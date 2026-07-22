@@ -1,0 +1,31 @@
+{
+  "summary": "Re-verified MCQ two-stage verifier after tightening (exp_idx=None now discards instead of falling back). All 8 pytest cases pass. Pool is not starved: verified docs grew from 34 -> 72 across 10 (company, section) buckets during the ~4-min test window. Fresh OA on core-default reached generation_status=ready with all sections populated in ~90s. CRITICAL consistency check (fresh Sonnet re-pick from explanation) had 0 regressions on served MCQs and 0 regressions in /review answer_key.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A", "issue": "Test file did not load /app/backend/.env, so ai_service saw no EMERGENT_LLM_KEY and every direct Sonnet call in TestServedMcqsConsistent returned None. Not a product bug — fixed by adding load_dotenv('/app/backend/.env') at the top of the test module."},
+      {"endpoint": "ai_service", "issue": "Cosmetic litellm/pydantic serializer warnings + 'coroutine close_litellm_async_clients was never awaited' — unchanged since iteration 3, harmless."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_mcq_verification.py",
+    "/app/test_reports/pytest/iteration4_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "mcq_pool._verify_question (lines 255-261) now correctly discards on exp_idx is None with a clear 'no_valid_explanation_pick' reason — the previously flagged silent-fallback vulnerability is closed.",
+    "Because the gate is stricter, disagreement_rate visible in /api/admin/mcq-stats may creep up over time; consider tracking a separate 'no_explanation_pick' counter in mcq_pool_stats to distinguish generator-writes-bad-explanations vs. explanation-vs-verifier disagreement — currently both look like 'disagreements' from the founder dashboard.",
+    "Empirical: 72 verified docs across 10 (company, section) buckets accumulated during the ~4-min run, so the stricter rule is not starving the pool for the popular tracks (Infosys, TCS NQT). Low-traffic sections (e.g. TCS NQT 'advanced' still at 3) are worth watching, but not a regression — same ordering as iteration 3."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_mcq_verification.py (added load_dotenv so in-process Sonnet calls have EMERGENT_LLM_KEY when running pytest outside supervisor)"
+  ],
+  "success_rate": {"backend": "100% (8/8 after env fix)", "frontend": "not tested (per request)"},
+  "test_credentials": "founder: prashati02@gmail.com / testpass123 (works)",
+  "seed_data_creation": "1 ephemeral non-founder signup + 1 OA attempt on core-default under founder. No cleanup needed (test data only).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Test suite /app/backend/tests/test_mcq_verification.py is the canonical MCQ-verifier regression check. It now self-loads /app/backend/.env, so it works whether run under supervisor or directly with `python -m pytest`. Expect ~75-120s runtime dominated by TestOAEndToEnd + Sonnet consistency checks (~7 Sonnet calls per test).",
+  "rca of the issue": "Not a bug this iteration. The prior review flagged that mcq_pool._verify_question was silently accepting a question when exp_idx (LLM's read of the explanation) came back None/-1, using the old single-verifier rule as fallback — which is exactly the failure mode iteration 3 was written to close. Main agent's fix returns False with reason='no_valid_explanation_pick' whenever exp_idx is None. Re-verification confirms: (a) served MCQs still pass the fresh Sonnet consistency check with 0 regressions, (b) pool still grows (34 -> 72 verified docs during the run), (c) core-default OA still reaches ready. The initial pytest run I did failed one test — but the failure was in the test process itself (missing EMERGENT_LLM_KEY when pytest is invoked outside supervisor's env), not a product regression. Added load_dotenv to the test file and re-ran that test: PASSED."
+}

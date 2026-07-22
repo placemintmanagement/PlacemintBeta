@@ -1,0 +1,25 @@
+=== SEEDING TOPIC: aptitude ===
+[aptitude] round 1: asking 15 raw stems (0/65 verified so far)
+[aptitude] round 1: 13/15 passed verification
+[aptitude] round 2: asking 15 raw stems (13/65 verified so far)
+[aptitude] round 2: 13/15 passed verification
+[aptitude] round 3: asking 15 raw stems (26/65 verified so far)
+[aptitude] round 3: 14/15 passed verification
+[aptitude] round 4: asking 15 raw stems (40/65 verified so far)
+[aptitude] round 4: 14/15 passed verification
+[aptitude] round 5: asking 15 raw stems (54/65 verified so far)
+[aptitude] round 5: 14/15 passed verification
+[aptitude] DONE: inserted 65 questions (source_batch=seed-initial)
+=== SEEDING TOPIC: verbal ===
+[verbal] round 1: asking 15 raw stems (0/65 verified so far)
+[verbal] round 1: 15/15 passed verification
+[verbal] round 2: asking 15 raw stems (15/65 verified so far)
+[verbal] round 2: 15/15 passed verification
+[verbal] round 3: asking 15 raw stems (30/65 verified so far)
+[verbal] round 3: 13/15 passed verification
+[verbal] round 4: asking 15 raw stems (43/65 verified so far)
+[verbal] round 4: 13/15 passed verification
+[verbal] round 5: asking 12 raw stems (56/65 verified so far)
+[verbal] round 5: 11/12 passed verification
+[verbal] DONE: inserted 65 questions (source_batch=seed-initial)
+=== SEEDING TOPIC: reasoning ===

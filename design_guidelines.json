@@ -1,0 +1,100 @@
+{
+  "theme": "Light, bold SaaS aesthetic",
+  "typography": {
+    "display": "Outfit (Weights: 600, 700, 800) - Used for primary headings and hero text",
+    "body": "Inter (Weights: 400, 500) - Used for paragraphs, general UI text",
+    "mono": "JetBrains Mono (Weights: 500, 600) - Used for data, timers, scores, section tags, and coding editor"
+  },
+  "colors": {
+    "background": "#FAF8F3",
+    "primary": "#0FAE73",
+    "secondary": "#FF6F4D",
+    "text": {
+      "primary": "#0A0A0A",
+      "secondary": "#4B5563",
+      "muted": "#9CA3AF"
+    },
+    "surface": {
+      "card": "#FFFFFF",
+      "editor": "#0F111A",
+      "muted": "#F3F0E6"
+    },
+    "borders": {
+      "default": "rgba(10, 10, 10, 0.1)",
+      "dashed_unverified": "#FF6F4D"
+    }
+  },
+  "visual_enhancers": {
+    "shadows": {
+      "ambient": "0 8px 32px rgba(0, 0, 0, 0.04)",
+      "direct": "0 2px 8px rgba(15, 174, 115, 0.15)"
+    },
+    "borders": "1px solid rgba(10,10,10,0.1), unverified companies use 2px dashed #FF6F4D",
+    "glassmorphism": "Used selectively on sticky nav - backdrop-blur-xl bg-[#FAF8F3]/80 border-b border-[rgba(10,10,10,0.05)]",
+    "radius": "xl (16px) for main cards, md (8px) for chips and buttons. Nested radii rule applies."
+  },
+  "components": {
+    "pipeline_diagram": "4 connected nodes (Resume -> OA -> Interview -> Review) with an animated flowing SVG connector. Color-coded nodes.",
+    "company_card": "Shows time-limit chip, 3-4 'what to expect' chips. Unverified get dashed border + red badge.",
+    "coding_ide": "Split-panel layout. Left: problem + test cases (light theme). Right: dark code editor (#0F111A).",
+    "buttons": "Pill-shaped, bold primary background (#0FAE73) with white text, micro-interactions on hover."
+  },
+  "grids_layouts": {
+    "landing_page": "header -> hero (rating badge, gradient text, CTA, avatars) -> contrarian statement -> feature grid (Bento A: 1 dark hero card, 2 light cards) -> live preview mockup -> company grid (auto-fit minmax) -> pricing -> FAQ",
+    "company_grid": "Dense grid for 14 companies. gap-6, grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+    "coding_layout": "CSS Grid, 100vh height. grid-cols-1 lg:grid-cols-2. Left side scrollable, right side fixed editor.",
+    "dashboard": "High Density Grid (Mode B). sidebar left, content right. Cardless rectangular surfaces."
+  },
+  "motion": {
+    "pipeline": "Framer motion for glowing flowing stroke along SVG path between nodes.",
+    "cards": "Subtle -translate-y-1 and shadow increase on hover.",
+    "page_transitions": "Fade and slight slide up (20px).",
+    "micro_interactions": "Button active scale (0.95)."
+  },
+  "accessibility": {
+    "contrast": "Ensure #0A0A0A text on #FAF8F3 background. #FFFFFF text on #0FAE73 buttons. Use APCA guidelines.",
+    "focus": "focus:ring-2 focus:ring-[#0FAE73] focus:outline-none",
+    "aria": "Use aria-hidden for decorative pipeline nodes.",
+    "data_testid": "Add data-testid attributes to all interactive elements."
+  },
+  "media": {
+    "image_urls": {
+      "social_proof_avatars": [
+        "https://images.unsplash.com/photo-1552113125-81af17f36b57?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzF8MHwxfHNlYXJjaHw0fHxpbmRpYW4lMjBzdHVkZW50JTIwcG9ydHJhaXR8ZW58MHx8fHwxNzgzOTI1NzQyfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1667655861998-46fe4c29a4cf?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzF8MHwxfHNlYXJjaHwxfHxpbmRpYW4lMjBzdHVkZW50JTIwcG9ydHJhaXR8ZW58MHx8fHwxNzgzOTI1NzQyfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1604177091072-b7b677a077f6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzF8MHwxfHNlYXJjaHwzfHxpbmRpYW4lMjBzdHVkZW50JTIwcG9ydHJhaXR8ZW58MHx8fHwxNzgzOTI1NzQyfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.pexels.com/photos/15237309/pexels-photo-15237309.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+      ],
+      "live_preview_mockup": "https://images.pexels.com/photos/1181271/pexels-photo-1181271.jpeg"
+    },
+    "icons": "lucide-react for UI icons, react-icons for company logos (e.g., SiMicrosoft, SiIbm) - install react-icons"
+  },
+  "3d_libraries": {
+    "recommendation": "Framer Motion for pipeline animation. Avoid heavy 3D to keep the UI fast and focus on the SaaS functional clarity."
+  },
+  "component_path": {
+    "ui_components": "/app/frontend/src/components/ui/",
+    "custom_components": "/app/frontend/src/components/"
+  },
+  "instructions_to_main_agent": [
+    "Install and use specific fonts: Outfit, Inter, JetBrains Mono.",
+    "Implement the landing page in /app/frontend/src/App.js or equivalent main file, without Shadcn UI layout wrappers (use raw HTML/Tailwind for marketing asymmetry).",
+    "For dashboard and authenticated routes, utilize Shadcn UI components heavily customized with the SaaS theme colors.",
+    "Pipeline Animation: Create an SVG path connecting 4 div nodes. Use framer-motion to animate a stroke-dashoffset or stroke-dasharray over the path to simulate a flowing connector.",
+    "Coding Round Layout: Ensure split pane. Force dark mode styles on the right-side pane only, regardless of global light theme.",
+    "Feature Grid: One large dark hero card (e.g., bg-[#0A0A0A] text-white), and two light cards to create contrast.",
+    "Company Grid: Map through the 14 companies. Implement a visual flag (dashed border + red badge) for unverified companies.",
+    "Install react-icons for company logos: yarn add react-icons"
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not converge toward generic, on-distribution AI slop. Be distinctive.",
+    "Do not apply `transition: all`.",
+    "Do not center align the app container in App.css.",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Incorporate subtle noise overlays or grain textures where appropriate to break flatness.",
+    "Never use AI assistant Emojis.",
+    "Always use the provided image URLs or react-icons for logos. Do NOT use placeholder text.",
+    "All interactive elements MUST include data-testid attribute.",
+    "Use sonner for toast notifications."
+  ]
+}

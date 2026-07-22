@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --pm-bg: #FAF8F3;
+  --pm-surface: #FFFFFF;
+  --pm-surface-muted: #F3F0E6;
+  --pm-primary: #0FAE73;
+  --pm-primary-dark: #0C8B5C;
+  --pm-secondary: #FF6F4D;
+  --pm-text: #0A0A0A;
+  --pm-text-2: #4B5563;
+  --pm-text-muted: #9CA3AF;
+  --pm-border: rgba(10,10,10,0.10);
+  --pm-editor-bg: #0F111A;
+
+  --background: 44 33% 96%;
+  --foreground: 0 0% 4%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 4%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 4%;
+  --primary: 158 84% 37%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 44 27% 92%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 44 27% 92%;
+  --muted-foreground: 220 9% 46%;
+  --accent: 12 100% 65%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 91%;
+  --input: 0 0% 91%;
+  --ring: 158 84% 37%;
+  --radius: 0.75rem;
+}
+
+* { border-color: hsl(var(--border)); }
+
+html, body, #root {
+  background: var(--pm-bg);
+  color: var(--pm-text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* Subtle grain overlay on light surfaces */
+.pm-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.4;
+  mix-blend-mode: multiply;
+}
+
+.font-display { font-family: 'Outfit', system-ui, sans-serif; letter-spacing: -0.02em; }
+.font-mono    { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+.pm-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  border-radius: 999px; padding: 0.75rem 1.5rem; font-weight: 600;
+  transition: transform 120ms ease, background-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
+}
+.pm-btn:active { transform: scale(0.97); }
+.pm-btn-primary { background: var(--pm-primary); color: #fff; box-shadow: 0 6px 20px -6px rgba(15,174,115,0.4); }
+.pm-btn-primary:hover { background: var(--pm-primary-dark); }
+.pm-btn-secondary { background: #0A0A0A; color: #fff; }
+.pm-btn-secondary:hover { background: #1F1F1F; }
+.pm-btn-ghost { background: transparent; color: var(--pm-text); border: 1px solid var(--pm-border); }
+.pm-btn-ghost:hover { background: rgba(0,0,0,0.03); }
+
+@layer components {
+  .pm-card {
+    background-color: var(--pm-surface); border: 1px solid var(--pm-border); border-radius: 16px;
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  }
+  .pm-card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px -12px rgba(0,0,0,0.10); }
+}
+
+.pm-chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.25rem 0.6rem; border-radius: 999px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem; letter-spacing: 0.01em;
+  background: var(--pm-surface-muted); color: var(--pm-text);
+}
+
+.pm-chip-primary { background: rgba(15,174,115,0.10); color: var(--pm-primary-dark); }
+.pm-chip-coral   { background: rgba(255,111,77,0.14);  color: #B23E23; }
+
+.pm-input {
+  width: 100%; padding: 0.75rem 1rem; border-radius: 12px;
+  background: #fff; border: 1px solid var(--pm-border); font-size: 0.95rem;
+}
+.pm-input:focus { outline: none; box-shadow: 0 0 0 3px rgba(15,174,115,0.20); border-color: var(--pm-primary); }
+
+/* Editor pane */
+.pm-editor-pane {
+  background: var(--pm-editor-bg); color: #E4E7EE;
+  border-left: 1px solid rgba(255,255,255,0.06);
+}
+
+/* Pipeline animation */
+@keyframes flow-dash { to { stroke-dashoffset: -1000; } }
+.pm-flow { animation: flow-dash 8s linear infinite; }
+
+/* Kbd */
+kbd {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+  padding: 0.1rem 0.4rem; border-radius: 6px;
+  background: #F3F0E6; border: 1px solid var(--pm-border);
+}
+
+/* Company card dashed unverified */
+.pm-card-unverified { border: 2px dashed var(--pm-secondary); }
+
+/* Fade+slide on route mount */
+@keyframes pm-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.pm-in { animation: pm-in 320ms ease-out both; }
+
+/* Selection */
+::selection { background: rgba(15,174,115,0.25); }

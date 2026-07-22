@@ -1,0 +1,41 @@
+{
+  "summary": "Extended /app/backend/tests/test_mcq_pipeline_v3.py with 9 new tests covering the transpile-and-execute ground-truth path plus pseudocode-section routing. 20/21 tests pass in 88s. Unit tests for _looks_like_code_output_question (4), _ground_truth_from_pseudocode_transpile (3: BEGIN/END → idx 1, non-code → None, Java a*b+3 → idx 0), _process_one_stem end-to-end with ground_truth_source='transpile_execution', and admin/mcq-stats schema all pass. All iteration-5 regression tests (11) still pass. HOWEVER, the ONE new failure is CRITICAL and blocks the pseudocode routing feature: server._generate_section_questions has DEAD CODE — the elif at line ~795 that routes stype=='pseudocode' through mcq_pool.fallback_live_verify is unreachable because the top-level elif chain at line 743 catches stype=='pseudocode' first and still calls the raw call_json(pseudocode_prompt(...)) path. Pseudocode sections for tcs-nqt, wipro-elite, cognizant-nqt, infosys-hackwithinfy R1 therefore continue to bypass the 3-stage pipeline. The unit tests prove the transpile path itself works perfectly; the wiring in server.py is broken.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "server._generate_section_questions (/app/backend/server.py line 743 vs. 795)",
+        "issue": "The `elif stype == 'pseudocode':` at line 795 is UNREACHABLE — it lives inside the `else:  # mcq / topic_mcq` branch (line 756), but the outer chain at line 743 already handles stype=='pseudocode' by calling `call_json(system, pseudocode_prompt(...))` (the OLD raw-LLM path). Pseudocode sections therefore never route through mcq_pool.fallback_live_verify. Feature is effectively unimplemented despite the intent stated in the review request. Fix: DELETE lines 743-744 (the raw path) so control falls into the `else` branch and reaches line 795. Verified by the new test TestPseudocodeSectionRouting.test_generate_section_questions_pseudocode_uses_pipeline (monkeypatches call_json + fallback_live_verify; asserts fallback is called and call_json is NOT).",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {"endpoint": "ai_service", "issue": "Persistent pydantic/litellm serializer UserWarnings and 'close_litellm_async_clients was never awaited' RuntimeWarning — unchanged since iterations 3-5, harmless."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_mcq_pipeline_v3.py",
+    "/app/test_reports/pytest/iteration6_results.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Remove/relocate the raw pseudocode branch at /app/backend/server.py:743-744. Options: (a) delete those two lines entirely so pseudocode falls into the else block and reaches the reachable branch at line 795; (b) replace lines 743-744 with `elif stype == 'pseudocode': data = await mcq_pool.fallback_live_verify(company_name, section_name, section.get('key') or 'pseudocode', count, diff)`. After the fix, re-run tests/test_mcq_pipeline_v3.py::TestPseudocodeSectionRouting to confirm 21/21."
+  ],
+  "critical_code_review_comments": [
+    "server.py:743-800 — TWO branches for stype=='pseudocode': the first (line 743, active) uses the raw pseudocode_prompt path; the second (line 795, dead) is inside `else: # mcq / topic_mcq` and cannot be reached. This is a logic bug that made it through review because both branches syntactically compile.",
+    "mcq_pool._transpile_prompt is well-designed (explicit unclear-response schema, low creativity, forbids bug-fixing) — passes all three smoke inputs from the review request.",
+    "mcq_pool._ground_truth_from_pseudocode_transpile correctly short-circuits on non-code prompts via _looks_like_code_output_question before the LLM call — saves ~1 API call per verbal/quant question during pool warmup.",
+    "mcq_pool._match_stdout_to_options extracted as a shared helper (good DRY move); it's used by both _ground_truth_from_execution and _ground_truth_from_pseudocode_transpile.",
+    "_process_one_stem correctly orders the 3-tier ground-truth waterfall (execution → transpile-execute → solver-agreement → discard) at lines 423-438.",
+    "_record_outcome auto-derives f'source_{source}' bucket names, so source_transpile_execution flows into the admin readout without any pool_stats() changes required — clean."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_mcq_pipeline_v3.py (extended with 9 new tests covering heuristic, transpile+execute, _process_one_stem transpile path, server routing, and admin stats schema)"
+  ],
+  "success_rate": {"backend": "95.2% (20/21). Only failure is the routing-integration test which correctly surfaces the dead-code bug in server.py:743.", "frontend": "not tested (per request)"},
+  "test_credentials": "Founder: prashati02@gmail.com / testpass123 (works)",
+  "seed_data_creation": "Temp DB 'placemint_test_pipeline_v3_transpile' created + dropped inside TestProcessOneStemTranspileSource. No prod mutations.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_mcq_pipeline_v3.py now covers iterations 5+6 (21 tests, ~90s). After main agent fixes the pseudocode routing dead code at server.py:743-744, re-run: `cd /app/backend && python -m pytest tests/test_mcq_pipeline_v3.py::TestPseudocodeSectionRouting -v` — should go green. To fully validate the end-to-end pseudocode integration on a live OA, start an OA on tcs-nqt as founder and check via admin/mcq-stats that source_transpile_execution > 0 accumulates for the (TCS NQT, pseudocode) bucket over ~2-3 minutes of worker runtime.",
+  "rca of the issue": "Refactor introduced a new branch for pseudocode inside the mcq/topic_mcq else-block (line 795) without removing the old top-level elif at line 743. Python's if/elif chain evaluates top-to-bottom, so stype=='pseudocode' always matches at line 743 and short-circuits before reaching line 795. Reproduction: monkeypatch server.call_json and mcq_pool.fallback_live_verify, invoke _generate_section_questions with section={'type':'pseudocode',...}; observe that call_json is invoked 1x and fallback_live_verify is invoked 0x (should be reversed). Mitigation: delete lines 743-744 OR replace them with a call to mcq_pool.fallback_live_verify. The functional helpers underneath (_transpile_prompt, _ground_truth_from_pseudocode_transpile, _match_stdout_to_options, _looks_like_code_output_question) are all correct and unit-tested green — the fix is a one-liner in server.py."
+}

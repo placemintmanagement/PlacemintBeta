@@ -1,0 +1,31 @@
+{
+  "summary": "Verified the new 3-stage MCQ pool pipeline (stem-only generator → execute-or-two-solver ground truth → explanation-with-conflict-flag). 11/11 pytest cases pass in ~100s. Prompts confirmed stem-only (no correct_index/explanation requested). `_extract_code_block` + `_ground_truth_from_execution` derive index 2 for the hand-crafted `print(2+3)` stem. `_process_one_stem` end-to-end on that stem produces a doc with ground_truth_source='execution', correct_index=2, and a non-empty explanation (no conflict). Admin /api/admin/mcq-stats returns the new shape (pipeline description string, generator/solver_a/solver_b/explanation models, new outcome_* fields, no legacy verifier_model). Pool DB inspection: verified docs carry ground_truth_source; solver_agreement docs present. OA start on tcs-nqt reaches generation_status=ready with populated MCQ sections; fresh independent Sonnet solve on 5 served MCQs matched stored correct_index (0 regressions).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "ai_service", "issue": "Harmless litellm/pydantic serializer warnings and 'coroutine close_litellm_async_clients was never awaited' RuntimeWarning during LLM calls — unchanged since iteration 3/4."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_mcq_pipeline_v3.py",
+    "/app/test_reports/pytest/iteration5_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "mcq_pool.pop_from_pool at line 116: find_one_and_delete does not filter deletion by verified=True in the atomic delete criteria beyond the query itself — this is fine, but note the returned doc could omit ground_truth_source when serving historical (pre-purge) docs, so downstream consumers must tolerate its absence.",
+    "mcq_pool._process_one_stem: the execution-ground-truth path bypasses the two-solver check entirely. This is intentional per design (real interpreter output is authoritative) but means one buggy generated snippet with misleading options could still pass if stdout coincidentally matches an option. Low risk, but worth logging.",
+    "ai_service.solver_prompt: allows correct_index=-1 (ambiguous) but _solver_pick treats only 0-3 as valid, dropping -1 to None. This means an 'ambiguous' verdict from one solver = solver-disagreement = question discarded. Correct behavior, just note it in dashboard nomenclature (drop cause is currently bucketed as dropped_no_ground_truth, not dropped_solver_ambiguous).",
+    "Legacy stats docs (from before the purge) may still exist in mcq_pool_stats without new outcome_* fields; pool_stats() gracefully defaults them to 0. Verified against live founder endpoint — new writes carry new fields."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_mcq_pipeline_v3.py (new — covers 3-stage pipeline unit + integration)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "not tested (per request)"},
+  "test_credentials": "Founder: prashati02@gmail.com / testpass123 (works)",
+  "seed_data_creation": "1 OA attempt on tcs-nqt under founder + temp DB 'placemint_test_pipeline_v3' created and dropped inside TestProcessOneStem. No prod-data mutation.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Canonical regression suite for the 3-stage pipeline is /app/backend/tests/test_mcq_pipeline_v3.py. It self-loads /app/backend/.env and /app/frontend/.env so it works both under supervisor and standalone. Runtime ~100s. Old iteration_3/iteration_4 suite (/app/backend/tests/test_mcq_verification.py) still references removed fields (`verifier_model`, `disagreement_rate_pct`) and should NOT be re-used against the new pipeline — either delete it or expect its TestAdminMcqStats.test_founder_can_read to fail on the missing `verifier_model` field.",
+  "rca of the issue": "N/A — re-architecture verification, not a bug fix. The user's architectural critique (explanation generator should not be handed a fixed answer to rationalize) is now enforced by design: stage-A never emits correct_index; stage-B derives it independently via code execution or two-solver agreement; stage-C explanation is instructed to flag a conflict rather than rationalize (and the pipeline discards on conflict). All 11 unit + integration tests confirm each stage behaves as documented."
+}

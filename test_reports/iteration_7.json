@@ -1,0 +1,21 @@
+{
+  "summary": "Re-ran the full /app/backend/tests/test_mcq_pipeline_v3.py suite after the elif shadowing fix. All 21/21 tests pass, including the previously-failing TestPseudocodeSectionRouting::test_generate_section_questions_pseudocode_uses_pipeline. No regressions in the other 20 tests. Runtime: ~101.6s.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_mcq_pipeline_v3.py",
+    "/app/test_reports/pytest/iteration7_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Non-blocking: server.py still uses deprecated @app.on_event('startup'/'shutdown'); should migrate to FastAPI lifespan handlers.",
+    "Non-blocking: Pydantic serializer warnings coming from litellm mock responses in tests — cosmetic, safe to ignore."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only per request)"},
+  "seed_data_creation": "None. Pool NOT purged per instruction — allowing transpile_execution docs to accumulate.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "iteration 7 confirmed the elif shadow fix at server.py:743 works: pseudocode-typed sections now route through mcq_pool.fallback_live_verify (3-stage pipeline). Full suite 21/21 green. If verifying transpile_execution accumulation via GET /api/admin/mcq-stats, allow 2-3+ minutes of worker runtime.",
+  "rca of the issue": "N/A — the previously reported bug (shadowed outer elif at server.py:743 running raw call_json(pseudocode_prompt(...)) instead of the new pipeline) has been resolved by the main agent's two-line fix. Verified via TestPseudocodeSectionRouting test now passing."
+}
