@@ -20,6 +20,7 @@ import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
 import VerifyEmail from "@/pages/VerifyEmail";
 import { PrivacyPolicy, TermsOfService, RefundPolicy, CookiePolicy, About } from "@/pages/Legal";
+import DevChartPreview from "@/pages/DevChartPreview";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -55,6 +56,8 @@ function AppRouter() {
       <Route path="/deck" element={<Protected><ReviewDeck /></Protected>} />
       <Route path="/interview/:interviewId" element={<Protected><Interview /></Protected>} />
       <Route path="/attempt/:attemptId/report" element={<Protected><FinalReport /></Protected>} />
+      {/* Standing dev tool — DI chart question visual check, not gated behind auth */}
+      <Route path="/dev/chart-preview" element={<DevChartPreview />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

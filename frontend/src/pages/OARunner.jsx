@@ -5,6 +5,7 @@ import Editor from "@monaco-editor/react";
 import { toast } from "sonner";
 import api from "../api";
 import Header from "../components/Header";
+import ChartQuestion from "../components/charts/ChartQuestion";
 import { TID } from "../testIds";
 import { Clock, Play, ChevronRight, CheckCircle2, XCircle, Star, RotateCcw, Circle, Square, Triangle, ArrowUp } from "lucide-react";
 
@@ -239,6 +240,16 @@ function MCQSection({ section, answers, setAnswer }) {
     <div className="space-y-4">
       {qs.length === 0 && <div className="pm-card p-6 text-pm-text2">Question generation returned empty. Try re-starting this run.</div>}
       {qs.map((q, i) => (
+        q.chart ? (
+          <ChartQuestion
+            key={q.id}
+            question={q}
+            index={i}
+            total={qs.length}
+            selected={answers[q.id]}
+            onSelect={setAnswer}
+          />
+        ) : (
         <div key={q.id} className="pm-card p-6">
           <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Q{i+1} of {qs.length}</div>
           <div className="font-display text-lg font-semibold mb-4"><MD>{q.prompt}</MD></div>
@@ -261,6 +272,7 @@ function MCQSection({ section, answers, setAnswer }) {
             })}
           </div>
         </div>
+        )
       ))}
     </div>
   );

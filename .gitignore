@@ -41,6 +41,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 dump.rdb
+frontend/npm.pid
+frontend/npm_out.log
+frontend/npm_err.log
 
 # System files
 .DS_Store

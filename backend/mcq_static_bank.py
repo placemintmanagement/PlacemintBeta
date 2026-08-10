@@ -90,6 +90,7 @@ async def sample_static(user_id: str, topic: str, count: int) -> List[dict]:
         "correct_index": d["correct_index"],
         "explanation": d.get("explanation", ""),
         "difficulty": d.get("difficulty", "Medium"),
+        "chart": d.get("chart"),
     } for d in docs]
     await mark_seen(user_id, topic, [it["id"] for it in items])
     return items
