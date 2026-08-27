@@ -298,7 +298,7 @@ TOPIC_INSTRUCTIONS = {
     "os":           "Operating systems — processes vs threads, scheduling, deadlocks, semaphores/mutexes, virtual memory, paging.",
     "cn":           "Computer networks — OSI/TCP-IP layers, TCP vs UDP, subnetting, HTTP/HTTPS, DNS, routing.",
     "architecture": "Computer architecture — pipelining, cache hierarchy, memory ordering, cache-coherence, addressing modes, instruction encoding, MIPS/RISC concepts.",
-    "reasoning":    "Logical/analytical reasoning — syllogisms, coding-decoding, blood relations, seating arrangements, data sufficiency, series/pattern completion.",
+    "reasoning":    "Logical/analytical reasoning — syllogisms, coding-decoding, blood relations, seating arrangements, data sufficiency, series/pattern completion, direction sense, analogies, classification/odd-one-out, statement-assumption/conclusion, input-output machines, ranking/ordering, cube and dice.",
 }
 
 

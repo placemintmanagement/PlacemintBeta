@@ -21,15 +21,18 @@ import random
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-# The 8 canonical topics (matches ai_service.TOPIC_INSTRUCTIONS /
-# mcq_pool.TOPIC_KEY_MAP's topic_key values exactly).
-CANONICAL_TOPICS = {"aptitude", "verbal", "reasoning", "oops", "dbms", "os", "cn", "architecture"}
+# The 9 canonical topics (matches ai_service.TOPIC_INSTRUCTIONS /
+# mcq_pool.TOPIC_KEY_MAP's topic_key values exactly, plus "puzzles" which is
+# static-bank-only — no live mcq_pool worker generates puzzles content).
+CANONICAL_TOPICS = {"aptitude", "verbal", "reasoning", "oops", "dbms", "os", "cn", "architecture", "puzzles"}
 
 # Company section keys (mcq_pool.POOLED_SECTION_KEYS) that map cleanly to one
 # canonical topic, and therefore get the 90/10 static/live split on their
 # plain "mcq" sections. Anything NOT listed here (cs-fundamentals, technical,
-# puzzles, advanced) stays live-only — those keys mean different things to
-# different companies and don't have a clean 1:1 topic match.
+# advanced) stays live-only — those keys mean different things to
+# different companies and don't have a clean 1:1 topic match. "puzzles" is
+# routed via extra_topics instead (see companies.py, Infosys) rather than
+# this dict, since it's a dedicated per-company section, not a pooled key.
 SECTION_KEY_TO_TOPIC = {
     "verbal": "verbal",
     "english": "verbal",
@@ -91,6 +94,7 @@ async def sample_static(user_id: str, topic: str, count: int) -> List[dict]:
         "explanation": d.get("explanation", ""),
         "difficulty": d.get("difficulty", "Medium"),
         "chart": d.get("chart"),
+        "svg_diagram": d.get("svg_diagram"),
     } for d in docs]
     await mark_seen(user_id, topic, [it["id"] for it in items])
     return items

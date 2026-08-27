@@ -44,6 +44,8 @@ dump.rdb
 frontend/npm.pid
 frontend/npm_out.log
 frontend/npm_err.log
+backend/backend_dev.log
+*.log
 
 # System files
 .DS_Store

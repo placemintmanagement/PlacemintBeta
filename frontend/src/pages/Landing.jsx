@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import api from "../api";
 import Header from "../components/Header";
 import PipelineDiagram from "../components/PipelineDiagram";
-import CompanyCard from "../components/CompanyCard";
+import DepartmentCard from "../components/DepartmentCard";
 import IDEMockup from "../components/IDEMockup";
 import Footer from "../components/Footer";
 import { TID } from "../testIds";
@@ -17,11 +17,11 @@ const AVATARS = [
 ];
 
 export default function Landing() {
-  const [companies, setCompanies] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [plans, setPlans] = useState([]);
 
   useEffect(() => {
-    api.get("/companies").then(r => setCompanies(r.data.companies)).catch(() => {});
+    api.get("/departments").then(r => setDepartments(r.data.departments)).catch(() => {});
     api.get("/pricing").then(r => setPlans(r.data.plans)).catch(() => {});
   }, []);
 
@@ -142,17 +142,17 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Companies grid */}
+      {/* Departments grid */}
       <section id="companies" className="max-w-7xl mx-auto px-6 lg:px-10 pb-24">
         <div className="mb-8 flex items-end justify-between flex-wrap gap-4">
           <div>
-            <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-2">14 supported tracks</div>
-            <h2 className="font-display font-bold text-3xl lg:text-4xl">Each company runs its <em>own</em> real structure.</h2>
+            <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-2">5 engineering departments</div>
+            <h2 className="font-display font-bold text-3xl lg:text-4xl">Pick your <em>branch</em>, then your track.</h2>
           </div>
-          <p className="max-w-md text-pm-text2 text-sm">Time chip shows the confirmed OA duration. Dashed border + red badge = pattern we couldn't fully confirm; we use a documented fallback.</p>
+          <p className="max-w-md text-pm-text2 text-sm">Computer Science is live today with 15 real company OA structures. The other branches are on the way — greyed-out tracks are placeholders, not broken links.</p>
         </div>
-        <div data-testid={TID.companyGrid} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {companies.map(c => <CompanyCard key={c.id} company={c} />)}
+        <div data-testid={TID.departmentGrid} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {departments.map(d => <DepartmentCard key={d.id} department={d} />)}
         </div>
       </section>
 

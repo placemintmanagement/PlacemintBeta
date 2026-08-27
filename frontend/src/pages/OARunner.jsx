@@ -1,17 +1,17 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
 import Editor from "@monaco-editor/react";
 import { toast } from "sonner";
 import api from "../api";
 import Header from "../components/Header";
 import ChartQuestion from "../components/charts/ChartQuestion";
+import DeductiveGridSection from "../components/games/DeductiveGridSection";
+import SwitchChallengeSection from "../components/games/SwitchChallengeSection";
+import GridChallengeSection from "../components/games/GridChallengeSection";
+import InductiveChallengeSection from "../components/games/InductiveChallengeSection";
+import MotionChallengeSection from "../components/games/MotionChallengeSection";
 import { TID } from "../testIds";
-import { Clock, Play, ChevronRight, CheckCircle2, XCircle, Star, RotateCcw, Circle, Square, Triangle, ArrowUp } from "lucide-react";
-
-// Deductive Challenge (mini-sudoku) symbol names (from capgemini_challenges.py's
-// _SUDOKU_SYMBOLS) mapped to their lucide-react icon components.
-const SUDOKU_ICONS = { circle: Circle, square: Square, triangle: Triangle, star: Star };
+import { Clock, Play, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
 
 // SafeMarkdown: falls back to plain text if react-markdown isn't present in the pipeline.
 function MD({ children }) {
@@ -171,6 +171,31 @@ export default function OARunner() {
     } finally { setSubmitting(false); }
   };
 
+  // gamified_round has no manual "Submit section" step -- DeductiveGridSection
+  // auto-advances through every sub-puzzle on its own and fires onComplete
+  // exactly once with the full answers map. Posts that map directly instead
+  // of going through sectionAnswers state (setAnswer/setAnswers batching
+  // wouldn't be reflected yet if we read state back synchronously here).
+  const submitGamifiedRoundAnswers = async (answersMap) => {
+    if (submitting) return;
+    setSubmitting(true);
+    setAnswers(a => ({ ...a, [sectionKey]: answersMap }));
+    try {
+      const { data } = await api.post(`/oa/${attemptId}/section`, {
+        section_key: sectionKey,
+        answers: answersMap,
+      });
+      toast.success(`Section done — score ${(data.section_result.score * 100).toFixed(0)}%`);
+      const { data: fresh } = await api.get(`/oa/${attemptId}`);
+      setAttempt(fresh);
+      if (data.status === "completed") {
+        navigate(`/attempt/${attemptId}/review`);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Submit failed");
+    } finally { setSubmitting(false); }
+  };
+
   return (
     <div>
       <Header />
@@ -187,10 +212,12 @@ export default function OARunner() {
             <div data-testid={TID.oaTimer} className={`pm-chip ${remaining < 60 ? "pm-chip-coral" : "pm-chip-primary"} text-base py-2 px-4`}>
               <Clock size={14} /> <span className="font-mono">{mm}:{ss}</span>
             </div>
-            <button data-testid={TID.oaFinishSection} onClick={submitSection} disabled={submitting}
-                    className="pm-btn pm-btn-primary text-sm py-2 px-4">
-              {submitting ? "Grading…" : <>Submit section <ChevronRight size={14}/></>}
-            </button>
+            {currentSection.type !== "gamified_round" && (
+              <button data-testid={TID.oaFinishSection} onClick={submitSection} disabled={submitting}
+                      className="pm-btn pm-btn-primary text-sm py-2 px-4">
+                {submitting ? "Grading…" : <>Submit section <ChevronRight size={14}/></>}
+              </button>
+            )}
           </div>
         </div>
 
@@ -217,20 +244,132 @@ export default function OARunner() {
           <CommMixedSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
         ) : currentSection.type === "voice_mixed" ? (
           <VoiceMixedSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
-        ) : (currentSection.type === "cognitive_game" || currentSection.type === "game") ? (
-          <CognitiveGameSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} onAutoAdvanceEnd={submitSection} />
-        ) : currentSection.type === "capgemini_challenges" ? (
-          <CapgeminiChallengesSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} onAutoAdvanceEnd={submitSection} />
-        ) : currentSection.type === "cognizant_games" ? (
-          <CognizantGamesSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} onAutoAdvanceEnd={submitSection} />
-        ) : currentSection.type === "accenture_games" ? (
-          <AccentureGamesSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} onAutoAdvanceEnd={submitSection} />
+        ) : currentSection.type === "gamified_round" ? (
+          <GamifiedRoundSection attemptId={attemptId} section={currentSection} onComplete={submitGamifiedRoundAnswers} />
         ) : (
           <MCQSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
         )}
       </div>
     </div>
   );
+}
+
+// -------- gamified_round -----------------------------------------------------
+// A gamified_round section now runs EVERY game type the company's config
+// lists, back to back within one section -- not one randomly-picked type
+// (that was the old model). section.questions is a FLAT list spanning all
+// present types (each item still carries its own gameType, unstripped --
+// only correctAnswer/explanation are removed), grouped here by type
+// (preserving first-seen order, which matches the server's generation
+// order) and rendered ONE type's flow-wrapper at a time. Each wrapper owns
+// its own instructions -> sub-puzzle 1..N -> done flow; when one finishes,
+// this component advances to the next type's wrapper, merging
+// deductive_grid/switch_challenge/inductive_challenge's per-puzzle answers
+// into one combined map (all three use answer_check and the same {selected,
+// timedOut, timeTakenMs} shape -- inductive_challenge's `selected` is just a
+// 2-element index list instead of a single index, which the merge below
+// doesn't need to know or care about). grid_challenge and motion_challenge
+// contribute nothing to that map -- both already live server-side via their
+// own live round trips (/grid-challenge/answer, /motion-challenge/move and
+// /undo) -- each calls handleSubComplete({}), and spreading an empty object
+// into the merge is a proven no-op (verified against grid_challenge's
+// existing identical call before wiring motion_challenge the same way): it
+// can never overwrite or drop keys the other types already contributed.
+// onComplete fires exactly once, after the LAST type finishes, with the
+// full merged map -- submitGamifiedRoundAnswers + the server's combined
+// _grade_gamified_round_section remain the sole source of truth for score.
+// perTypeConfig comes down on the section doc itself (server.py's
+// gamified_round branch persists it to sections.$.perTypeConfig at
+// generation time, via the SAME GET /oa/{attempt_id} fetch OARunner
+// already makes -- no separate config fetch needed). Maps each type's DB
+// field names onto the prop names its own component already expects
+// (each one already has a `config?.X ?? default` fallback -- this was
+// simply never being passed a real config before, so every timer was
+// silently hardcoded regardless of what gamified_round_config held).
+function buildGameConfig(perTypeConfig, gameType) {
+  const cfg = (perTypeConfig || {})[gameType] || {};
+  return {
+    timerPerPuzzle: cfg.timerPerPuzzle,
+    poolSeconds: cfg.poolTimerSeconds,
+    blinkMs: cfg.blinkMs,
+    judgmentSeconds: cfg.judgmentSeconds,
+  };
+}
+
+function GamifiedRoundSection({ attemptId, section, onComplete }) {
+  const puzzles = section.questions || [];
+  const [subIndex, setSubIndex] = useState(0);
+  const [combinedAnswers, setCombinedAnswers] = useState({});
+
+  if (puzzles.length === 0) {
+    return <div className="pm-card p-6 text-pm-text2">Question generation returned empty. Try re-starting this run.</div>;
+  }
+
+  const groups = [];
+  for (const p of puzzles) {
+    let group = groups.find((g) => g.gameType === p.gameType);
+    if (!group) {
+      group = { gameType: p.gameType, items: [] };
+      groups.push(group);
+    }
+    group.items.push(p);
+  }
+
+  const onCheckAnswer = async (puzzleId, result) => {
+    const { data } = await api.post(`/oa/${attemptId}/section/check`, {
+      section_key: section.key,
+      puzzle_id: puzzleId,
+      selected: result.selected,
+      timedOut: result.timedOut,
+      timeTakenMs: result.timeTakenMs,
+    });
+    return data; // {correct, pointsAwarded, runningScore}
+  };
+
+  const handleSubComplete = (answersForThisType) => {
+    const merged = { ...combinedAnswers, ...(answersForThisType || {}) };
+    setCombinedAnswers(merged);
+    if (subIndex + 1 < groups.length) {
+      setSubIndex(subIndex + 1);
+    } else {
+      onComplete?.(merged);
+    }
+  };
+
+  const current = groups[subIndex];
+  if (!current) return null;
+  const gameConfig = buildGameConfig(section.perTypeConfig, current.gameType);
+
+  if (current.gameType === "switch_challenge") {
+    return <SwitchChallengeSection puzzles={current.items} config={gameConfig} onComplete={handleSubComplete} onCheckAnswer={onCheckAnswer} />;
+  }
+  if (current.gameType === "inductive_challenge") {
+    return <InductiveChallengeSection puzzles={current.items} config={gameConfig} onComplete={handleSubComplete} onCheckAnswer={onCheckAnswer} />;
+  }
+  if (current.gameType === "grid_challenge") {
+    const puzzleId = current.items[0]?.id ?? current.items[0]?.puzzle_id;
+    return (
+      <GridChallengeSection
+        attemptId={attemptId}
+        sectionKey={section.key}
+        puzzleId={puzzleId}
+        config={gameConfig}
+        onComplete={() => handleSubComplete({})}
+      />
+    );
+  }
+  if (current.gameType === "motion_challenge") {
+    return (
+      <MotionChallengeSection
+        puzzles={current.items}
+        attemptId={attemptId}
+        sectionKey={section.key}
+        config={gameConfig}
+        onComplete={() => handleSubComplete({})}
+      />
+    );
+  }
+  return <DeductiveGridSection puzzles={current.items} config={gameConfig} onComplete={handleSubComplete} onCheckAnswer={onCheckAnswer} />;
 }
 
 // -------- MCQ / pseudocode / comm / game ------------------------------------
@@ -253,6 +392,12 @@ function MCQSection({ section, answers, setAnswer }) {
         <div key={q.id} className="pm-card p-6">
           <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Q{i+1} of {qs.length}</div>
           <div className="font-display text-lg font-semibold mb-4"><MD>{q.prompt}</MD></div>
+          {q.svg_diagram && (
+            <div
+              className="mb-4 rounded-lg border border-pm-border overflow-x-auto flex justify-center bg-white p-2"
+              dangerouslySetInnerHTML={{ __html: q.svg_diagram }}
+            />
+          )}
           <div className="grid grid-cols-1 gap-2">
             {(q.options || []).map((opt, ix) => {
               const selected = answers[q.id] === ix;
@@ -786,1201 +931,6 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
         </div>
         )}
       </div>
-    </div>
-  );
-}
-
-// -------- Cognitive Game (Accenture "cognitive_game", IBM/Capgemini "game") --
-// Per-question timer. When the timer expires we auto-record the current selection
-// (or -1 if none), advance to the next question, and when done auto-submit.
-function CognitiveGameSection({ section, answers, setAnswer, onAutoAdvanceEnd }) {
-  const qs = section.questions || [];
-  const perQ = section.per_question_seconds || 15;
-  const [idx, setIdx] = useState(0);
-  const [remaining, setRemaining] = useState(perQ);
-  const timerRef = useRef(null);
-
-  const currentQ = qs[idx];
-
-  useEffect(() => {
-    setRemaining(perQ);
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setRemaining((r) => {
-        if (r <= 1) {
-          clearInterval(timerRef.current);
-          // Lock in whatever the user has selected; -1 means skipped.
-          setAnswer(currentQ.id, answers[currentQ.id] ?? -1);
-          if (idx + 1 < qs.length) {
-            setIdx(idx + 1);
-          } else if (onAutoAdvanceEnd) {
-            setTimeout(onAutoAdvanceEnd, 200);
-          }
-          return perQ;
-        }
-        return r - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timerRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx]);
-
-  if (!currentQ) return <div className="pm-card p-6">No questions generated.</div>;
-
-  const chooseAndAdvance = (i) => {
-    setAnswer(currentQ.id, i);
-    // Small delay so user sees selection highlight
-    setTimeout(() => {
-      if (idx + 1 < qs.length) setIdx(idx + 1);
-      else if (onAutoAdvanceEnd) onAutoAdvanceEnd();
-    }, 250);
-  };
-
-  const styleChip = {
-    // Accenture/IBM (cognitive_game_prompt)
-    pattern: "pattern",
-    sequence: "odd-one-out",
-    spatial: "spatial",
-    speed_math: "speed math",
-    // Capgemini's own distinct categories (capgemini_challenges.py) — same
-    // component, same visual treatment, just its own real category names.
-    deductive_challenge: "Deductive Challenge",
-    inductive_challenge: "Inductive Challenge",
-    grid_challenge: "Grid Challenge",
-    switch_challenge: "Switch Challenge",
-    motion_challenge: "Motion Challenge",
-    digit_challenge: "Digit Challenge",
-  }[currentQ.style] || "cognitive";
-
-  return (
-    <div className="pm-card p-8 max-w-2xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <span className="pm-chip pm-chip-primary">Q{idx + 1} / {qs.length}</span>
-          <span className="pm-chip">{styleChip}</span>
-        </div>
-        {/* Per-question countdown — turns coral in the last 5 seconds */}
-        <div className={`pm-chip text-lg py-2 px-4 font-mono ${remaining <= 5 ? "pm-chip-coral" : "pm-chip-primary"}`}>
-          {String(remaining).padStart(2, "0")}s
-        </div>
-      </div>
-      <div className="font-display text-2xl font-bold my-6 text-center leading-snug"><MD>{currentQ.prompt}</MD></div>
-      <div className="grid grid-cols-2 gap-3">
-        {(currentQ.options || []).map((opt, ix) => {
-          const selected = answers[currentQ.id] === ix;
-          return (
-            <button
-              key={ix}
-              data-testid={TID.oaQuestionOption(currentQ.id, ix)}
-              onClick={() => chooseAndAdvance(ix)}
-              className={`text-center border-2 rounded-xl p-4 font-mono text-lg transition ${selected ? "border-pm-primary bg-pm-primary/10" : "border-pm-border hover:border-pm-primary/40 hover:bg-pm-primary/5"}`}
-            >
-              <span className="text-xs font-bold text-pm-text2 mr-2">{String.fromCharCode(65 + ix)}</span> {opt}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// -------- Capgemini's own Cognitive Challenges (bespoke rebuild) -----------
-// Full rebuild (2026-07-19) of Capgemini's 6 challenge categories as genuine
-// bespoke interactive puzzles — NOT the shared CognitiveGameSection MCQ-button
-// UI. Batch 1: Deductive + Grid Challenge. Inductive/Switch/Motion/Digit are
-// still old-shape (rendered via the CognitiveGameSection-style single-MCQ
-// fallback below) pending their own batches — capgemini_challenges.py's
-// generate_capgemini_challenges() returns a MIX of both shapes during this
-// transition, and CapgeminiChallengesSection below dispatches on which shape
-// each item actually is.
-
-// Shared sub-puzzle-sequencing state, reused by every rebuilt challenge type.
-function useSubPuzzleFlow(subPuzzles, onChallengeComplete) {
-  const [subIdx, setSubIdx] = useState(0);
-  const [collected, setCollected] = useState([]);
-  const total = subPuzzles.length;
-  const current = subPuzzles[subIdx];
-
-  const submitSub = (answer) => {
-    const next = [...collected, answer];
-    if (subIdx + 1 < total) {
-      setCollected(next);
-      setSubIdx(subIdx + 1);
-    } else {
-      onChallengeComplete(next);
-    }
-  };
-
-  return { subIdx, total, current, submitSub };
-}
-
-function DeductiveChallengeGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [grid, setGrid] = useState(() => current.grid.map((row) => [...row]));
-  const [selectedCell, setSelectedCell] = useState(null);
-
-  useEffect(() => {
-    setGrid(current.grid.map((row) => [...row]));
-    setSelectedCell(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subIdx]);
-
-  const isGiven = (r, c) => current.grid[r][c] !== null;
-  const clickCell = (r, c) => { if (!isGiven(r, c)) setSelectedCell([r, c]); };
-  const placeSymbol = (sym) => {
-    if (!selectedCell) return;
-    const [r, c] = selectedCell;
-    const next = grid.map((row) => [...row]);
-    next[r][c] = sym;
-    setGrid(next);
-  };
-
-  const isComplete = grid.every((row) => row.every((cell) => cell !== null));
-  const isValid = (() => {
-    if (!isComplete) return false;
-    const { size, region_size: regionSize, symbols } = current;
-    const expected = new Set(symbols);
-    const sameSet = (arr) => arr.length === expected.size && new Set(arr).size === expected.size && arr.every((v) => expected.has(v));
-    for (let r = 0; r < size; r++) if (!sameSet(grid[r])) return false;
-    for (let c = 0; c < size; c++) if (!sameSet(grid.map((row) => row[c]))) return false;
-    for (let br = 0; br < size; br += regionSize) {
-      for (let bc = 0; bc < size; bc += regionSize) {
-        const block = [];
-        for (let r = br; r < br + regionSize; r++) for (let c = bc; c < bc + regionSize; c++) block.push(grid[r][c]);
-        if (!sameSet(block)) return false;
-      }
-    }
-    return true;
-  })();
-
-  return (
-    <div className="max-w-md mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-        {isComplete && (
-          <span className={`pm-chip font-mono ${isValid ? "pm-chip-primary" : "pm-chip-coral"}`}>
-            {isValid ? "Valid!" : "Not valid yet"}
-          </span>
-        )}
-      </div>
-      <div
-        className="grid gap-1 mx-auto mb-4"
-        style={{ gridTemplateColumns: `repeat(${current.size}, minmax(0,1fr))`, maxWidth: 280 }}
-      >
-        {grid.map((row, r) => row.map((cell, c) => {
-          const given = isGiven(r, c);
-          const isSel = selectedCell && selectedCell[0] === r && selectedCell[1] === c;
-          const Icon = cell ? SUDOKU_ICONS[cell] : null;
-          return (
-            <button
-              key={`${r}-${c}`}
-              data-testid={TID.oaCardTile(current.id || `deductive-${subIdx}`, `${r}-${c}`)}
-              onClick={() => clickCell(r, c)}
-              disabled={given}
-              className={`aspect-square rounded-lg border-2 flex items-center justify-center transition ${
-                given ? "border-pm-border bg-pm-surface-muted" : isSel ? "border-pm-primary bg-pm-primary/10" : "border-pm-border bg-white hover:border-pm-primary/40"
-              }`}
-            >
-              {Icon && <Icon size={22} className={given ? "text-pm-text2" : "text-pm-primary-dark"} />}
-            </button>
-          );
-        }))}
-      </div>
-      <div className="flex items-center justify-center gap-3 mb-6">
-        {current.symbols.map((sym) => {
-          const Icon = SUDOKU_ICONS[sym];
-          return (
-            <button
-              key={sym}
-              onClick={() => placeSymbol(sym)}
-              disabled={!selectedCell}
-              className="w-12 h-12 rounded-xl border-2 border-pm-border bg-white hover:border-pm-primary/40 disabled:opacity-40 flex items-center justify-center transition"
-            >
-              <Icon size={22} className="text-pm-primary-dark" />
-            </button>
-          );
-        })}
-      </div>
-      <div className="text-center">
-        <button
-          onClick={() => submitSub({ grid })}
-          disabled={!isValid}
-          className="pm-btn pm-btn-primary text-sm disabled:opacity-40"
-        >
-          {subIdx + 1 < total ? "Continue" : "Finish challenge"} <ChevronRight size={14} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function GridChallengeGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [selected, setSelected] = useState(null);
-
-  useEffect(() => { setSelected(null); }, [subIdx]);
-
-  const [blankR, blankC] = current.blank_position;
-
-  return (
-    <div className="max-w-md mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-      </div>
-      <div className="grid grid-cols-3 gap-2 mx-auto mb-6" style={{ maxWidth: 240 }}>
-        {current.grid.map((row, r) => row.map((cell, c) => {
-          const isBlank = r === blankR && c === blankC;
-          return (
-            <div
-              key={`${r}-${c}`}
-              className={`aspect-square rounded-lg border-2 flex items-center justify-center font-mono text-lg ${
-                isBlank ? (selected !== null ? "border-pm-primary bg-pm-primary/10 text-pm-primary-dark font-bold" : "border-dashed border-pm-secondary bg-pm-surface-muted") : "border-pm-border bg-white text-pm-text"
-              }`}
-            >
-              {isBlank ? (selected !== null ? selected : "?") : cell}
-            </div>
-          );
-        }))}
-      </div>
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        {current.options.map((opt, ix) => (
-          <button
-            key={ix}
-            data-testid={TID.oaQuestionOption(current.id || `grid-${subIdx}`, ix)}
-            onClick={() => setSelected(opt)}
-            className={`text-center border-2 rounded-xl p-3 font-mono text-lg transition ${selected === opt ? "border-pm-primary bg-pm-primary/10" : "border-pm-border hover:border-pm-primary/40 hover:bg-pm-primary/5"}`}
-          >
-            {opt}
-          </button>
-        ))}
-      </div>
-      <div className="text-center">
-        <button
-          onClick={() => submitSub({ selected_value: selected })}
-          disabled={selected === null}
-          className="pm-btn pm-btn-primary text-sm disabled:opacity-40"
-        >
-          {subIdx + 1 < total ? "Continue" : "Finish challenge"} <ChevronRight size={14} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// Shared shape renderer for Switch Challenge — reuses the same 4 icons as
-// Deductive Challenge's sudoku symbols, just with color/rotation/scale
-// animated via Framer Motion instead of placed in a grid cell.
-const SWITCH_COLOR_CLASS = { primary: "text-pm-primary", secondary: "text-pm-secondary", dark: "text-pm-text" };
-
-function VisualShape({ shape, color, rotation = 0, scale = 1, size = 48 }) {
-  const Icon = SUDOKU_ICONS[shape] || Circle;
-  return (
-    <motion.div
-      animate={{ rotate: rotation, scale }}
-      transition={{ duration: 0.5, ease: "easeInOut" }}
-      className="flex items-center justify-center"
-      style={{ width: size, height: size }}
-    >
-      <Icon size={size * 0.6} className={SWITCH_COLOR_CLASS[color] || "text-pm-text"} strokeWidth={2.5} />
-    </motion.div>
-  );
-}
-
-function SwitchChallengeGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [demoKey, setDemoKey] = useState(0);
-  const [selected, setSelected] = useState(null);
-
-  useEffect(() => { setSelected(null); setDemoKey((n) => n + 1); }, [subIdx]);
-
-  return (
-    <div className="max-w-lg mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-        <button onClick={() => setDemoKey((n) => n + 1)} className="pm-chip hover:bg-pm-surface-muted transition">
-          <RotateCcw size={12} /> Replay
-        </button>
-      </div>
-
-      <div className="pm-card p-6 mb-6 bg-pm-surface-muted/50">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-text2 mb-3 text-center">Watch the rule</div>
-        <div className="flex items-center justify-center gap-6">
-          <div className="text-center">
-            <VisualShape {...current.example_before} />
-            <div className="text-xs text-pm-text2 mt-1">Before</div>
-          </div>
-          <ChevronRight className="text-pm-text-muted" />
-          <div className="text-center">
-            <motion.div
-              key={demoKey}
-              initial={{ rotate: current.example_before.rotation, scale: current.example_before.scale }}
-              animate={{ rotate: current.example_after.rotation, scale: current.example_after.scale }}
-              transition={{ duration: 0.8, ease: "easeInOut" }}
-              className="flex items-center justify-center"
-              style={{ width: 48, height: 48 }}
-            >
-              {(() => {
-                const Icon = SUDOKU_ICONS[current.example_after.shape] || Circle;
-                return <Icon size={30} className={SWITCH_COLOR_CLASS[current.example_after.color] || "text-pm-text"} strokeWidth={2.5} />;
-              })()}
-            </motion.div>
-            <div className="text-xs text-pm-text2 mt-1">After</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="text-center mb-4">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-text2 mb-3">Now apply the SAME rule to:</div>
-        <VisualShape {...current.new_before} />
-      </div>
-      <div className="grid grid-cols-4 gap-3 mb-6">
-        {current.options.map((opt, ix) => (
-          <button
-            key={ix}
-            data-testid={TID.oaQuestionOption(current.id || `switch-${subIdx}`, ix)}
-            onClick={() => setSelected(ix)}
-            className={`pm-card p-3 flex items-center justify-center transition ${selected === ix ? "border-pm-primary bg-pm-primary/10" : "hover:border-pm-primary/40"}`}
-          >
-            <VisualShape {...opt} size={40} />
-          </button>
-        ))}
-      </div>
-      <div className="text-center">
-        <button
-          onClick={() => submitSub({ selected_index: selected })}
-          disabled={selected === null}
-          className="pm-btn pm-btn-primary text-sm disabled:opacity-40"
-        >
-          {subIdx + 1 < total ? "Continue" : "Finish challenge"} <ChevronRight size={14} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function MotionChallengeGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [frameIx, setFrameIx] = useState(0);
-  const [playing, setPlaying] = useState(true);
-  const [selected, setSelected] = useState(null);
-
-  useEffect(() => {
-    setFrameIx(0);
-    setPlaying(true);
-    setSelected(null);
-  }, [subIdx]);
-
-  useEffect(() => {
-    if (!playing) return undefined;
-    if (frameIx >= current.frames.length - 1) {
-      const t = setTimeout(() => setPlaying(false), 500);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setFrameIx((i) => i + 1), 700);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, frameIx]);
-
-  const replay = () => { setFrameIx(0); setPlaying(true); setSelected(null); };
-
-  return (
-    <div className="max-w-md mx-auto text-center">
-      <div className="flex items-center justify-between mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-        <button onClick={replay} className="pm-chip hover:bg-pm-surface-muted transition">
-          <RotateCcw size={12} /> Replay
-        </button>
-      </div>
-      <div className="pm-card p-8 mb-6 bg-pm-surface-muted/50">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-text2 mb-4">
-          {playing ? `Frame ${frameIx + 1} of ${current.frames.length}` : "What comes next?"}
-        </div>
-        <div className="flex items-center justify-center" style={{ height: 80 }}>
-          {playing ? (
-            <motion.div animate={{ rotate: current.frames[frameIx] }} transition={{ duration: 0.5, ease: "easeInOut" }}>
-              <ArrowUp size={48} className="text-pm-primary-dark" strokeWidth={2.5} />
-            </motion.div>
-          ) : (
-            <span className="text-3xl font-display font-bold text-pm-text-muted">?</span>
-          )}
-        </div>
-      </div>
-      {!playing && (
-        <>
-          <div className="grid grid-cols-4 gap-3 mb-6">
-            {current.options.map((rot, ix) => (
-              <button
-                key={ix}
-                data-testid={TID.oaQuestionOption(current.id || `motion-${subIdx}`, ix)}
-                onClick={() => setSelected(ix)}
-                className={`pm-card p-3 flex items-center justify-center transition ${selected === ix ? "border-pm-primary bg-pm-primary/10" : "hover:border-pm-primary/40"}`}
-              >
-                <motion.div animate={{ rotate: rot }} transition={{ duration: 0.3 }}>
-                  <ArrowUp size={28} className="text-pm-text" strokeWidth={2.5} />
-                </motion.div>
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => submitSub({ selected_index: selected })}
-            disabled={selected === null}
-            className="pm-btn pm-btn-primary text-sm disabled:opacity-40"
-          >
-            {subIdx + 1 < total ? "Continue" : "Finish challenge"} <ChevronRight size={14} />
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-function InductiveChallengeGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [typed, setTyped] = useState("");
-
-  useEffect(() => { setTyped(""); }, [subIdx]);
-
-  const submit = () => { if (typed.trim() !== "") submitSub({ typed_value: typed.trim() }); };
-
-  return (
-    <div className="max-w-md mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-      </div>
-      <div className="pm-card p-6 mb-6 bg-pm-surface-muted/50">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-text2 mb-3 text-center">These follow a hidden rule</div>
-        <div className="space-y-2">
-          {current.examples.map((ex, i) => (
-            <div key={i} className="flex items-center justify-center gap-3 font-mono text-lg">
-              <span className="pm-chip">{ex.input}</span>
-              <ChevronRight size={16} className="text-pm-text-muted" />
-              <span className="pm-chip pm-chip-primary">{ex.output}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="text-center mb-6">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-text2 mb-3">Apply the same rule</div>
-        <div className="flex items-center justify-center gap-3">
-          <span className="pm-chip text-lg py-2 px-4 font-mono">{current.new_input}</span>
-          <ChevronRight size={18} className="text-pm-text-muted" />
-          <input
-            type="number"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            data-testid={TID.oaTypedInput(current.id || `inductive-${subIdx}`)}
-            className="pm-input w-28 text-center font-mono text-lg"
-            placeholder="?"
-          />
-        </div>
-      </div>
-      <div className="text-center">
-        <button onClick={submit} disabled={typed.trim() === ""} className="pm-btn pm-btn-primary text-sm disabled:opacity-40">
-          {subIdx + 1 < total ? "Continue" : "Finish challenge"} <ChevronRight size={14} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function DigitChallengeGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [typed, setTyped] = useState("");
-  const [placedTileIx, setPlacedTileIx] = useState({}); // {position: tileIndex}
-  const [selectedTileIx, setSelectedTileIx] = useState(null);
-
-  useEffect(() => {
-    setTyped("");
-    setPlacedTileIx({});
-    setSelectedTileIx(null);
-  }, [subIdx]);
-
-  if (current.variant === "type_in") {
-    const submit = () => { if (typed.trim() !== "") submitSub({ typed_value: typed.trim() }); };
-    return (
-      <div className="max-w-md mx-auto text-center">
-        <div className="flex items-center justify-between mb-4">
-          <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-        </div>
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-text2 mb-4">What comes next?</div>
-        <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
-          {current.sequence.map((v, i) => (
-            <span key={i} className="pm-chip text-lg py-2 px-4 font-mono">{v}</span>
-          ))}
-          <input
-            type="number"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            data-testid={TID.oaTypedInput(current.id || `digit-${subIdx}`)}
-            className="pm-input w-24 text-center font-mono text-lg"
-            placeholder="?"
-          />
-        </div>
-        <button onClick={submit} disabled={typed.trim() === ""} className="pm-btn pm-btn-primary text-sm disabled:opacity-40">
-          {subIdx + 1 < total ? "Continue" : "Finish challenge"} <ChevronRight size={14} />
-        </button>
-      </div>
-    );
-  }
-
-  // arrange_tiles variant — click a tile, then click a blank slot to place
-  // it (click a filled slot again to clear it); same click-to-place
-  // interaction as Deductive/Grid Challenge, not drag-and-drop.
-  const usedTileIndices = new Set(Object.values(placedTileIx));
-
-  const clickTile = (tileIx) => { if (!usedTileIndices.has(tileIx)) setSelectedTileIx(tileIx); };
-  const clickSlot = (position) => {
-    if (placedTileIx[position] !== undefined) {
-      const next = { ...placedTileIx };
-      delete next[position];
-      setPlacedTileIx(next);
-      return;
-    }
-    if (selectedTileIx === null) return;
-    setPlacedTileIx({ ...placedTileIx, [position]: selectedTileIx });
-    setSelectedTileIx(null);
-  };
-
-  const allSlotsFilled = current.blank_positions.every((p) => placedTileIx[p] !== undefined);
-  const submitArrange = () => {
-    const placedValues = {};
-    for (const pos of current.blank_positions) placedValues[pos] = current.tiles[placedTileIx[pos]];
-    submitSub({ placed: placedValues });
-  };
-
-  return (
-    <div className="max-w-md mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-      </div>
-      <div className="text-xs font-mono uppercase tracking-widest text-pm-text2 mb-4 text-center">Place the tiles to complete the sequence</div>
-      <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
-        {current.sequence.map((v, i) => {
-          if (v !== null) return <span key={i} className="pm-chip text-lg py-2 px-4 font-mono">{v}</span>;
-          const tileIx = placedTileIx[i];
-          const filled = tileIx !== undefined;
-          return (
-            <button
-              key={i}
-              data-testid={TID.oaDigitSlot(current.id || `digit-${subIdx}`, i)}
-              onClick={() => clickSlot(i)}
-              className={`w-16 h-11 rounded-lg border-2 flex items-center justify-center font-mono text-lg transition ${
-                filled ? "border-pm-primary bg-pm-primary/10 text-pm-primary-dark font-bold" : "border-dashed border-pm-secondary bg-pm-surface-muted"
-              }`}
-            >
-              {filled ? current.tiles[tileIx] : "?"}
-            </button>
-          );
-        })}
-      </div>
-      <div className="flex items-center justify-center gap-3 mb-6">
-        {current.tiles.map((t, ix) => (
-          <button
-            key={ix}
-            data-testid={TID.oaDigitTile(current.id || `digit-${subIdx}`, ix)}
-            onClick={() => clickTile(ix)}
-            disabled={usedTileIndices.has(ix)}
-            className={`w-14 h-14 rounded-xl border-2 font-mono text-lg transition ${
-              usedTileIndices.has(ix) ? "opacity-30 border-pm-border" : selectedTileIx === ix ? "border-pm-primary bg-pm-primary/10" : "border-pm-border bg-white hover:border-pm-primary/40"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      <div className="text-center">
-        <button onClick={submitArrange} disabled={!allSlotsFilled} className="pm-btn pm-btn-primary text-sm disabled:opacity-40">
-          {subIdx + 1 < total ? "Continue" : "Finish challenge"} <ChevronRight size={14} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const CAPGEMINI_CHALLENGE_INTROS = {
-  deductive_challenge: { title: "Deductive Challenge", body: "A mini logic grid. Place each shape so every row, column, and 2×2 block contains all 4 shapes exactly once." },
-  grid_challenge: { title: "Grid Challenge", body: "Each grid follows a consistent row/column pattern. Work out the rule and pick the value that completes it." },
-  inductive_challenge: { title: "Inductive Challenge", body: "Study the example pairs, infer the hidden rule, then apply it." },
-  switch_challenge: { title: "Switch Challenge", body: "Watch the transformation, then apply the same rule to a new item." },
-  motion_challenge: { title: "Motion Challenge", body: "Watch the motion sequence, then predict what comes next." },
-  digit_challenge: { title: "Digit Challenge", body: "Complete the numeric pattern." },
-};
-
-const COGNIZANT_GAME_INTROS = {
-  connect_pairs: { title: "Connect the Pairs", body: "Connect every point to exactly one other point so that no two connecting lines cross." },
-  pattern_break: { title: "Pattern Break", body: "A hidden rule generates this sequence. Click the one number that breaks it." },
-  speed_math_chain: { title: "Speed Math Chain", body: "Follow the chain of operations from the starting number and enter the final result." },
-  shape_rotation: { title: "Shape Rotation", body: "One option is a true rotation of the base shape. The others are mirror images. Click the true rotation." },
-};
-
-const ACCENTURE_GAME_INTROS = {
-  number_sort: { title: "Number Sorting", body: "Click the tiles in order from smallest value to largest." },
-  path_finding: { title: "Path-Finding", body: "Starting at the marked cell, follow each arrow to the next cell until you exit the grid. Click where you exit." },
-  key_door_maze: { title: "Key-Door Maze", body: "Click the one key that's both reachable from the start and matches the door's color." },
-};
-
-const _DIR_ROTATE = { up: 0, right: 90, down: 180, left: 270 };
-const _KEY_COLOR_HEX = { red: "#DC2626", blue: "#2563EB", green: "#16A34A", yellow: "#CA8A04", purple: "#7C3AED" };
-
-function CapgeminiChallengesSection({ section, answers, setAnswer, onAutoAdvanceEnd }) {
-  const challenges = section.questions || [];
-  const [challengeIdx, setChallengeIdx] = useState(0);
-  const [phase, setPhase] = useState("intro"); // intro -> playing
-
-  const challenge = challenges[challengeIdx];
-  if (!challenge) return <div className="pm-card p-6">No challenges generated.</div>;
-
-  const advanceChallenge = () => {
-    if (challengeIdx + 1 < challenges.length) {
-      setChallengeIdx(challengeIdx + 1);
-      setPhase("intro");
-    } else if (onAutoAdvanceEnd) {
-      onAutoAdvanceEnd();
-    }
-  };
-
-  const handleSubPuzzleChallengeComplete = (perSubAnswers) => {
-    perSubAnswers.forEach((ans, i) => setAnswer(`${challenge.id}_${i}`, ans));
-    advanceChallenge();
-  };
-
-  const type = challenge.type || challenge.style;
-  const intro = CAPGEMINI_CHALLENGE_INTROS[type] || { title: "Cognitive Challenge", body: "" };
-
-  return (
-    <div className="pm-card p-8">
-      <div className="flex items-center gap-2 mb-6">
-        <span className="pm-chip pm-chip-primary">Challenge {challengeIdx + 1} / {challenges.length}</span>
-        <span className="pm-chip">{intro.title}</span>
-      </div>
-
-      {phase === "intro" ? (
-        <div className="text-center py-8">
-          <h3 className="font-display text-2xl font-bold mb-3">{intro.title}</h3>
-          <p className="text-pm-text2 max-w-md mx-auto mb-6">{intro.body}</p>
-          <button onClick={() => setPhase("playing")} className="pm-btn pm-btn-primary">
-            <Play size={14} /> Start
-          </button>
-        </div>
-      ) : "sub_puzzles" in challenge ? (
-        type === "deductive_challenge" ? (
-          <DeductiveChallengeGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-        ) : type === "grid_challenge" ? (
-          <GridChallengeGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-        ) : type === "switch_challenge" ? (
-          <SwitchChallengeGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-        ) : type === "motion_challenge" ? (
-          <MotionChallengeGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-        ) : type === "inductive_challenge" ? (
-          <InductiveChallengeGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-        ) : (
-          <DigitChallengeGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-        )
-      ) : (
-        // Backward compatibility only — rebuild is complete as of 2026-07-19,
-        // so no NEW attempt generates old-shape items anymore. This renders
-        // any old-shape item still persisted in an OA attempt created before
-        // this deploy (e.g. a candidate resuming an in-progress session).
-        <div>
-          <div className="font-display text-xl font-bold mb-6 text-center"><MD>{challenge.prompt}</MD></div>
-          <div className="grid grid-cols-2 gap-3">
-            {(challenge.options || []).map((opt, ix) => {
-              const selected = answers[challenge.id] === ix;
-              return (
-                <button
-                  key={ix}
-                  data-testid={TID.oaQuestionOption(challenge.id, ix)}
-                  onClick={() => { setAnswer(challenge.id, ix); setTimeout(advanceChallenge, 250); }}
-                  className={`text-center border-2 rounded-xl p-4 font-mono text-lg transition ${selected ? "border-pm-primary bg-pm-primary/10" : "border-pm-border hover:border-pm-primary/40 hover:bg-pm-primary/5"}`}
-                >
-                  <span className="text-xs font-bold text-pm-text2 mr-2">{String.fromCharCode(65 + ix)}</span> {opt}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// -------- Cognizant gamified round (tile matching / memory / puzzle) -------
-// NOT based on real Cognizant OA research — a deliberate new addition (see
-// cognizant_games.py). Three genuinely new interaction patterns, cycled one
-// at a time like CognitiveGameSection, but untimed per-item (the outer
-// section-level countdown chip already provides overall time pressure —
-// these are about accuracy, not per-question speed).
-
-function ConnectPairsGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [selected, setSelected] = useState(null);
-  const [pairs, setPairs] = useState([]); // [{a, b}]
-
-  useEffect(() => {
-    setSelected(null);
-    setPairs([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subIdx]);
-
-  const points = current.points || [];
-  const usedIds = new Set(pairs.flatMap((p) => [p.a, p.b]));
-
-  const clickPoint = (pointId) => {
-    if (usedIds.has(pointId)) return;
-    if (selected === null) {
-      setSelected(pointId);
-    } else if (selected === pointId) {
-      setSelected(null);
-    } else {
-      setPairs([...pairs, { a: selected, b: pointId }]);
-      setSelected(null);
-    }
-  };
-
-  const undo = () => setPairs(pairs.slice(0, -1));
-  const submit = () => submitSub({ pairs: pairs.map((p) => [p.a, p.b]) });
-
-  const byId = Object.fromEntries(points.map((p) => [p.point_id, p]));
-  const done = pairs.length === current.n_pairs;
-
-  return (
-    <div className="max-w-lg mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-      </div>
-      <div className="pm-card p-4 mb-4">
-        <svg
-          viewBox={`0 0 ${current.canvas_width} ${current.canvas_height}`}
-          width="100%"
-          height={current.canvas_height}
-        >
-          {pairs.map((p, i) => (
-            <line
-              key={i}
-              x1={byId[p.a].x} y1={byId[p.a].y} x2={byId[p.b].x} y2={byId[p.b].y}
-              stroke="#0FAE73" strokeWidth="3" strokeLinecap="round"
-            />
-          ))}
-          {points.map((p) => {
-            const isUsed = usedIds.has(p.point_id);
-            const isSelected = selected === p.point_id;
-            return (
-              <circle
-                key={p.point_id}
-                data-testid={TID.oaConnectPoint(`connect-${subIdx}`, p.point_id)}
-                cx={p.x} cy={p.y} r={isSelected ? 10 : 8}
-                fill={isUsed ? "#0FAE73" : isSelected ? "#FF6F4D" : "#0A0A0A"}
-                style={{ cursor: isUsed ? "default" : "pointer" }}
-                onClick={() => clickPoint(p.point_id)}
-              />
-            );
-          })}
-        </svg>
-      </div>
-      <div className="flex items-center justify-between">
-        <span className="pm-chip font-mono">{pairs.length} / {current.n_pairs} connected</span>
-        <div className="flex gap-2">
-          <button
-            data-testid={TID.oaConnectUndo(`connect-${subIdx}`)}
-            onClick={undo}
-            disabled={pairs.length === 0}
-            className="pm-btn pm-btn-ghost text-sm"
-          >
-            <RotateCcw size={14} /> Undo
-          </button>
-          <button
-            data-testid={TID.oaConnectSubmit(`connect-${subIdx}`)}
-            onClick={submit}
-            disabled={!done}
-            className="pm-btn pm-btn-primary text-sm"
-          >
-            Submit
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// -------- Pattern Break: click the number that breaks the sequence --------
-function PatternBreakGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const sequence = current.sequence || [];
-
-  return (
-    <div className="max-w-lg mx-auto text-center">
-      <div className="flex items-center justify-center mb-6">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-      </div>
-      <div className="flex items-center justify-center gap-3 flex-wrap">
-        {sequence.map((n, ix) => (
-          <button
-            key={ix}
-            data-testid={TID.oaPatternTile(`pattern-${subIdx}`, ix)}
-            onClick={() => submitSub({ selected_index: ix })}
-            className="w-16 h-16 rounded-xl border-2 border-pm-border bg-white hover:border-pm-primary font-display font-bold text-xl transition"
-          >
-            {n}
-          </button>
-        ))}
-      </div>
-      <div className="text-xs text-pm-text2 mt-4">Click the number that breaks the pattern.</div>
-    </div>
-  );
-}
-
-// -------- Speed Math Chain: mental-math operation chain -------------------
-const _OP_SYMBOL = { add: "+", subtract: "−", multiply: "×" };
-
-function SpeedMathChainGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [value, setValue] = useState("");
-
-  useEffect(() => { setValue(""); }, [subIdx]);
-
-  const submit = () => {
-    if (value.trim() === "") return;
-    submitSub({ value: Number(value) });
-  };
-
-  return (
-    <div className="max-w-lg mx-auto text-center">
-      <div className="flex items-center justify-center mb-6">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-      </div>
-      <div className="flex items-center justify-center gap-2 flex-wrap font-mono text-lg mb-6">
-        <span className="pm-chip">{current.start}</span>
-        {(current.operations || []).map((op, ix) => (
-          <React.Fragment key={ix}>
-            <ArrowUp size={16} className="rotate-90 text-pm-text2" />
-            <span className="pm-chip">{_OP_SYMBOL[op.op] || op.op} {op.value}</span>
-          </React.Fragment>
-        ))}
-        <ArrowUp size={16} className="rotate-90 text-pm-text2" />
-        <span className="pm-chip pm-chip-primary">?</span>
-      </div>
-      <div className="flex items-center justify-center gap-3">
-        <input
-          data-testid={TID.oaMathInput(`math-${subIdx}`)}
-          type="number"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-          className="pm-input w-32 text-center font-mono text-lg"
-          placeholder="?"
-        />
-        <button
-          data-testid={TID.oaMathSubmit(`math-${subIdx}`)}
-          onClick={submit}
-          disabled={value.trim() === ""}
-          className="pm-btn pm-btn-primary text-sm"
-        >
-          Submit
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// -------- Shape Rotation: click the true rotation, not the mirror ---------
-function ShapeMini({ grid, testId }) {
-  const size = grid.length;
-  return (
-    <div data-testid={testId} className="grid gap-0.5 mx-auto" style={{ gridTemplateColumns: `repeat(${size}, minmax(0,1fr))`, width: 84 }}>
-      {grid.map((row, r) => row.map((cell, c) => (
-        <div
-          key={`${r}-${c}`}
-          className={`aspect-square rounded-sm ${cell ? "bg-pm-primary" : "bg-pm-surface-muted"}`}
-        />
-      )))}
-    </div>
-  );
-}
-
-function ShapeRotationGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-
-  return (
-    <div className="max-w-lg mx-auto text-center">
-      <div className="flex items-center justify-center mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-      </div>
-      <div className="text-xs text-pm-text2 mb-2">Base shape</div>
-      <ShapeMini grid={current.base_grid} testId={TID.oaShapeBase(`shape-${subIdx}`)} />
-      <div className="text-xs text-pm-text2 mt-6 mb-3">Which option is a true rotation of the base shape?</div>
-      <div className="grid grid-cols-4 gap-3">
-        {(current.options || []).map((opt, ix) => (
-          <button
-            key={ix}
-            data-testid={TID.oaShapeOption(`shape-${subIdx}`, ix)}
-            onClick={() => submitSub({ selected_index: ix })}
-            className="pm-card p-3 hover:border-pm-primary transition"
-          >
-            <ShapeMini grid={opt} />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function CognizantGamesSection({ section, answers, setAnswer, onAutoAdvanceEnd }) {
-  const challenges = section.questions || [];
-  const [challengeIdx, setChallengeIdx] = useState(0);
-  const [phase, setPhase] = useState("intro"); // intro -> playing
-
-  const challenge = challenges[challengeIdx];
-  if (!challenge) return <div className="pm-card p-6">No games generated.</div>;
-
-  const advanceChallenge = () => {
-    if (challengeIdx + 1 < challenges.length) {
-      setChallengeIdx(challengeIdx + 1);
-      setPhase("intro");
-    } else if (onAutoAdvanceEnd) {
-      onAutoAdvanceEnd();
-    }
-  };
-
-  const handleSubPuzzleChallengeComplete = (perSubAnswers) => {
-    perSubAnswers.forEach((ans, i) => setAnswer(`${challenge.id}_${i}`, ans));
-    advanceChallenge();
-  };
-
-  const type = challenge.type;
-  const intro = COGNIZANT_GAME_INTROS[type] || { title: "Puzzle", body: "" };
-
-  return (
-    <div className="pm-card p-8">
-      <div className="flex items-center gap-2 mb-6">
-        <span className="pm-chip pm-chip-primary">Challenge {challengeIdx + 1} / {challenges.length}</span>
-        <span className="pm-chip">{intro.title}</span>
-      </div>
-
-      {phase === "intro" ? (
-        <div className="text-center py-8">
-          <h3 className="font-display text-2xl font-bold mb-3">{intro.title}</h3>
-          <p className="text-pm-text2 max-w-md mx-auto mb-6">{intro.body}</p>
-          <button onClick={() => setPhase("playing")} className="pm-btn pm-btn-primary">
-            <Play size={14} /> Start
-          </button>
-        </div>
-      ) : type === "connect_pairs" ? (
-        <ConnectPairsGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-      ) : type === "pattern_break" ? (
-        <PatternBreakGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-      ) : type === "speed_math_chain" ? (
-        <SpeedMathChainGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-      ) : type === "shape_rotation" ? (
-        <ShapeRotationGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-      ) : (
-        <div className="text-pm-text2">Unknown challenge type.</div>
-      )}
-    </div>
-  );
-}
-
-// -------- Number Sorting: click tiles smallest-to-largest ------------------
-function NumberSortGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const [order, setOrder] = useState([]);
-
-  useEffect(() => { setOrder([]); }, [subIdx]);
-
-  const items = current.items || [];
-  const clickItem = (id) => {
-    if (order.includes(id)) return;
-    const next = [...order, id];
-    setOrder(next);
-    if (next.length === items.length) {
-      submitSub({ order: next });
-    }
-  };
-  const undo = () => setOrder(order.slice(0, -1));
-
-  return (
-    <div className="max-w-lg mx-auto text-center">
-      <div className="flex items-center justify-between mb-6">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-        <span className="pm-chip font-mono">{order.length} / {items.length} placed</span>
-      </div>
-      <div className="flex items-center justify-center gap-3 flex-wrap mb-4">
-        {items.map((it) => {
-          const pos = order.indexOf(it.id);
-          return (
-            <button
-              key={it.id}
-              data-testid={TID.oaSortTile(`sort-${subIdx}`, it.id)}
-              onClick={() => clickItem(it.id)}
-              disabled={pos !== -1}
-              className={`relative w-20 h-20 rounded-xl border-2 flex items-center justify-center font-mono font-bold transition ${
-                pos !== -1 ? "border-pm-primary bg-pm-primary/10 text-pm-text2" : "border-pm-border bg-white hover:border-pm-primary"
-              }`}
-            >
-              {it.display}
-              {pos !== -1 && (
-                <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-pm-primary text-white text-xs grid place-items-center">{pos + 1}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-      <button onClick={undo} disabled={order.length === 0} className="pm-btn pm-btn-ghost text-sm">
-        <RotateCcw size={14} /> Undo
-      </button>
-    </div>
-  );
-}
-
-// -------- Path-Finding: trace arrows to the true exit -----------------------
-function PathFindingGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const grid = current.grid || [];
-  const start = current.start || { row: 0, col: 0 };
-
-  return (
-    <div className="max-w-lg mx-auto text-center">
-      <div className="flex items-center justify-center mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-      </div>
-      <div
-        className="grid gap-1 mx-auto mb-6"
-        style={{ gridTemplateColumns: `repeat(${grid.length}, minmax(0,1fr))`, maxWidth: 260 }}
-      >
-        {grid.map((row, r) => row.map((dir, c) => {
-          const isStart = start.row === r && start.col === c;
-          return (
-            <div
-              key={`${r}-${c}`}
-              data-testid={TID.oaPathCell(`path-${subIdx}`, `${r}-${c}`)}
-              className={`aspect-square rounded-lg border-2 flex items-center justify-center ${isStart ? "border-pm-primary bg-pm-primary/10" : "border-pm-border bg-white"}`}
-            >
-              <ArrowUp size={18} style={{ transform: `rotate(${_DIR_ROTATE[dir]}deg)` }} className={isStart ? "text-pm-primary-dark" : "text-pm-text2"} />
-            </div>
-          );
-        }))}
-      </div>
-      <div className="text-xs text-pm-text2 mb-3">Where do you exit the grid?</div>
-      <div className="flex items-center justify-center gap-3 flex-wrap">
-        {(current.exit_options || []).map((opt, ix) => (
-          <button
-            key={ix}
-            data-testid={TID.oaPathExitOption(`path-${subIdx}`, ix)}
-            onClick={() => submitSub({ selected_index: ix })}
-            className="pm-btn pm-btn-secondary text-sm py-2 px-4 font-mono"
-          >
-            ({opt.row}, {opt.col})
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// -------- Key-Door Maze: click the reachable, color-matching key ----------
-function KeyDoorMazeGame({ subPuzzles, onChallengeComplete }) {
-  const { subIdx, total, current, submitSub } = useSubPuzzleFlow(subPuzzles, onChallengeComplete);
-  const size = current.size || 5;
-  const start = current.start || { row: 0, col: 0 };
-  const wallSet = new Set((current.walls || []).map((w) => `${w.row}-${w.col}`));
-  const door = current.door || {};
-  const keys = current.keys || [];
-  const keyByCell = Object.fromEntries(keys.map((k) => [`${k.row}-${k.col}`, k]));
-
-  return (
-    <div className="max-w-lg mx-auto text-center">
-      <div className="flex items-center justify-between mb-4">
-        <span className="pm-chip pm-chip-primary font-mono">Puzzle {subIdx + 1} of {total}</span>
-        <span className="pm-chip font-mono" style={{ background: `${_KEY_COLOR_HEX[door.color]}22`, color: _KEY_COLOR_HEX[door.color] }}>
-          Door: {door.color}
-        </span>
-      </div>
-      <div
-        className="grid gap-1 mx-auto mb-4"
-        style={{ gridTemplateColumns: `repeat(${size}, minmax(0,1fr))`, maxWidth: 300 }}
-      >
-        {Array.from({ length: size }).map((_, r) => Array.from({ length: size }).map((_, c) => {
-          const cellKey = `${r}-${c}`;
-          const isWall = wallSet.has(cellKey);
-          const isStart = start.row === r && start.col === c;
-          const isDoor = door.row === r && door.col === c;
-          const key = keyByCell[cellKey];
-          return (
-            <div
-              key={cellKey}
-              data-testid={TID.oaMazeCell(`maze-${subIdx}`, cellKey)}
-              className={`aspect-square rounded flex items-center justify-center text-[9px] font-mono ${
-                isWall ? "bg-pm-text-muted/40" : "bg-pm-surface-muted"
-              }`}
-            >
-              {isStart && <span className="pm-chip pm-chip-primary" style={{ padding: "2px 4px", fontSize: 9 }}>S</span>}
-              {isDoor && !isStart && <span style={{ color: _KEY_COLOR_HEX[door.color] }}>▢</span>}
-              {key && (
-                <button
-                  data-testid={TID.oaMazeKey(`maze-${subIdx}`, key.id)}
-                  onClick={() => submitSub({ selected_key_id: key.id })}
-                  className="w-4 h-4 rounded-full hover:ring-2 hover:ring-pm-primary"
-                  style={{ background: _KEY_COLOR_HEX[key.color] }}
-                  title={`Key: ${key.color}`}
-                />
-              )}
-            </div>
-          );
-        }))}
-      </div>
-      <div className="text-xs text-pm-text2">Click the key that's reachable and matches the door's color.</div>
-    </div>
-  );
-}
-
-function AccentureGamesSection({ section, answers, setAnswer, onAutoAdvanceEnd }) {
-  const challenges = section.questions || [];
-  const [challengeIdx, setChallengeIdx] = useState(0);
-  const [phase, setPhase] = useState("intro"); // intro -> playing
-
-  const challenge = challenges[challengeIdx];
-  if (!challenge) return <div className="pm-card p-6">No games generated.</div>;
-
-  const advanceChallenge = () => {
-    if (challengeIdx + 1 < challenges.length) {
-      setChallengeIdx(challengeIdx + 1);
-      setPhase("intro");
-    } else if (onAutoAdvanceEnd) {
-      onAutoAdvanceEnd();
-    }
-  };
-
-  const handleSubPuzzleChallengeComplete = (perSubAnswers) => {
-    perSubAnswers.forEach((ans, i) => setAnswer(`${challenge.id}_${i}`, ans));
-    advanceChallenge();
-  };
-
-  const type = challenge.type;
-  const intro = ACCENTURE_GAME_INTROS[type] || { title: "Puzzle", body: "" };
-
-  return (
-    <div className="pm-card p-8">
-      <div className="flex items-center gap-2 mb-6">
-        <span className="pm-chip pm-chip-primary">Challenge {challengeIdx + 1} / {challenges.length}</span>
-        <span className="pm-chip">{intro.title}</span>
-      </div>
-
-      {phase === "intro" ? (
-        <div className="text-center py-8">
-          <h3 className="font-display text-2xl font-bold mb-3">{intro.title}</h3>
-          <p className="text-pm-text2 max-w-md mx-auto mb-6">{intro.body}</p>
-          <button onClick={() => setPhase("playing")} className="pm-btn pm-btn-primary">
-            <Play size={14} /> Start
-          </button>
-        </div>
-      ) : type === "number_sort" ? (
-        <NumberSortGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-      ) : type === "path_finding" ? (
-        <PathFindingGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-      ) : type === "key_door_maze" ? (
-        <KeyDoorMazeGame subPuzzles={challenge.sub_puzzles} onChallengeComplete={handleSubPuzzleChallengeComplete} />
-      ) : (
-        <div className="text-pm-text2">Unknown challenge type.</div>
-      )}
     </div>
   );
 }

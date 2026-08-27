@@ -12,20 +12,20 @@ from typing import List, Dict, Any
 #   essay                -> written long-form answer (150-400 words)
 #   pseudocode           -> pseudocode / trace-the-output MCQ
 #   comm                 -> communication assessment MCQ (grammar / comprehension)
-#   cognitive_game / game -> Accenture ("cognitive_game") and IBM ("game", identical behavior,
-#                           kept as a distinct string for its own history) real-time
-#                           per-question-timer minigame, LLM-generated stems.
-#   capgemini_challenges -> Capgemini's own distinct round: 6 procedurally-generated (zero-AI)
-#                           challenge categories matching Capgemini's real category names, 4
-#                           picked at random per session. Renders via the same
-#                           CognitiveGameSection UI as cognitive_game (see capgemini_challenges.py).
-#   cognizant_games      -> Cognizant's gamified round. NOT based on real Cognizant OA research —
-#                           a deliberate new addition (see cognizant_games.py docstring). Tile
-#                           matching / memory recall / non-crossing puzzle, procedurally generated.
+#
+# The old per-company gamified-round types (cognitive_game/game,
+# capgemini_challenges, cognizant_games, accenture_games) were deleted
+# entirely (2026-08) in favor of a registry-driven "gamified_round" system --
+# game_types.py (code registry) + gamified_round_config/puzzle_bank/
+# game_session (MongoDB). Capgemini, Cognizant, Accenture, and IBM each have
+# a "gamified_round" section below (type: "gamified_round"), currently
+# serving the one registered game type, deductive_grid.
 
 COMPANIES: List[Dict[str, Any]] = [
     {
         "id": "tcs-nqt",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "TCS NQT",
         "tagline": "Foundation (Ninja) \u2192 Advanced Quant+Reasoning (Digital) \u2192 Advanced Coding (Prime)",
         "logo": "SiTcs",
@@ -80,6 +80,8 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "infosys",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Infosys",
         "tagline": "Verbal \u2192 Aptitude \u2192 Pseudocode \u2192 Puzzles \u2192 Essay",
         "logo": "SiInfosys",
@@ -89,14 +91,38 @@ COMPANIES: List[Dict[str, Any]] = [
         "chips": ["Pseudocode highest cutoff", "Written Essay", "Puzzles round"],
         "sections": [
             {"key": "verbal", "name": "Verbal Ability", "type": "mcq", "count": 6, "minutes": 10, "cutoff": 0.5},
-            {"key": "aptitude", "name": "Reasoning + Aptitude", "type": "mcq", "count": 8, "minutes": 20, "cutoff": 0.5},
+            {
+                "key": "aptitude", "name": "Reasoning + Aptitude", "type": "mcq", "count": 8, "minutes": 20, "cutoff": 0.5,
+                # No separate Logical Reasoning section anywhere in Infosys's
+                # structure (confirmed 2026-08-18 audit) despite this section's
+                # own name already promising "Reasoning + Aptitude" -- it was
+                # previously drawing 100% from the aptitude topic pool. Blended
+                # in per the new cross-company reasoning-coverage rule.
+                "extra_topics": [
+                    {"key": "aptitude", "name": "Aptitude", "count": 2},
+                    {"key": "reasoning", "name": "Reasoning", "count": 6},
+                ],
+            },
             {"key": "pseudocode", "name": "Pseudocode (highest cutoff)", "type": "pseudocode", "count": 6, "minutes": 15, "cutoff": 0.65},
-            {"key": "puzzles", "name": "Puzzles", "type": "mcq", "count": 4, "minutes": 10, "cutoff": 0.5},
+            {
+                "key": "puzzles", "name": "Puzzles", "type": "mcq", "count": 4, "minutes": 10, "cutoff": 0.5,
+                # Previously fully live -- "puzzles" isn't in SECTION_KEY_TO_TOPIC
+                # (it means logic/text puzzles here, not an aptitude/reasoning
+                # alias), so it fell through to 100% live generation. Now
+                # covered by the dedicated puzzles static-bank topic
+                # (mcq_static_bank.CANONICAL_TOPICS) via extra_topics, same
+                # mechanism as the cs-fundamentals fix.
+                "extra_topics": [
+                    {"key": "puzzles", "name": "Puzzles", "count": 4},
+                ],
+            },
             {"key": "essay", "name": "Written Essay", "type": "essay", "count": 1, "minutes": 20, "cutoff": 0.5},
         ],
     },
     {
         "id": "wipro",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Wipro Elite NTH",
         "tagline": "Aptitude \u2192 Coding \u2192 Written Communication",
         "logo": "SiWipro",
@@ -140,14 +166,16 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "cognizant",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Cognizant GenC",
         "tagline": "Communication gate \u2192 Quant + Gamified \u2192 Skill Cluster (Coding/SQL/Domain)",
         "logo": "SiCognizant",
         "verified": True,
-        "time_minutes": 170,
+        "time_minutes": 164,
         "scoring_mode": "sectional",
         "cluster_options": ["Java", "Python"],
-        "chips": ["Communication gate reflects in final verdict, doesn't block", "Pick Java or Python cluster", "Gamified round in R2"],
+        "chips": ["Communication gate reflects in final verdict, doesn't block", "Pick Java or Python cluster"],
         "sections": [
             # Round 1: Communication Assessment (60 min total). Each section
             # carries its own cutoff: 0.5 \u2014 sectional scoring means failing any
@@ -162,13 +190,28 @@ COMPANIES: List[Dict[str, Any]] = [
             {"key": "speaking", "name": "R1: Speaking", "type": "speaking", "count": 1, "minutes": 5, "cutoff": 0.5},
             {"key": "reading_listening", "name": "R1: Reading & Listening (repeat statements)", "type": "reading_listening", "count": 5, "minutes": 15, "cutoff": 0.5},
             # Round 2: Quant + Gaming (Logical Reasoning dropped, see above).
-            {"key": "quant", "name": "R2: Quantitative Aptitude", "type": "mcq", "count": 25, "minutes": 35, "cutoff": 0.5},
-            # A bespoke design, not drawn from real Cognizant OA content —
-            # rebuilt 2026-07-19 to the same procedural/hidden-secret standard
-            # as capgemini_challenges.py (4 categories: Connect the Pairs,
-            # Pattern Break, Speed Math Chain, Shape Rotation — 3 picked per
-            # session). See cognizant_games.py.
-            {"key": "gamified", "name": "R2: Gamified Round (logic & pattern challenges)", "type": "cognizant_games", "minutes": 20, "cutoff": 0.5},
+            {
+                "key": "quant", "name": "R2: Quantitative Aptitude", "type": "mcq", "count": 25, "minutes": 35, "cutoff": 0.5,
+                # Logical Reasoning was dropped entirely from Cognizant's
+                # structure (see the comment above, 2026-07-19) -- audited
+                # 2026-08-18 and confirmed no reasoning-mapped section exists
+                # anywhere else in this company's structure either. Per the
+                # cross-company reasoning-coverage rule, blended into THIS
+                # section rather than restoring a dedicated one (explicit
+                # user decision, not a relocation of the dropped section).
+                "extra_topics": [
+                    {"key": "aptitude", "name": "Quantitative Aptitude", "count": 19},
+                    {"key": "reasoning", "name": "Reasoning", "count": 6},
+                ],
+            },
+            # Gamified round (R2) — registry-driven (see game_types.py /
+            # gamified_round.py), replaces the deleted cognizant_games.py.
+            # Runs all 5 registered game types every session (deductive_grid,
+            # switch_challenge, grid_challenge, inductive_challenge,
+            # motion_challenge); minutes below is the section-level backstop,
+            # sized (2026-08-18) for the realistic 5-type total (~11:19 raw,
+            # see gamified_round.py's module docstring for the full breakdown).
+            {"key": "gamified", "name": "R2: Gamified Round", "type": "gamified_round", "count": 5, "minutes": 14, "cutoff": 0.5},
             # Round 3: Skill Cluster \u2014 candidate picks Java or Python at start
             # via cluster_options above (C# dropped: code_runner.py has no C#
             # execution path). Coding stays language-agnostic (candidate can
@@ -181,21 +224,22 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "accenture",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Accenture",
         "tagline": "5 sections \u2013 Behavioral \u2192 Cognitive \u2192 Tech MCQs \u2192 Coding \u2192 Comm",
         "logo": "SiAccenture",
         "verified": True,
-        "time_minutes": 170,
+        "time_minutes": 164,
         "scoring_mode": "composite",
-        "chips": ["5 sections, 125 Qs", "Gamified cognitive", "Stack-specific coding"],
+        "chips": ["5 sections", "Gamified cognitive", "Stack-specific coding"],
         "sections": [
             {"key": "behavioral", "name": "Behavioral (unscored)", "type": "mcq", "count": 5, "minutes": 15, "cutoff": 0.0, "weight": 0.0},  # was missing weight — silently counted at full weight despite the "(unscored)" label; now matches Core Assessment's correct pattern
-            # Bespoke design, not drawn from real Accenture OA content — built
-            # to the same procedural/hidden-secret sub-puzzle-set standard as
-            # capgemini_challenges.py/cognizant_games.py (2026-07-20), scoped
-            # to 3 always-shown categories (Number Sorting, Path-Finding,
-            # Key-Door Maze) instead of a larger pool. See accenture_games.py.
-            {"key": "cognitive", "name": "Gamified Cognitive (logic & maze challenges)", "type": "accenture_games", "count": 3, "minutes": 20, "cutoff": 0.5},
+            # Gamified Cognitive section — registry-driven (see game_types.py /
+            # gamified_round.py), replaces the deleted accenture_games.py.
+            # Runs all 5 registered game types every session; minutes below
+            # sized (2026-08-18) for the realistic 5-type total (~11:19 raw).
+            {"key": "cognitive", "name": "Gamified Cognitive", "type": "gamified_round", "count": 5, "minutes": 14, "cutoff": 0.5},
             {"key": "technical", "name": "Tech MCQs (Pseudocode/MS Office/Cloud/Net/CS)", "type": "mcq", "count": 12, "minutes": 45, "cutoff": 0.5},
             {"key": "coding", "name": "Stack-specific Coding", "type": "coding", "count": 1, "minutes": 45, "cutoff": 0.5},
             # Deliberate deviation from Accenture's real researched (all-MCQ+
@@ -209,6 +253,8 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "product-general",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Product Company (Generic)",
         "tagline": "Explicit generic fallback template",
         "logo": "LuBriefcaseBusiness",
@@ -217,13 +263,41 @@ COMPANIES: List[Dict[str, Any]] = [
         "scoring_mode": "composite",
         "chips": ["Generic fallback", "DSA-heavy", "Aptitude + Coding"],
         "sections": [
-            {"key": "aptitude", "name": "Quant + Reasoning", "type": "mcq", "count": 10, "minutes": 25, "cutoff": 0.5},
-            {"key": "cs-fundamentals", "name": "CS Fundamentals", "type": "mcq", "count": 8, "minutes": 20, "cutoff": 0.5},
+            {
+                "key": "aptitude", "name": "Quant + Reasoning", "type": "mcq", "count": 10, "minutes": 25, "cutoff": 0.5,
+                # No separate Reasoning section in this generic fallback
+                # template -- blended per the cross-company reasoning-coverage
+                # rule (2026-08-18), matching what this section's own name
+                # already promised.
+                "extra_topics": [
+                    {"key": "aptitude", "name": "Quantitative Aptitude", "count": 4},
+                    {"key": "reasoning", "name": "Reasoning", "count": 6},
+                ],
+            },
+            {
+                "key": "cs-fundamentals", "name": "CS Fundamentals (OS/DBMS/OOPS/CN/Architecture)",
+                "type": "mcq", "count": 8, "minutes": 20, "cutoff": 0.5,
+                # Was a bare mcq section (100% live, never actually wired to
+                # the static bank -- confirmed 2026-08-25 audit: this key
+                # isn't in SECTION_KEY_TO_TOPIC, and having no extra_topics
+                # meant it never hit the branch that would have mapped it).
+                # cs_fundamentals is now formally the 5-topic group (OS,
+                # DBMS, OOPS, CN, Architecture), split as evenly as possible.
+                "extra_topics": [
+                    {"key": "os", "name": "Operating Systems", "count": 2},
+                    {"key": "dbms", "name": "DBMS", "count": 2},
+                    {"key": "oops", "name": "OOPS", "count": 2},
+                    {"key": "cn", "name": "Computer Networks", "count": 1},
+                    {"key": "architecture", "name": "Computer Architecture", "count": 1},
+                ],
+            },
             {"key": "coding", "name": "DSA Coding", "type": "coding", "count": 2, "minutes": 75, "cutoff": 0.5},
         ],
     },
     {
         "id": "microsoft-swe",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Microsoft SWE",
         "tagline": "Unverified \u2013 uses generic fallback",
         "logo": "SiMicrosoft",
@@ -232,28 +306,72 @@ COMPANIES: List[Dict[str, Any]] = [
         "scoring_mode": "composite",
         "chips": ["Unverified pattern", "Fallback template", "DSA-focused"],
         "sections": [
-            {"key": "aptitude", "name": "Quant + Reasoning", "type": "mcq", "count": 8, "minutes": 20, "cutoff": 0.5},
-            {"key": "cs-fundamentals", "name": "OS + DBMS + Networks", "type": "mcq", "count": 10, "minutes": 25, "cutoff": 0.5},
+            {
+                "key": "aptitude", "name": "Quant + Reasoning", "type": "mcq", "count": 8, "minutes": 20, "cutoff": 0.5,
+                # No separate Reasoning section in this unverified fallback
+                # template -- blended per the cross-company reasoning-coverage
+                # rule (2026-08-18), matching what this section's own name
+                # already promised.
+                "extra_topics": [
+                    {"key": "aptitude", "name": "Quantitative Aptitude", "count": 2},
+                    {"key": "reasoning", "name": "Reasoning", "count": 6},
+                ],
+            },
+            {
+                "key": "cs-fundamentals", "name": "CS Fundamentals (OS/DBMS/OOPS/CN/Architecture)",
+                "type": "mcq", "count": 10, "minutes": 25, "cutoff": 0.5,
+                # Was a bare mcq section (100% live -- see product-general's
+                # note above for the same root cause). cs_fundamentals is now
+                # formally the 5-topic group, split evenly (10/5=2 each).
+                "extra_topics": [
+                    {"key": "os", "name": "Operating Systems", "count": 2},
+                    {"key": "dbms", "name": "DBMS", "count": 2},
+                    {"key": "oops", "name": "OOPS", "count": 2},
+                    {"key": "cn", "name": "Computer Networks", "count": 2},
+                    {"key": "architecture", "name": "Computer Architecture", "count": 2},
+                ],
+            },
             {"key": "coding", "name": "DSA Coding (2 problems)", "type": "coding", "count": 2, "minutes": 75, "cutoff": 0.5},
         ],
     },
     {
         "id": "ibm",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "IBM",
         "tagline": "Coding-first, light aptitude gate",
         "logo": "SiIbm",
         "verified": True,
-        "time_minutes": 130,
+        "time_minutes": 119,
         "scoring_mode": "composite",
         "chips": ["Coding-first", "Light aptitude", "Cognitive round"],
         "sections": [
-            {"key": "cognitive", "name": "Cognitive", "type": "game", "count": 6, "minutes": 25, "cutoff": 0.5},
-            {"key": "aptitude", "name": "Aptitude (light gate)", "type": "mcq", "count": 6, "minutes": 15, "cutoff": 0.4},
+            # Cognitive section — registry-driven (see game_types.py /
+            # gamified_round.py), replaces IBM's old live-LLM "game" type
+            # (cognitive_game_prompt, no bespoke module of its own).
+            # Runs all 5 registered game types every session; minutes below
+            # sized (2026-08-18) for the realistic 5-type total (~11:19 raw).
+            {"key": "cognitive", "name": "Cognitive", "type": "gamified_round", "count": 5, "minutes": 14, "cutoff": 0.5},
+            {
+                "key": "aptitude", "name": "Aptitude (light gate)", "type": "mcq", "count": 6, "minutes": 15, "cutoff": 0.4,
+                # No separate Reasoning section -- but this section is only 6
+                # questions total, too small for the standard 6-7 reasoning
+                # minimum (would consume the whole section or exceed it,
+                # leaving no room for genuine aptitude content). Reduced 3+3
+                # split confirmed with user 2026-08-18 as this company's
+                # deliberate exception to the standard blend count.
+                "extra_topics": [
+                    {"key": "aptitude", "name": "Quantitative Aptitude", "count": 3},
+                    {"key": "reasoning", "name": "Reasoning", "count": 3},
+                ],
+            },
             {"key": "coding", "name": "Coding (2 problems)", "type": "coding", "count": 2, "minutes": 90, "cutoff": 0.5},
         ],
     },
     {
         "id": "zoho",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Zoho",
         "tagline": "3 rounds \u2013 Aptitude+Tech MCQs \u2192 5 Programs \u2192 Advanced DSA",
         "logo": "LuCode",
@@ -273,11 +391,13 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "capgemini",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Capgemini",
         "tagline": "Round 1: Tech MCQ+Pseudo \u2192 Essay \u2192 Game \u2192 Behavioral \u00b7 Round 2: Coding",
         "logo": "SiCapgemini",
         "verified": True,
-        "time_minutes": 180,
+        "time_minutes": 169,
         "scoring_mode": "sectional",
         "chips": ["Round 1: OA (4 sections)", "Round 2: 2 DSA Coding", "Behavioral (unscored)"],
         "sections": [
@@ -301,10 +421,12 @@ COMPANIES: List[Dict[str, Any]] = [
                 ],
             },
             {"key": "essay", "name": "R1b: Essay Writing", "type": "essay", "count": 1, "minutes": 25, "cutoff": 0.5},
-            # Own distinct round (not the shared Accenture/IBM cognitive_game): 4 of 6
-            # real Capgemini category names, procedurally generated, zero AI. See
+            # R1c: Game Based Cognitive Test — registry-driven (see
+            # game_types.py / gamified_round.py), replaces the deleted
             # capgemini_challenges.py.
-            {"key": "cognitive", "name": "R1c: Game Based Cognitive Test", "type": "capgemini_challenges", "count": 4, "minutes": 25, "cutoff": 0.5},
+            # Runs all 5 registered game types every session; minutes below
+            # sized (2026-08-18) for the realistic 5-type total (~11:19 raw).
+            {"key": "cognitive", "name": "R1c: Game Based Cognitive Test", "type": "gamified_round", "count": 5, "minutes": 14, "cutoff": 0.5},
             # NEW (2026-07-19): never built before, based on newly confirmed research.
             # Unscored, same pattern as Accenture/Core Assessment's Behavioral sections \u2014
             # weight: 0.0 is what actually excludes it from the composite (cutoff alone
@@ -316,6 +438,8 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "hcltech",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "HCLTech",
         "tagline": "5-section OA -- 77 questions, 95 minutes (confirmed structure)",
         "logo": "SiHcl",
@@ -340,12 +464,27 @@ COMPANIES: List[Dict[str, Any]] = [
             {"key": "numerical", "name": "Numerical Ability", "type": "mcq", "count": 15, "minutes": 15, "cutoff": 0.5},
             {"key": "verbal", "name": "Verbal Ability", "type": "mcq", "count": 15, "minutes": 15, "cutoff": 0.5},
             {"key": "reasoning", "name": "Logical Reasoning Ability", "type": "mcq", "count": 15, "minutes": 15, "cutoff": 0.5},
-            {"key": "cs-fundamentals", "name": "Computer Fundamentals", "type": "mcq", "count": 30, "minutes": 30, "cutoff": 0.5},
+            {
+                "key": "cs-fundamentals", "name": "Computer Fundamentals (OS/DBMS/OOPS/CN/Architecture)",
+                "type": "mcq", "count": 30, "minutes": 30, "cutoff": 0.5,
+                # Was a bare mcq section (100% live -- see product-general's
+                # note above for the same root cause). cs_fundamentals is now
+                # formally the 5-topic group, split evenly (30/5=6 each).
+                "extra_topics": [
+                    {"key": "os", "name": "Operating Systems", "count": 6},
+                    {"key": "dbms", "name": "DBMS", "count": 6},
+                    {"key": "oops", "name": "OOPS", "count": 6},
+                    {"key": "cn", "name": "Computer Networks", "count": 6},
+                    {"key": "architecture", "name": "Computer Architecture", "count": 6},
+                ],
+            },
             {"key": "coding", "name": "Coding", "type": "coding", "count": 2, "minutes": 20, "cutoff": 0.5},
         ],
     },
     {
         "id": "ltimindtree",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "LTIMindtree",
         "tagline": "7-section, 130 min \u2013 confirmed structure (111 Qs)",
         "logo": "LuLayers",
@@ -360,12 +499,19 @@ COMPANIES: List[Dict[str, Any]] = [
             {"key": "quant", "name": "Quantitative Ability", "type": "mcq", "count": 12, "minutes": 15, "cutoff": 0.5},
             {"key": "programming", "name": "Computer Programming", "type": "pseudocode", "count": 25, "minutes": 35, "cutoff": 0.5},
             {
-                "key": "cs-fundamentals", "name": "Computer Science (DBMS/OOPs/OS)",
+                "key": "cs-fundamentals", "name": "Computer Science (OS/DBMS/OOPS/CN/Architecture)",
                 "type": "mcq", "count": 20, "minutes": 20, "cutoff": 0.5,
+                # Normalized 2026-08-25: cs_fundamentals is now formally the
+                # 5-topic group (OS/DBMS/OOPS/CN/Architecture) in equal ratio
+                # across every company that has this section, not just the
+                # DBMS/OOPS/OS subset this company originally shipped with.
+                # 20/5=4 each (previously dbms:7, oops:7, os:6, no cn/arch).
                 "extra_topics": [
-                    {"key": "dbms", "name": "DBMS", "count": 7},
-                    {"key": "oops", "name": "OOPS", "count": 7},
-                    {"key": "os", "name": "Operating Systems", "count": 6},
+                    {"key": "os", "name": "Operating Systems", "count": 4},
+                    {"key": "dbms", "name": "DBMS", "count": 4},
+                    {"key": "oops", "name": "OOPS", "count": 4},
+                    {"key": "cn", "name": "Computer Networks", "count": 4},
+                    {"key": "architecture", "name": "Computer Architecture", "count": 4},
                 ],
             },
             {
@@ -384,6 +530,8 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "tech-mahindra",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Tech Mahindra",
         "tagline": "4-round OA (170 min) \u2013 elimination gate in R1, voice-based R3",
         "logo": "SiTeamviewer",
@@ -408,7 +556,15 @@ COMPANIES: List[Dict[str, Any]] = [
         ],
         "sections": [
             # --- Round 1: Online Test (60 min, elimination gate) ---
-            {"key": "aptitude", "name": "Logical Ability", "type": "mcq", "count": 12, "minutes": 15, "cutoff": 0.5, "negative": True},
+            # Rekeyed "aptitude" -> "reasoning" (2026-08-18 audit): this
+            # section is named "Logical Ability" and was always intended as
+            # pure reasoning content, but SECTION_KEY_TO_TOPIC matches by KEY
+            # not name -- it had been silently drawing 100% from the
+            # APTITUDE topic pool this whole time, a pre-existing miskey bug
+            # unrelated to (found while investigating) the cross-company
+            # reasoning-blend rule. Tech Mahindra's genuine quant content is
+            # the separate "quant"-keyed section below, untouched.
+            {"key": "reasoning", "name": "Logical Ability", "type": "mcq", "count": 12, "minutes": 15, "cutoff": 0.5, "negative": True},
             {"key": "quant", "name": "Quantitative Ability", "type": "mcq", "count": 12, "minutes": 15, "cutoff": 0.5, "negative": True},
             {"key": "verbal", "name": "English", "type": "mcq", "count": 12, "minutes": 15, "cutoff": 0.5, "negative": True},
             # Confirmed with user 2026-07-21: negative marking kept on R1/R2
@@ -420,15 +576,21 @@ COMPANIES: List[Dict[str, Any]] = [
             # --- Round 2: Technical Test + Personality (90 min) ---
             {"key": "programming", "name": "Computer Programming", "type": "pseudocode", "count": 12, "minutes": 15, "cutoff": 0.5, "negative": True},
             {
-                "key": "cs-fundamentals", "name": "Computer Science (DBMS/OOPS/OS/CN)",
+                "key": "cs-fundamentals", "name": "Computer Science (OS/DBMS/OOPS/CN/Architecture)",
                 "type": "mcq", "count": 12, "minutes": 15, "cutoff": 0.5, "negative": True,
-                # Even 3-way-per-4-topics split -- source gives the 12-question
-                # total and the DBMS/OOPS/OS/CN mix but no finer breakdown.
+                # Normalized 2026-08-25: cs_fundamentals is now formally the
+                # 5-topic group (OS/DBMS/OOPS/CN/Architecture) in equal ratio
+                # across every company that has this section, not just the
+                # DBMS/OOPS/OS/CN subset this company originally shipped with.
+                # 12/5=2 each + 2 remainder to the first two (os, dbms) --
+                # previously an even 3/3/3/3 across just 4 topics, no
+                # architecture.
                 "extra_topics": [
-                    {"key": "dbms", "name": "DBMS", "count": 3},
-                    {"key": "oops", "name": "OOPS", "count": 3},
                     {"key": "os", "name": "Operating Systems", "count": 3},
-                    {"key": "cn", "name": "Computer Networks", "count": 3},
+                    {"key": "dbms", "name": "DBMS", "count": 3},
+                    {"key": "oops", "name": "OOPS", "count": 2},
+                    {"key": "cn", "name": "Computer Networks", "count": 2},
+                    {"key": "architecture", "name": "Computer Architecture", "count": 2},
                 ],
             },
             # Automata Fix minutes: confirmed with user 2026-07-21 as 45 (not
@@ -457,6 +619,8 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "deloitte-usi",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Deloitte USI",
         "tagline": "90 min \u2013 4 sections, heavy CS fundamentals block",
         "logo": "LuBriefcase",
@@ -465,9 +629,32 @@ COMPANIES: List[Dict[str, Any]] = [
         "scoring_mode": "composite",
         "chips": ["4 sections", "30-MCQ CS Fundamentals block", "Networking/Cloud/Security"],
         "sections": [
-            {"key": "aptitude", "name": "Aptitude", "type": "mcq", "count": 8, "minutes": 20, "cutoff": 0.5},
+            {
+                "key": "aptitude", "name": "Aptitude", "type": "mcq", "count": 8, "minutes": 20, "cutoff": 0.5,
+                # No separate Reasoning section anywhere in Deloitte USI's
+                # structure -- blended per the cross-company reasoning-coverage
+                # rule (2026-08-18).
+                "extra_topics": [
+                    {"key": "aptitude", "name": "Aptitude", "count": 2},
+                    {"key": "reasoning", "name": "Reasoning", "count": 6},
+                ],
+            },
             {"key": "verbal", "name": "Verbal", "type": "mcq", "count": 6, "minutes": 15, "cutoff": 0.5},
-            {"key": "cs-fundamentals", "name": "CS Fundamentals (heavy)", "type": "mcq", "count": 12, "minutes": 30, "cutoff": 0.5},
+            {
+                "key": "cs-fundamentals", "name": "CS Fundamentals (heavy: OS/DBMS/OOPS/CN/Architecture)",
+                "type": "mcq", "count": 12, "minutes": 30, "cutoff": 0.5,
+                # Was a bare mcq section (100% live -- see product-general's
+                # note above for the same root cause). cs_fundamentals is now
+                # formally the 5-topic group, 12/5=2 each + 2 remainder to
+                # the first two (os, dbms).
+                "extra_topics": [
+                    {"key": "os", "name": "Operating Systems", "count": 3},
+                    {"key": "dbms", "name": "DBMS", "count": 3},
+                    {"key": "oops", "name": "OOPS", "count": 2},
+                    {"key": "cn", "name": "Computer Networks", "count": 2},
+                    {"key": "architecture", "name": "Computer Architecture", "count": 2},
+                ],
+            },
             {"key": "coding", "name": "Coding", "type": "coding", "count": 1, "minutes": 25, "cutoff": 0.5},
         ],
     },
@@ -479,12 +666,14 @@ COMPANIES: List[Dict[str, Any]] = [
     # ---------------------------------------------------------------------
     {
         "id": "core-default",
+        "department": "cse",
+        "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Core Assessment (Default)",
         "tagline": "General-purpose practice — deliberately harder, broad topic coverage",
         "logo": "LuLayers",
         "verified": False,
         "generic": True,  # UI flag → renders the "general fallback" label
-        "time_minutes": 105,
+        "time_minutes": 109,  # +4 from adding reasoning as an 8th core-fundamentals topic (2026-08-18)
         "scoring_mode": "composite",
         "interview_difficulty": "medium",  # medium-skew DSA in Phase 3
         "chips": ["General practice", "Medium+ difficulty", "MCQ 40% + Coding 60%"],
@@ -492,16 +681,17 @@ COMPANIES: List[Dict[str, Any]] = [
         "sections": [
             {
                 "key": "core-fundamentals",
-                "name": "Core Fundamentals (7-topic MCQ)",
+                "name": "Core Fundamentals (8-topic MCQ)",
                 "type": "topic_mcq",
-                "count": 7,
-                "minutes": 30,
+                "count": 8,
+                "minutes": 34,  # proportional +4 from 30 (30 * 8/7 ≈ 34.3) -- 2026-08-18
                 "cutoff": 0.5,
                 "weight": 0.4,
                 "difficulty_target": "medium_hard",
                 "topics": [
                     {"key": "aptitude",     "name": "Aptitude"},
                     {"key": "verbal",       "name": "Verbal"},
+                    {"key": "reasoning",    "name": "Reasoning"},
                     {"key": "oops",         "name": "OOPS"},
                     {"key": "dbms",         "name": "DBMS"},
                     {"key": "os",           "name": "Operating Systems"},
@@ -537,4 +727,23 @@ def get_company(company_id: str) -> Dict[str, Any] | None:
     for c in COMPANIES:
         if c["id"] == company_id:
             return c
+    return None
+
+
+# Landing-page department navigation. Purely a categorization/navigation
+# layer over COMPANIES (matched via the "department" field on each company
+# dict above) -- not read by any OA/scoring/MCQ logic.
+DEPARTMENTS: List[Dict[str, Any]] = [
+    {"id": "cse", "name": "Computer Science Engineering", "active": True},
+    {"id": "entc", "name": "Electronics and Telecommunication Engineering", "active": False},
+    {"id": "electronics", "name": "Electronics Engineering", "active": False},
+    {"id": "mechanical", "name": "Mechanical Engineering", "active": False},
+    {"id": "civil", "name": "Civil Engineering", "active": False},
+]
+
+
+def get_department(department_id: str) -> Dict[str, Any] | None:
+    for d in DEPARTMENTS:
+        if d["id"] == department_id:
+            return d
     return None

@@ -25,7 +25,7 @@ import requests
 import razorpay
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import (
     FastAPI,
@@ -47,7 +47,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, EmailStr, Field
 import pdfplumber
 
-from companies import COMPANIES, get_company
+from companies import COMPANIES, DEPARTMENTS, get_company, get_department
 from code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
 from problem_bank import sample_problems as _sample_problems
 from ai_service import (
@@ -62,7 +62,6 @@ from ai_service import (
     comm_prompt,
     grammar_prompt,
     comprehension_prompt,
-    cognitive_game_prompt,
     automata_fix_prompt,
     essay_prompt,
     grade_essay_prompt,
@@ -79,10 +78,7 @@ from ai_service import (
 )
 import mcq_pool
 import mcq_static_bank
-import capgemini_challenges
-import cognizant_games
-import accenture_games
-import challenge_repetition
+import gamified_round
 import entitlements
 
 ROOT_DIR = Path(__file__).parent
@@ -595,6 +591,24 @@ async def get_company_detail(company_id: str):
 
 
 # =============================================================================
+#  Departments
+# =============================================================================
+
+@api.get("/departments")
+async def list_departments():
+    return {"departments": DEPARTMENTS}
+
+
+@api.get("/departments/{department_id}/companies")
+async def get_department_companies(department_id: str):
+    dept = get_department(department_id)
+    if not dept:
+        raise HTTPException(404, "Department not found")
+    companies = [c for c in COMPANIES if c.get("department") == department_id]
+    return {"department": dept, "companies": companies}
+
+
+# =============================================================================
 #  Resume checker
 # =============================================================================
 
@@ -829,7 +843,7 @@ async def _generate_topic_mix(company_name: str, count: int, topic_groups: List[
     return all_items[:count]
 
 
-async def _generate_section_questions(company_name: str, section: dict, user_id: str, attempt_id: str) -> List[dict]:
+async def _generate_section_questions(company_name: str, section: dict, user_id: str, attempt_id: str, company_id: Optional[str] = None) -> List[dict]:
     system = "You are an expert Indian tech OA question setter. Return only strict JSON."
     stype = section["type"]
     count = section.get("count", 5)
@@ -902,84 +916,6 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         data = await call_json(system, grammar_prompt(company_name, count, diff))
     elif stype == "comprehension":
         data = await call_json(system, comprehension_prompt(company_name, count, diff))
-    elif stype in ("cognitive_game", "game"):
-        # "game" (IBM) gets the exact same treatment as Accenture's
-        # cognitive_game: the real per-question-timer UI needs style-tagged,
-        # tightly length-limited stems, which only cognitive_game_prompt
-        # produces — game_prompt's plain MCQ shape can't back that UI.
-        # (Capgemini used to share this branch too, before it got its own
-        # capgemini_challenges type below.)
-        data = await call_json(system, cognitive_game_prompt(company_name, count))
-    elif stype == "capgemini_challenges":
-        # Capgemini's own distinct round — fully procedural, zero AI (see
-        # capgemini_challenges.py docstring for why). Non-repetition is
-        # tracked per candidate/category since procedural generation lets us
-        # actually GUARANTEE a fresh variant, unlike LLM content.
-        #
-        # Mid-rebuild: items come back in one of two shapes (see
-        # capgemini_challenges.py's module docstring). Old-shape items mark
-        # one hash under the item's own `style`. New-shape (rebuilt) items
-        # carry a `sub_puzzles` list — each sub-puzzle gets its own
-        # repetition hash (tracked at sub-puzzle granularity, not just
-        # challenge-type granularity, per the rebuild's non-repetition
-        # requirement) AND, where a secret exists (e.g. Grid Challenge's
-        # correct value), gets it persisted via _store_hidden_answer_key
-        # under a composite id ("<challenge_id>_<sub_index>") — never
-        # included in the public payload served to the frontend.
-        section_key = section.get("key") or "cognitive"
-        seen = await challenge_repetition.get_seen_hashes(user_id, section_key)
-        data = capgemini_challenges.generate_capgemini_challenges(count, seen)
-        for item in data:
-            if "sub_puzzles" in item:
-                secrets = item.pop("_secrets", [])
-                hashes = item.pop("_content_hashes", [])
-                for i, h in enumerate(hashes):
-                    if h:
-                        await challenge_repetition.mark_seen(user_id, section_key, item["type"], h)
-                    secret = secrets[i] if i < len(secrets) else None
-                    if secret is not None:
-                        sub_qid = f"{item['id']}_{i}"
-                        await _store_hidden_answer_key(attempt_id, section_key, sub_qid, secret)
-            else:
-                h = item.pop("_content_hash", None)
-                if h:
-                    await challenge_repetition.mark_seen(user_id, section_key, item["style"], h)
-    elif stype == "cognizant_games":
-        # Cognizant's gamified round — bespoke design, fully procedural, zero
-        # AI, built to the same sub-puzzle-set + hidden-secret standard as
-        # capgemini_challenges.py (see cognizant_games.py's module docstring).
-        # Every item is new-shape (sub_puzzles) — no old-shape branching
-        # needed here, unlike Capgemini's mid-rebuild dual-shape handling.
-        section_key = section.get("key") or "gamified"
-        seen = await challenge_repetition.get_seen_hashes(user_id, section_key)
-        data = cognizant_games.generate_cognizant_games(seen)
-        for item in data:
-            secrets = item.pop("_secrets", [])
-            hashes = item.pop("_content_hashes", [])
-            for i, h in enumerate(hashes):
-                if h:
-                    await challenge_repetition.mark_seen(user_id, section_key, item["type"], h)
-                secret = secrets[i] if i < len(secrets) else None
-                if secret is not None:
-                    sub_qid = f"{item['id']}_{i}"
-                    await _store_hidden_answer_key(attempt_id, section_key, sub_qid, secret)
-    elif stype == "accenture_games":
-        # Accenture's gamified round — same bespoke sub-puzzle-set + hidden-
-        # secret architecture as cognizant_games, scoped to 3 always-shown
-        # categories (see accenture_games.py's module docstring).
-        section_key = section.get("key") or "cognitive"
-        seen = await challenge_repetition.get_seen_hashes(user_id, section_key)
-        data = accenture_games.generate_accenture_games(seen)
-        for item in data:
-            secrets = item.pop("_secrets", [])
-            hashes = item.pop("_content_hashes", [])
-            for i, h in enumerate(hashes):
-                if h:
-                    await challenge_repetition.mark_seen(user_id, section_key, item["type"], h)
-                secret = secrets[i] if i < len(secrets) else None
-                if secret is not None:
-                    sub_qid = f"{item['id']}_{i}"
-                    await _store_hidden_answer_key(attempt_id, section_key, sub_qid, secret)
     elif stype == "essay":
         e = essay_prompt(company_name, section_name, target_words=section.get("target_words"))
         data = await call_json(e["system"], e["prompt"])
@@ -1049,6 +985,67 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             if isinstance(q, dict):
                 q["mode"] = "speaking"
         data = listening_items + speaking_items
+    elif stype == "gamified_round":
+        # Registry-driven gamified round (see game_types.py / gamified_round.py).
+        # Unlike every other branch here, content isn't generated by an LLM at
+        # all -- it's sampled from the pre-verified puzzle_bank, already
+        # stripped of correctAnswer server-side (gamified_round.strip_answer).
+        # Real grading happens later against puzzle_bank via
+        # gamified_round.grade_session, keyed by session_id =
+        # f"{attempt_id}_{section_key}" (same convention create_session uses
+        # right below) -- the answer key never touches the attempt doc.
+        # gamified_round_config/puzzle_bank are keyed by the lowercase company
+        # id ("capgemini"), NOT the display name ("Capgemini") that
+        # `company_name` holds everywhere else in this function (used for LLM
+        # prompt text) -- company_id is threaded in separately for this.
+        cid = company_id or company_name
+        config = await gamified_round.get_config(cid)
+        game_types_list = (config.get("gameTypes") if config else None) or ["deductive_grid"]
+        # EVERY game type listed in gameTypes runs in EVERY session -- not a
+        # random pick-1-of-N (that was the old model, replaced 2026-08).
+        # perType holds per-type tunables: subPuzzlesPerGame for the flat-list
+        # types (deductive_grid/switch_challenge), instancesPerGame for
+        # grid_challenge (always 1 -- it's one instance with internal blocks,
+        # not N independent sub-puzzles).
+        per_type_config = (config.get("perType") if config else None) or {}
+
+        # Persist perType tunables (timerPerPuzzle, poolTimerSeconds,
+        # blinkMs/judgmentSeconds, etc.) onto the section itself, so the
+        # SAME GET /oa/{attempt_id} fetch the frontend already makes
+        # carries them down -- no separate config fetch needed. Targeted
+        # update by section key (not the numeric index this function
+        # doesn't have) so it composes safely alongside the caller's own
+        # `sections.{index}.questions` $set on the same array element.
+        # Previously this was fetched here ONLY to size sample_puzzles()
+        # calls and never reached the client at all -- every type's timer
+        # was silently hardcoded client-side regardless of what this
+        # config actually said.
+        await db.oa_attempts.update_one(
+            {"attempt_id": attempt_id, "sections.key": section.get("key")},
+            {"$set": {"sections.$.perTypeConfig": per_type_config}},
+        )
+
+        all_puzzles: List[dict] = []
+        puzzle_ids_by_type: Dict[str, List[str]] = {}
+        for gtype in game_types_list:
+            type_cfg = per_type_config.get(gtype, {})
+            n = type_cfg.get("instancesPerGame") if gtype == "grid_challenge" else type_cfg.get("subPuzzlesPerGame")
+            n = n or count
+            type_puzzles = await gamified_round.sample_puzzles(cid, gtype, user_id, n)
+            # Force id == puzzle_id before the generic id-normalization below
+            # runs (it only fills in q["id"] when missing/non-string) --
+            # otherwise every puzzle would get a synthetic "q1"/"q2" id that
+            # no longer matches the puzzle_id the answers dict (and
+            # grade_session) key on.
+            for p in type_puzzles:
+                p["id"] = p.get("puzzle_id")
+            puzzle_ids_by_type[gtype] = [p["puzzle_id"] for p in type_puzzles if p.get("puzzle_id")]
+            all_puzzles.extend(type_puzzles)
+
+        await gamified_round.create_session(
+            user_id, attempt_id, cid, section.get("key"), puzzle_ids_by_type,
+        )
+        data = all_puzzles
     else:  # mcq / topic_mcq
         skey = section.get("key")
         stype = section.get("type")
@@ -1177,7 +1174,7 @@ _BATCHABLE_TYPES = {"mcq", "topic_mcq", "pseudocode", "comm", "grammar", "compre
 BATCH_SIZE = 5
 
 
-async def _gen_and_persist_section(attempt_id: str, company_name: str, index: int, section: dict, user_id: str):
+async def _gen_and_persist_section(attempt_id: str, company_name: str, index: int, section: dict, user_id: str, company_id: Optional[str] = None):
     """Generate one section's questions and write them back atomically. This
     lets the frontend unlock a section as soon as it's ready \u2014 without waiting
     for the slowest sibling.
@@ -1260,7 +1257,7 @@ async def _gen_and_persist_section(attempt_id: str, company_name: str, index: in
 
     if not batchable:
         try:
-            questions = await _generate_section_questions(company_name, section, user_id, attempt_id)
+            questions = await _generate_section_questions(company_name, section, user_id, attempt_id, company_id=company_id)
         except Exception as e:  # pragma: no cover
             logger.warning("section '%s' failed: %s", section["key"], e)
             questions = []
@@ -1310,7 +1307,7 @@ async def _generate_all_sections_bg(attempt_id: str, company: dict, user_id: str
     import asyncio
     try:
         await asyncio.gather(
-            *[_gen_and_persist_section(attempt_id, company["name"], i, s, user_id)
+            *[_gen_and_persist_section(attempt_id, company["name"], i, s, user_id, company_id=company["id"])
               for i, s in enumerate(company["sections"])],
             return_exceptions=True,
         )
@@ -1436,6 +1433,54 @@ class SubmitSectionIn(BaseModel):
     answers: Dict[str, Any]  # {question_id: answer}
 
 
+class CheckPuzzleIn(BaseModel):
+    section_key: str
+    puzzle_id: str
+    # int for deductive_grid/switch_challenge's single-index answers; a
+    # 2-element list for inductive_challenge's unordered pair-of-indices
+    # answer (see game_types._pair_answer_check) -- both are passed through
+    # untouched to gamified_round.check_answer, which looks up the right
+    # checker per puzzle's gameType rather than assuming a shape here.
+    selected: Optional[Union[int, List[int]]] = None
+    timedOut: bool = False
+    timeTakenMs: Optional[int] = None
+
+
+class GridChallengePhaseIn(BaseModel):
+    section_key: str
+    puzzle_id: str
+    phase: str  # "block{1,2,3}_blink" | "block{1,2,3}_judgments" | "recall_board"
+    blockIndex: Optional[int] = None
+
+
+class GridChallengeAnswerIn(BaseModel):
+    section_key: str
+    puzzle_id: str
+    phase: str  # "judgment" | "recall"
+    blockIndex: Optional[int] = None
+    judgmentIndex: Optional[int] = None
+    answer: Any = None
+    timedOut: bool = False
+    timeTakenMs: Optional[int] = None
+
+
+class MotionChallengeMoveIn(BaseModel):
+    section_key: str
+    puzzle_id: str
+    blockId: Optional[str] = None  # None means "move the ball"
+    direction: str  # "up" | "down" | "left" | "right"
+
+
+class MotionChallengeUndoIn(BaseModel):
+    section_key: str
+    puzzle_id: str
+
+
+class MotionChallengeStateIn(BaseModel):
+    section_key: str
+    puzzle_id: str
+
+
 def _grade_mcq_like(section: dict, answers: Dict[str, Any]) -> dict:
     total = len(section.get("questions", []))
     correct = 0
@@ -1459,127 +1504,76 @@ def _grade_mcq_like(section: dict, answers: Dict[str, Any]) -> dict:
     return {"score": round(score, 3), "correct": correct, "total": total, "passed": passed}
 
 
-def _grade_capgemini_challenges_section(section: dict, answers: Dict[str, Any], attempt: dict) -> dict:
-    """Capgemini's cognitive round mixes old-shape items (not yet rebuilt:
-    inductive/switch/motion/digit — single question, graded like _grade_mcq_like)
-    with new-shape items (rebuilt: deductive/grid — a set of sub-puzzles, each
-    graded by its own type-specific function in capgemini_challenges.py).
-    Score is per-CHALLENGE (e.g. "4 of 5 sub-puzzles solved" collapses to one
-    0.0-1.0 score for that challenge), matching the design's "rolls up into
-    the section's existing weight" requirement — a 5-sub-puzzle challenge
-    counts the same as a 1-question challenge, not 5x as much.
-    """
-    section_key = section.get("key") or "cognitive"
-    items = section.get("questions", [])
-    total = len(items)
-    per_item = []
-    total_score = 0.0
-    for item in items:
-        qid = str(item.get("id"))
-        if "sub_puzzles" in item:
-            sub_puzzles = item["sub_puzzles"]
-            n = len(sub_puzzles) or 1
-            grader = capgemini_challenges.SUBPUZZLE_GRADERS.get(item.get("type"))
-            correct = 0
-            for i, pub in enumerate(sub_puzzles):
-                if grader is None:
-                    continue
-                sub_qid = f"{qid}_{i}"
-                sub_answer = answers.get(sub_qid)
-                secret = _get_hidden_answer_key(attempt, section_key, sub_qid)
-                if grader(pub, secret, sub_answer) >= 1.0:
-                    correct += 1
-            item_score = correct / n
-            per_item.append({
-                "question_id": qid, "type": item.get("type"),
-                "sub_puzzles_correct": correct, "sub_puzzles_total": n,
-                "score": round(item_score, 3),
-            })
+async def _grade_gamified_round_section(section: dict, answers: Dict[str, Any], attempt_id: str) -> dict:
+    """Grades EVERY game type present in this section (a gamified_round
+    section now runs all of a company's configured game types together,
+    not one at a time) and combines them into one section-level result.
+
+    Grades against puzzle_bank's stored correctAnswer via
+    gamified_round.grade_session -- never against anything stored on the
+    attempt doc itself (the served questions had correctAnswer stripped).
+    session_id is recomputed rather than stored, matching create_session's
+    own f"{attempt_id}_{section_key}" convention. `answers` here is keyed by
+    puzzle_id -> {selected, timedOut, timeTakenMs}, produced by
+    DeductiveGridSection/SwitchChallengeSection's onComplete, merged across
+    both by GamifiedRoundSection before this is called.
+
+    grid_challenge and motion_challenge are each dispatched to their own
+    grade_*_session instead -- their whole interaction already happened
+    via live round-trips (/grid-challenge/answer, /motion-challenge/move
+    and /undo) rather than one "answers dict submitted once at the end"
+    the flat-list types use, so both independently re-derive the final
+    score from what's already stored server-side rather than from this
+    function's `answers` param.
+
+    Combined raw_score sums across types even though they use different
+    point ratios (+1/-1, +3/-1, +3/-1, +4/-1) -- it's an informational total, not
+    what decides pass/fail; score/passed use plain correct/total across
+    every sub-answer from every type, same convention every other section
+    type in this app already uses."""
+    session_id = f"{attempt_id}_{section['key']}"
+    questions = section.get("questions") or []
+    types_present = sorted({q.get("gameType") for q in questions if q.get("gameType")})
+
+    combined_raw_score = 0
+    combined_correct = 0
+    combined_incorrect = 0
+    combined_total = 0
+    combined_items = []
+
+    for gtype in types_present:
+        if gtype == "grid_challenge":
+            result = await gamified_round.grade_grid_challenge_session(session_id)
+        elif gtype == "motion_challenge":
+            result = await gamified_round.grade_motion_challenge_session(session_id)
         else:
-            correct_index = item.get("correct_index")
-            raw_user = answers.get(qid)
-            try:
-                user_index = int(raw_user) if raw_user is not None and raw_user != "" else None
-            except Exception:
-                user_index = None
-            item_score = 1.0 if (user_index is not None and user_index == correct_index) else 0.0
-            per_item.append({"question_id": qid, "type": item.get("style"), "score": item_score})
-        total_score += item_score
-    score = (total_score / total) if total else 0
-    passed = score >= section.get("cutoff", 0.5)
-    return {"score": round(score, 3), "items": per_item, "total": total, "passed": passed}
+            result = await gamified_round.grade_session(session_id, gtype, answers)
+        combined_raw_score += result.get("raw_score") or 0
+        combined_correct += result.get("correct") or 0
+        combined_incorrect += result.get("incorrect") or 0
+        combined_total += result.get("total") or 0
+        for item in result.get("items", []):
+            combined_items.append({**item, "gameType": gtype})
 
-
-def _grade_cognizant_games_section(section: dict, answers: Dict[str, Any], attempt: dict) -> dict:
-    """Mirrors _grade_capgemini_challenges_section exactly (same sub-puzzle-set
-    architecture): every item carries `sub_puzzles`, each graded by its own
-    type-specific function in cognizant_games.py, reading the hidden secret
-    (if any) back via _get_hidden_answer_key. Score is per-CHALLENGE (fraction
-    of its sub-puzzles solved), not per-sub-puzzle, so a 4-sub-puzzle
-    challenge counts the same as any other single item in the section."""
-    section_key = section.get("key") or "gamified"
-    items = section.get("questions", [])
-    total = len(items)
-    per_item = []
-    total_score = 0.0
-    for item in items:
-        qid = str(item.get("id"))
-        sub_puzzles = item.get("sub_puzzles", [])
-        n = len(sub_puzzles) or 1
-        grader = cognizant_games.SUBPUZZLE_GRADERS.get(item.get("type"))
-        correct = 0
-        for i, pub in enumerate(sub_puzzles):
-            if grader is None:
-                continue
-            sub_qid = f"{qid}_{i}"
-            sub_answer = answers.get(sub_qid)
-            secret = _get_hidden_answer_key(attempt, section_key, sub_qid)
-            if grader(pub, secret, sub_answer) >= 1.0:
-                correct += 1
-        item_score = correct / n
-        per_item.append({
-            "question_id": qid, "type": item.get("type"),
-            "sub_puzzles_correct": correct, "sub_puzzles_total": n,
-            "score": round(item_score, 3),
-        })
-        total_score += item_score
-    score = (total_score / total) if total else 0
-    passed = score >= section.get("cutoff", 0.5)
-    return {"score": round(score, 3), "items": per_item, "total": total, "passed": passed}
-
-
-def _grade_accenture_games_section(section: dict, answers: Dict[str, Any], attempt: dict) -> dict:
-    """Mirrors _grade_cognizant_games_section exactly (same sub-puzzle-set
-    architecture, scoped to accenture_games.py's 3 categories)."""
-    section_key = section.get("key") or "cognitive"
-    items = section.get("questions", [])
-    total = len(items)
-    per_item = []
-    total_score = 0.0
-    for item in items:
-        qid = str(item.get("id"))
-        sub_puzzles = item.get("sub_puzzles", [])
-        n = len(sub_puzzles) or 1
-        grader = accenture_games.SUBPUZZLE_GRADERS.get(item.get("type"))
-        correct = 0
-        for i, pub in enumerate(sub_puzzles):
-            if grader is None:
-                continue
-            sub_qid = f"{qid}_{i}"
-            sub_answer = answers.get(sub_qid)
-            secret = _get_hidden_answer_key(attempt, section_key, sub_qid)
-            if grader(pub, secret, sub_answer) >= 1.0:
-                correct += 1
-        item_score = correct / n
-        per_item.append({
-            "question_id": qid, "type": item.get("type"),
-            "sub_puzzles_correct": correct, "sub_puzzles_total": n,
-            "score": round(item_score, 3),
-        })
-        total_score += item_score
-    score = (total_score / total) if total else 0
-    passed = score >= section.get("cutoff", 0.5)
-    return {"score": round(score, 3), "items": per_item, "total": total, "passed": passed}
+    score = (combined_correct / combined_total) if combined_total else 0
+    result_out = {
+        "score": round(score, 3),
+        "correct": combined_correct,
+        "incorrect": combined_incorrect,
+        "total": combined_total,
+        "raw_score": combined_raw_score,
+        "passed": score >= section.get("cutoff", 0.5),
+        "items": combined_items,
+    }
+    await db.game_session.update_one(
+        {"session_id": session_id},
+        {"$set": {
+            "raw_score": combined_raw_score, "correct": combined_correct,
+            "incorrect": combined_incorrect, "total": combined_total,
+            "graded_at": iso(now_utc()),
+        }},
+    )
+    return result_out
 
 
 async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
@@ -1842,6 +1836,142 @@ async def oa_transcribe(
     return {"transcript": transcript}
 
 
+@api.post("/oa/{attempt_id}/section/check")
+async def check_puzzle_answer(attempt_id: str, body: CheckPuzzleIn, user: Dict[str, Any] = Depends(require_user)):
+    """Live, per-puzzle feedback for gamified_round sections DURING play
+    (the running-score bar) -- NOT the final grade. Ownership-checked the
+    same way submit_section is; the actual grading/scoring lookup lives in
+    gamified_round.check_answer, which never returns correctAnswer, only
+    {correct, pointsAwarded, runningScore}. submit_section's grade_session
+    call remains the sole source of truth for pass/fail -- this endpoint
+    never writes anything grade_session reads."""
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Not found")
+    section = next((s for s in attempt["sections"] if s["key"] == body.section_key), None)
+    if not section or section["type"] != "gamified_round":
+        raise HTTPException(404, "Section not found")
+    return await gamified_round.check_answer(
+        attempt_id, body.section_key, body.puzzle_id, body.selected, body.timedOut, body.timeTakenMs,
+    )
+
+
+@api.post("/oa/{attempt_id}/section/grid-challenge/phase")
+async def grid_challenge_phase(attempt_id: str, body: GridChallengePhaseIn, user: Dict[str, Any] = Depends(require_user)):
+    """Phase-gated content reveal for grid_challenge -- ownership-checked
+    the same way check_puzzle_answer is, but the actual sequencing
+    enforcement (block N unreachable until block N-1 is fully answered)
+    lives in gamified_round.get_grid_challenge_phase, checked against
+    game_session state server-side. A PermissionError there means the
+    gate genuinely rejected the request (mapped to HTTP 403) -- not a
+    convention the frontend is trusted to honor on its own."""
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Not found")
+    section = next((s for s in attempt["sections"] if s["key"] == body.section_key), None)
+    if not section or section["type"] != "gamified_round":
+        raise HTTPException(404, "Section not found")
+    try:
+        return await gamified_round.get_grid_challenge_phase(
+            attempt_id, body.section_key, body.puzzle_id, body.phase, body.blockIndex,
+        )
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@api.post("/oa/{attempt_id}/section/grid-challenge/answer")
+async def grid_challenge_answer(attempt_id: str, body: GridChallengeAnswerIn, user: Dict[str, Any] = Depends(require_user)):
+    """Live per-sub-answer feedback for grid_challenge (7 judgments + a
+    3-position recall) -- same never-leak-the-answer discipline as
+    check_puzzle_answer, dispatched through phase_check (not answer_check)
+    since one grid_challenge puzzle has multiple gradable sub-answers.
+    Final pass/fail still comes from submit_section ->
+    _grade_gamified_round_section -> grade_grid_challenge_session, which
+    independently re-derives everything and never trusts this endpoint's
+    own running tally."""
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Not found")
+    section = next((s for s in attempt["sections"] if s["key"] == body.section_key), None)
+    if not section or section["type"] != "gamified_round":
+        raise HTTPException(404, "Section not found")
+    return await gamified_round.check_grid_challenge_answer(
+        attempt_id, body.section_key, body.puzzle_id, body.phase,
+        body.blockIndex, body.judgmentIndex, body.answer, body.timeTakenMs, body.timedOut,
+    )
+
+
+@api.post("/oa/{attempt_id}/section/motion-challenge/move")
+async def motion_challenge_move_route(attempt_id: str, body: MotionChallengeMoveIn, user: Dict[str, Any] = Depends(require_user)):
+    """Server-authoritative per-move validation for motion_challenge --
+    ownership-checked the same way check_puzzle_answer/grid_challenge_phase
+    are. Unlike grid_challenge's progressive reveal, nothing here is
+    secret; the whole board is visible from move one. What's enforced
+    server-side is state mutation: gamified_round.motion_challenge_move
+    replays the FULL stored move history from the puzzle's own initial
+    board on every call, never trusting a client-claimed "current board",
+    and rejects moves against a level that's already won or already lost
+    (budget exhausted) rather than letting the client re-trigger them. A
+    PermissionError there means this puzzle_id was never served to this
+    session (mapped to HTTP 403) -- a real ownership rejection, not a
+    normal "wrong move" response (those come back as a normal 200 with
+    valid=False)."""
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Not found")
+    section = next((s for s in attempt["sections"] if s["key"] == body.section_key), None)
+    if not section or section["type"] != "gamified_round":
+        raise HTTPException(404, "Section not found")
+    try:
+        return await gamified_round.motion_challenge_move(
+            attempt_id, body.section_key, body.puzzle_id, body.blockId, body.direction,
+        )
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+@api.post("/oa/{attempt_id}/section/motion-challenge/undo")
+async def motion_challenge_undo_route(attempt_id: str, body: MotionChallengeUndoIn, user: Dict[str, Any] = Depends(require_user)):
+    """Pops the last move from server-held history -- free to perform,
+    doesn't refund a budget move (see gamified_round.motion_challenge_undo
+    for why that requires no special bookkeeping). Same ownership check as
+    the move route above; rejected the same way (403) if this puzzle_id
+    was never served to this session."""
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Not found")
+    section = next((s for s in attempt["sections"] if s["key"] == body.section_key), None)
+    if not section or section["type"] != "gamified_round":
+        raise HTTPException(404, "Section not found")
+    try:
+        return await gamified_round.motion_challenge_undo(attempt_id, body.section_key, body.puzzle_id)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+@api.post("/oa/{attempt_id}/section/motion-challenge/state")
+async def motion_challenge_state_route(attempt_id: str, body: MotionChallengeStateIn, user: Dict[str, Any] = Depends(require_user)):
+    """Read-only current-state fetch -- never mutates anything, safe to
+    call any number of times. Lets the frontend sync to the real
+    server-held state whenever a level is (re-)entered, instead of
+    assuming it always starts fresh -- added after Step 4/5 verification
+    surfaced a real bug: the frontend was unconditionally resetting to
+    the puzzle's pristine starting board on every mount, silently
+    diverging from whatever move history the server already had."""
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Not found")
+    section = next((s for s in attempt["sections"] if s["key"] == body.section_key), None)
+    if not section or section["type"] != "gamified_round":
+        raise HTTPException(404, "Section not found")
+    try:
+        return await gamified_round.motion_challenge_state(attempt_id, body.section_key, body.puzzle_id)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
 @api.post("/oa/{attempt_id}/section")
 async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str, Any] = Depends(require_user)):
     attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
@@ -1864,13 +1994,9 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
         result = await _grade_comm_mixed_section(section, body.answers)
     elif stype == "voice_mixed":
         result = await _grade_voice_mixed_section(section, body.answers)
-    elif stype == "cognizant_games":
-        result = _grade_cognizant_games_section(section, body.answers, attempt)
-    elif stype == "accenture_games":
-        result = _grade_accenture_games_section(section, body.answers, attempt)
-    elif stype == "capgemini_challenges":
-        result = _grade_capgemini_challenges_section(section, body.answers, attempt)
-    else:  # mcq / topic_mcq / pseudocode / comm / game / cognitive_game / grammar / comprehension
+    elif stype == "gamified_round":
+        result = await _grade_gamified_round_section(section, body.answers, attempt_id)
+    else:  # mcq / topic_mcq / pseudocode / comm / grammar / comprehension
         result = _grade_mcq_like(section, body.answers)
 
     # Persist
@@ -2555,18 +2681,20 @@ async def _startup():
     # Wire mcq_pool with our db handle and kick off the singleton background
     # worker that keeps the pre-verified MCQ pool topped up.
     mcq_pool.init(db)
-    challenge_repetition.init(db)
     mcq_static_bank.init(db)
+    gamified_round.init(db)
     try:
         await db.mcq_pool.create_index([("company_name", 1), ("section_key", 1), ("verified", 1)])
         await db.mcq_pool_stats.create_index([("company_name", 1), ("section_key", 1)], unique=True)
         await db.review_deck.create_index([("user_id", 1), ("added_at", -1)])
         await db.review_deck.create_index([("user_id", 1), ("source_attempt_id", 1), ("section_key", 1), ("question_id", 1)], unique=True)
-        await db.seen_challenges.create_index(
-            [("user_id", 1), ("section_key", 1), ("category", 1), ("content_hash", 1)], unique=True,
-        )
         await db.mcq_static_bank.create_index([("topic", 1), ("question_id", 1)], unique=True)
         await db.mcq_static_bank_seen.create_index([("user_id", 1), ("topic", 1)], unique=True)
+        await db.gamified_round_config.create_index([("company", 1)], unique=True)
+        await db.puzzle_bank.create_index([("gameType", 1), ("puzzle_id", 1)], unique=True)
+        await db.puzzle_bank.create_index([("gameType", 1), ("companyTags", 1)])
+        await db.game_session.create_index([("session_id", 1)], unique=True)
+        await db.game_session.create_index([("user_id", 1), ("gameType", 1)])
     except Exception as e:  # pragma: no cover
         logger.warning("mcq_pool index create failed: %s", e)
     mcq_pool.start_worker(COMPANIES)

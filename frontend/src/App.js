@@ -10,6 +10,7 @@ import Signup from "@/pages/Signup";
 import AuthCallback from "@/pages/AuthCallback";
 import Dashboard from "@/pages/Dashboard";
 import CompanyDetail from "@/pages/CompanyDetail";
+import DepartmentCompanies from "@/pages/DepartmentCompanies";
 import OARunner from "@/pages/OARunner";
 import OAReview from "@/pages/OAReview";
 import ReviewDeck from "@/pages/ReviewDeck";
@@ -21,6 +22,11 @@ import ResetPassword from "@/pages/ResetPassword";
 import VerifyEmail from "@/pages/VerifyEmail";
 import { PrivacyPolicy, TermsOfService, RefundPolicy, CookiePolicy, About } from "@/pages/Legal";
 import DevChartPreview from "@/pages/DevChartPreview";
+import DevGamePreview from "@/pages/DevGamePreview";
+import DevSwitchChallengePreview from "@/pages/DevSwitchChallengePreview";
+import DevGridChallengePreview from "@/pages/DevGridChallengePreview";
+import DevInductiveChallengePreview from "@/pages/DevInductiveChallengePreview";
+import DevMotionChallengePreview from "@/pages/DevMotionChallengePreview";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -51,6 +57,7 @@ function AppRouter() {
       <Route path="/legal/cookies" element={<CookiePolicy />} />
       <Route path="/legal/about" element={<About />} />
       <Route path="/company/:companyId" element={<CompanyDetail />} />
+      <Route path="/departments/:departmentId" element={<DepartmentCompanies />} />
       <Route path="/oa/:attemptId" element={<Protected><OARunner /></Protected>} />
       <Route path="/attempt/:attemptId/review" element={<Protected><OAReview /></Protected>} />
       <Route path="/deck" element={<Protected><ReviewDeck /></Protected>} />
@@ -58,6 +65,12 @@ function AppRouter() {
       <Route path="/attempt/:attemptId/report" element={<Protected><FinalReport /></Protected>} />
       {/* Standing dev tool — DI chart question visual check, not gated behind auth */}
       <Route path="/dev/chart-preview" element={<DevChartPreview />} />
+      {/* Standing dev tool — gamified-round component visual check, not gated behind auth */}
+      <Route path="/dev/game-preview" element={<DevGamePreview />} />
+      <Route path="/dev/switch-preview" element={<DevSwitchChallengePreview />} />
+      <Route path="/dev/grid-challenge-preview" element={<DevGridChallengePreview />} />
+      <Route path="/dev/inductive-preview" element={<DevInductiveChallengePreview />} />
+      <Route path="/dev/motion-challenge-preview" element={<DevMotionChallengePreview />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
