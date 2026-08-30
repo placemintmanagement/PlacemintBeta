@@ -27,9 +27,22 @@ import DevSwitchChallengePreview from "@/pages/DevSwitchChallengePreview";
 import DevGridChallengePreview from "@/pages/DevGridChallengePreview";
 import DevInductiveChallengePreview from "@/pages/DevInductiveChallengePreview";
 import DevMotionChallengePreview from "@/pages/DevMotionChallengePreview";
+import DevAuth0Preview from "@/pages/DevAuth0Preview";
+import Auth0ProviderWithNavigate from "@/auth/Auth0ProviderWithNavigate";
+import Auth0TokenSync from "@/auth/Auth0TokenSync";
+
+// TEST-ONLY (2026-08, Playwright E2E click-through testing). Read once, at
+// module load -- process.env.REACT_APP_TEST_AUTH_TOKEN is a CRA build-time
+// constant (inlined by webpack), never a runtime-mutable value, so this is
+// safe to hoist out of the component. A real production build (built
+// without this var set, which it never is -- see api.js's matching
+// bypass for the full reasoning) has this as `undefined`, making the
+// branch below dead code in any real deployment.
+const _TEST_AUTH_BYPASS_ACTIVE = Boolean(process.env.REACT_APP_TEST_AUTH_TOKEN);
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
+  if (_TEST_AUTH_BYPASS_ACTIVE) return children;
   if (loading) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
   return children;
@@ -71,6 +84,8 @@ function AppRouter() {
       <Route path="/dev/grid-challenge-preview" element={<DevGridChallengePreview />} />
       <Route path="/dev/inductive-preview" element={<DevInductiveChallengePreview />} />
       <Route path="/dev/motion-challenge-preview" element={<DevMotionChallengePreview />} />
+      {/* Standing dev tool — Auth0 login/logout/ProtectedRoute preview, not wired into any live route yet */}
+      <Route path="/dev/auth0-preview" element={<DevAuth0Preview />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -80,9 +95,12 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AppRouter />
-        <OnboardingModal />
-        <Toaster position="top-right" richColors closeButton />
+        <Auth0ProviderWithNavigate>
+          <Auth0TokenSync />
+          <AppRouter />
+          <OnboardingModal />
+          <Toaster position="top-right" richColors closeButton />
+        </Auth0ProviderWithNavigate>
       </BrowserRouter>
     </AuthProvider>
   );

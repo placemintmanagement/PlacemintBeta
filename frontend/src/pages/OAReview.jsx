@@ -20,6 +20,19 @@ export default function OAReview() {
 
   if (!review) return <div><Header /><div className="p-10 text-center">Loading review…</div></div>;
 
+  if (review.available === false) {
+    return (
+      <div>
+        <Header />
+        <div className="p-10 text-center">
+          <div className="font-display text-xl font-bold mb-2">Review isn't ready yet</div>
+          <div className="text-pm-text2 mb-6">Finish every section of the OA to unlock your full review and answer key.</div>
+          <Link to={`/oa/${attemptId}`} className="pm-btn pm-btn-primary">Back to OA</Link>
+        </div>
+      </div>
+    );
+  }
+
   const verdictColor = review.verdict === "clear" ? "text-pm-primary-dark" : review.verdict === "borderline" ? "text-pm-secondary" : "text-red-600";
   const verdictText = review.verdict === "clear" ? "You'd likely clear this."
     : review.verdict === "borderline" ? "You're borderline — fixable."

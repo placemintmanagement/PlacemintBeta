@@ -43,12 +43,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from ai_service import (
+from services.ai_service import (
     call_json, HAIKU, SONNET,
     mcq_prompt, topic_mcq_prompt, aptitude_topic_mix_prompt,
     solver_prompt, explanation_prompt,
 )
-from code_runner import run_code
+from services.code_runner import run_code
 
 logger = logging.getLogger(__name__)
 

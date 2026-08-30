@@ -40,8 +40,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-import game_types
-import motion_challenge
+from . import game_types
+from . import motion_challenge
 
 _db = None  # set by init(db)
 

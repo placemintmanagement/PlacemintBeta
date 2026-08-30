@@ -20,10 +20,16 @@ from typing import List, Dict, Any
 # game_session (MongoDB). Capgemini, Cognizant, Accenture, and IBM each have
 # a "gamified_round" section below (type: "gamified_round"), currently
 # serving the one registered game type, deductive_grid.
+#
+# NOTE: All companies are currently classified under Group 1 (IT Services &
+# Mass Recruiters). The "group1_..." folder naming under departments/ is
+# intentional future-proofing for when Group 2 (product/tech MNCs) is
+# actually added -- it is not a bug or leftover from an earlier assumption.
 
 COMPANIES: List[Dict[str, Any]] = [
     {
         "id": "tcs-nqt",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "TCS NQT",
@@ -80,6 +86,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "infosys",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.infosys.infosys_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Infosys",
@@ -121,6 +128,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "wipro",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.wipro.wipro_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Wipro Elite NTH",
@@ -166,6 +174,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "cognizant",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.cognizant.cognizant_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Cognizant GenC",
@@ -224,6 +233,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "accenture",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.accenture.accenture_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Accenture",
@@ -253,6 +263,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "product-general",
+        "module_path": None,  # no dedicated department/group/company folder for this generic entry
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Product Company (Generic)",
@@ -296,6 +307,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "microsoft-swe",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.microsoft.microsoft_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Microsoft SWE",
@@ -336,6 +348,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "ibm",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.ibm.ibm_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "IBM",
@@ -370,6 +383,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "zoho",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.zoho.zoho_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Zoho",
@@ -391,23 +405,63 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "capgemini",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini.capgemini_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Capgemini",
-        "tagline": "Round 1: Tech MCQ+Pseudo \u2192 Essay \u2192 Game \u2192 Behavioral \u00b7 Round 2: Coding",
+        # Renamed (2026-08, Round 1 Communication Assessment wiring): the OLD
+        # "Round 1"/"Round 2" numbering shifted up by one to make room for the
+        # NEW Communication Assessment as the real Round 1 -- confirmed safe
+        # via a repo-wide grep for "Round 1"/"Round 2"/"R1a".."R1d"/"R2:"
+        # before renaming: these strings are display-only prose (tagline/
+        # chips/section `name`), nothing in frontend or backend LOGIC keys
+        # off them (only `section["key"]` values like "technical"/"essay"
+        # matter programmatically, and those are UNCHANGED here).
+        "tagline": "Round 1: Communication Assessment \u2192 Round 2: Tech MCQ+Pseudo \u2192 Essay \u2192 Game \u2192 Behavioral \u00b7 Round 3: Coding",
         "logo": "SiCapgemini",
         "verified": True,
-        "time_minutes": 169,
+        "time_minutes": 229,  # 169 (pre-existing, already ~10min off the
+                               # section sum before this change -- not
+                               # reconciled here, out of scope) + 60 for the
+                               # new Round 1 section
         "scoring_mode": "sectional",
-        "chips": ["Round 1: OA (4 sections)", "Round 2: 2 DSA Coding", "Behavioral (unscored)"],
+        "chips": ["Round 1: Communication Assessment", "Round 2: OA (4 sections)", "Round 3: 2 DSA Coding", "Behavioral (unscored)"],
         "sections": [
-            # ROUND 1: Online Assessment (4 sections, in order)
+            # ROUND 1 (NEW, 2026-08): Communication Assessment -- ONE section
+            # covering 4 heterogeneous sub-parts (grammar_correction /
+            # business_writing / situational_response / reading_comprehension)
+            # sharing a SINGLE 60-minute timer, not four separate per-section
+            # timers. This codebase's timer model is strictly per-section
+            # (OARunner.jsx: remaining = currentSection.minutes*60 - elapsed,
+            # reset per section) with no shared-pool mechanism across section
+            # entries -- confirmed by inspecting Accenture's comm_mixed, the
+            # only existing analog for "one time budget across sub-parts",
+            # which achieves this the same way: ONE section entry, not many.
+            # Content is drawn (not LLM-generated) from capgemini_round1_bank
+            # via draw_section1-4_questions (server.py's "capgemini_round1"
+            # dispatch branch); each item is tagged `part` so the frontend
+            # can switch rendering, same convention as comm_mixed's `mode`.
+            # No pass/fail gate to the sections below -- scored normally
+            # (default cutoff/weight) but progression is unconditional
+            # regardless of score, same as every other section in this list;
+            # no ROUND1_PASS_THRESHOLD-style config introduced since no real
+            # threshold has been confirmed (simpler to add one later than
+            # carry a dead config flag now).
+            {
+                "key": "round1_communication",
+                "name": "Round 1: Communication Assessment",
+                "type": "capgemini_round1",
+                "count": 28,  # 10 grammar + 2 business_writing + 6 situational + 4 reading_comp + 4 listening_comp + 2 spoken_sim
+                "minutes": 60,
+                "cutoff": 0.5,
+            },
+            # ROUND 2: Online Assessment (4 sections, in order) -- formerly "Round 1"
             {
                 "key": "technical",
-                "name": "R1a: Technical MCQs + Pseudocode",
+                "name": "R2a: Technical MCQs + Pseudocode",
                 "type": "pseudocode",
                 "count": 40,
-                "pseudocode_count": 16,  # untouched pseudocode call's own count \u2014 NOT resized
+                "pseudocode_count": 16,  # untouched pseudocode call's own count -- NOT resized
                                          # by the section's total `count` above (see
                                          # server.py's pseudocode dispatch for how these
                                          # two interact)
@@ -420,24 +474,25 @@ COMPANIES: List[Dict[str, Any]] = [
                     {"key": "cn", "name": "Computer Networks", "count": 6},
                 ],
             },
-            {"key": "essay", "name": "R1b: Essay Writing", "type": "essay", "count": 1, "minutes": 25, "cutoff": 0.5},
-            # R1c: Game Based Cognitive Test — registry-driven (see
+            {"key": "essay", "name": "R2b: Essay Writing", "type": "essay", "count": 1, "minutes": 25, "cutoff": 0.5},
+            # R2c: Game Based Cognitive Test -- registry-driven (see
             # game_types.py / gamified_round.py), replaces the deleted
             # capgemini_challenges.py.
             # Runs all 5 registered game types every session; minutes below
             # sized (2026-08-18) for the realistic 5-type total (~11:19 raw).
-            {"key": "cognitive", "name": "R1c: Game Based Cognitive Test", "type": "gamified_round", "count": 5, "minutes": 14, "cutoff": 0.5},
+            {"key": "cognitive", "name": "R2c: Game Based Cognitive Test", "type": "gamified_round", "count": 5, "minutes": 14, "cutoff": 0.5},
             # NEW (2026-07-19): never built before, based on newly confirmed research.
-            # Unscored, same pattern as Accenture/Core Assessment's Behavioral sections \u2014
+            # Unscored, same pattern as Accenture/Core Assessment's Behavioral sections --
             # weight: 0.0 is what actually excludes it from the composite (cutoff alone
             # does not; see Accenture's weight fix for why that distinction matters).
-            {"key": "behavioral", "name": "R1d: Behavioral / PowerSkills (unscored)", "type": "mcq", "count": 5, "minutes": 20, "cutoff": 0.0, "weight": 0.0},
-            # ROUND 2: Coding Round
-            {"key": "coding", "name": "R2: Coding Round (2 DSA Problems)", "type": "coding", "count": 2, "minutes": 60, "cutoff": 0.5},
+            {"key": "behavioral", "name": "R2d: Behavioral / PowerSkills (unscored)", "type": "mcq", "count": 5, "minutes": 20, "cutoff": 0.0, "weight": 0.0},
+            # ROUND 3: Coding Round -- formerly "Round 2"
+            {"key": "coding", "name": "R3: Coding Round (2 DSA Problems)", "type": "coding", "count": 2, "minutes": 60, "cutoff": 0.5},
         ],
     },
     {
         "id": "hcltech",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.hcltech.hcltech_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "HCLTech",
@@ -483,6 +538,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "ltimindtree",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.ltimindtree.ltimindtree_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "LTIMindtree",
@@ -530,6 +586,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "tech-mahindra",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.tech_mahindra.tech_mahindra_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Tech Mahindra",
@@ -619,6 +676,7 @@ COMPANIES: List[Dict[str, Any]] = [
     },
     {
         "id": "deloitte-usi",
+        "module_path": "departments.computer_science_and_it.group1_it_services_mass_recruiters.deloitte_usi.deloitte_usi_recruitment_process",
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Deloitte USI",
@@ -666,6 +724,7 @@ COMPANIES: List[Dict[str, Any]] = [
     # ---------------------------------------------------------------------
     {
         "id": "core-default",
+        "module_path": None,  # no dedicated department/group/company folder for this generic entry
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "Core Assessment (Default)",

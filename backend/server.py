@@ -41,6 +41,7 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -48,9 +49,9 @@ from pydantic import BaseModel, EmailStr, Field
 import pdfplumber
 
 from companies import COMPANIES, DEPARTMENTS, get_company, get_department
-from code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
-from problem_bank import sample_problems as _sample_problems
-from ai_service import (
+from services.code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
+from banks.problem_bank import sample_problems as _sample_problems
+from services.ai_service import (
     call_json,
     call_json_gpt,
     call_text,
@@ -75,11 +76,22 @@ from ai_service import (
     grade_answer_prompt,
     final_report_prompt,
     INTERVIEW_SYSTEM,
+    GRADING_INJECTION_DEFENSE,
+    flag_suspicious_grading,
 )
-import mcq_pool
-import mcq_static_bank
-import gamified_round
-import entitlements
+from banks import mcq_pool
+from banks import mcq_static_bank
+from games import gamified_round
+from core import entitlements
+from core import auth0_middleware
+# Merged (2026-08 restructure) from capgemini_round1_section1..4.py into one
+# per-company module -- see that file's own docstring for the symbol-rename
+# collision list. Call sites below (capgemini_round1_section1.draw_section1_
+# questions(...) etc.) were updated to capgemini_recruitment_process.<name>
+# accordingly; the function names themselves are unchanged.
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini import (
+    capgemini_recruitment_process,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -139,6 +151,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static media (2026-08) -- no asset-storage convention existed anywhere in
+# this codebase before Capgemini Round 1 Section 5 (listening_comprehension)
+# needed to serve real audio files; this is that new pattern, flagged
+# explicitly per the audio-generation task's own instructions. Plain local
+# disk under backend/media/, served directly by FastAPI's StaticFiles --
+# deliberately the simplest thing that works today, not a CDN/object-store
+# integration (no credentials for one exist in this codebase, and inventing
+# a new external dependency wasn't asked for). Mounted at app-level "/media"
+# (NOT under the "/api" prefix "api" uses below) -- matches the audio_url
+# values already written onto capgemini_round1_bank docs
+# (e.g. "/media/capgemini_round1_audio/<clip_id>.wav") exactly as stored.
+MEDIA_DIR = os.path.join(ROOT_DIR, "media")
+os.makedirs(MEDIA_DIR, exist_ok=True)
+app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+
 # ---- Utilities --------------------------------------------------------------
 
 def now_utc() -> datetime:
@@ -173,55 +200,129 @@ def make_jwt(user_id: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
-def decode_jwt(token: str) -> Optional[str]:
-    try:
-        data = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
-        return data.get("sub")
-    except Exception:
-        return None
-
-
 # ---- Auth dependency --------------------------------------------------------
+# Auth0-only (2026-08, replacing the old dual-path require_user_any). The
+# app's own session-cookie/JWT auth check (get_current_user/decode_jwt/the
+# old require_user) was REMOVED here -- confirmed via a repo-wide search
+# that nothing else calls them (only require_user_any depended on them, and
+# require_user_any itself had no other callers either). An independent
+# audit confirmed zero real user accounts exist in db.users yet (all 23
+# were test/seed data), so there was no live-migration risk in dropping the
+# fallback rather than carrying it as dead weight.
+#
+# NOTE -- real consequence, not just an internal cleanup: /auth/signup,
+# /auth/login, /auth/google/session, and /auth/logout are UNTOUCHED (they're
+# a separate concern -- account creation / session issuance, not route
+# gating) and still create accounts and set session cookies exactly as
+# before. But since NOTHING reads that cookie/JWT anymore, those flows are
+# now functionally dead ends for reaching any Depends(require_user) route --
+# including /auth/me, which the frontend's OWN AuthProvider polls to
+# determine login state. The frontend's Protected/useAuth() (App.js) was
+# NOT updated to use Auth0 in this pass (out of scope here) -- so a user who
+# logs in via the app's own /login page will still see protected pages
+# render client-side, but every API call they make will now 401.
+# ---- Test-only auth bypass (2026-08, E2E click-through testing) -----------
+# Exists so a scripted Playwright run can authenticate as a designated
+# synthetic user WITHOUT a real Auth0 login (no test Auth0 tenant/user
+# credentials exist in this repo, and minting a token that would pass real
+# Auth0 JWT verification is not possible from our backend at all -- Auth0
+# signs with a private key only Auth0 holds; RS256 is asymmetric). This is
+# NOT a weakening of auth0_middleware's real verification -- that module is
+# completely unmodified. It's ONE extra early-exit branch here, in
+# server.py's own require_user, that:
+#   1. Only runs its check at all when os.environ.get("ENVIRONMENT") == "test"
+#      -- re-read fresh on every request, never cached -- which is never set
+#      by any real deployment (this repo has no ENVIRONMENT var today at
+#      all; introduced solely for this gate). A production .env/deployment
+#      config that never sets this is safe by simple omission, not by
+#      remembering to disable something.
+#   2. EVEN THEN, requires the caller to also present TEST_AUTH_TOKEN (a
+#      second, separate, random secret -- generated locally, gitignored,
+#      never a JWT, never known to or issued by Auth0) as the literal Bearer
+#      value, compared via hmac.compare_digest (constant-time, avoids a
+#      timing side-channel on the comparison itself).
+#   3. Falls through to the REAL, unmodified auth0_middleware.get_current_user
+#      check in EVERY other case -- including when ENVIRONMENT=="test" but
+#      the token isn't the exact test secret, so a genuine Auth0 token still
+#      authenticates normally even inside a test-mode process.
+# Net effect: a real user's Auth0 token takes the identical code path, with
+# identical verification, in every environment. Only a caller who both (a)
+# is talking to a process explicitly started with ENVIRONMENT=test AND
+# (b) knows TEST_AUTH_TOKEN can ever reach this branch's success case.
+_TEST_BYPASS_USER_SUB = "test-bypass|e2e-runner"
 
-async def get_current_user(
-    session_token: Optional[str] = Cookie(default=None),
+
+def _test_bypass_active() -> bool:
+    return os.environ.get("ENVIRONMENT") == "test"
+
+
+if _test_bypass_active():
+    logger.warning("=" * 70)
+    logger.warning("AUTH0 TEST BYPASS IS ACTIVE (ENVIRONMENT=test).")
+    logger.warning("This must NEVER be set in a production deployment.")
+    logger.warning("=" * 70)
+
+
+async def _resolve_auth0_sub(authorization: Optional[str]) -> str:
+    if _test_bypass_active():
+        test_token = os.environ.get("TEST_AUTH_TOKEN", "")
+        if (
+            test_token
+            and authorization
+            and authorization.lower().startswith("bearer ")
+            and hmac.compare_digest(authorization.split(" ", 1)[1].strip(), test_token)
+        ):
+            return _TEST_BYPASS_USER_SUB
+    # Real, unmodified Auth0 verification -- same function, same behavior,
+    # called directly instead of via Depends() so this can conditionally
+    # short-circuit above it; auth0_middleware.get_current_user itself is
+    # untouched and raises its own 401 on any failure, exactly as before.
+    return await auth0_middleware.get_current_user(authorization)
+
+
+async def require_user(
     authorization: Optional[str] = Header(default=None),
-) -> Optional[Dict[str, Any]]:
-    """Returns the current user document (with _id excluded) or None."""
-    token: Optional[str] = None
-    if session_token:
-        token = session_token
-    elif authorization and authorization.lower().startswith("bearer "):
+) -> Dict[str, Any]:
+    """Verifies the Auth0 access token (via _resolve_auth0_sub above, which
+    is real Auth0 verification in every case except the explicit,
+    doubly-gated test bypass -- see that function's docstring), then looks
+    up or auto-provisions the corresponding user document.
+
+    /userinfo is only ever called on first-seen sub (existing users skip
+    it entirely -- no extra network call on every request). A /userinfo
+    failure never blocks provisioning: logs a warning and proceeds with an
+    empty email, per spec.
+
+    Email collision handling: if /userinfo DOES return an email, and that
+    email already belongs to a different (pre-Auth0) user record, this
+    does NOT merge or overwrite -- _create_user_record's auth0_sub lookup
+    means a genuinely new document gets created for this sub regardless
+    (there's no unique index on users.email, so this can't fail at the DB
+    level either) -- but the collision is logged explicitly as a WARNING so
+    it's visible rather than silently creating two accounts for one real
+    person. Deliberately not resolved automatically -- flagged for an
+    explicit decision, per spec."""
+    auth0_sub = await _resolve_auth0_sub(authorization)
+    existing = await db.users.find_one({"auth0_sub": auth0_sub}, {"_id": 0})
+    if existing:
+        return existing
+
+    email = ""
+    if authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
-    if not token:
-        return None
+        email = await auth0_middleware.get_userinfo_email(token) or ""
 
-    # 1) Emergent OAuth session token \u2192 stored in user_sessions
-    sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
-    if sess:
-        expires_at = sess.get("expires_at")
-        if isinstance(expires_at, str):
-            expires_at = datetime.fromisoformat(expires_at)
-        if expires_at is not None:
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at < now_utc():
-                return None
-        user = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
-        return user
+    if email:
+        collision = await db.users.find_one({"email": email}, {"_id": 0})
+        if collision:
+            logger.warning(
+                "Auth0 email collision on first-seen provisioning: sub=%s email=%s "
+                "already belongs to user_id=%s (auth_provider=%s) -- creating a "
+                "SEPARATE Auth0-keyed record, NOT merging.",
+                auth0_sub, email, collision.get("user_id"), collision.get("auth_provider"),
+            )
 
-    # 2) JWT (email/password login)
-    user_id = decode_jwt(token)
-    if user_id:
-        user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
-        return user
-    return None
-
-
-async def require_user(user: Optional[Dict[str, Any]] = Depends(get_current_user)) -> Dict[str, Any]:
-    if not user:
-        raise HTTPException(401, "Not authenticated")
-    return user
+    return await _create_user_record(email=email, name="Auth0 User", auth_provider="auth0", auth0_sub=auth0_sub)
 
 
 # =============================================================================
@@ -245,8 +346,19 @@ async def _create_user_record(
     picture: str = "",
     password_hash: Optional[str] = None,
     auth_provider: str = "password",
+    auth0_sub: Optional[str] = None,
 ) -> Dict[str, Any]:
-    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    """auth0_sub (2026-08, Auth0 JWT verification middleware): Auth0 access
+    tokens for a custom API audience carry `sub` but typically no email
+    claim, so Auth0-provisioned users can't be deduped by email like every
+    other auth_provider here. When auth0_sub is given, lookup/dedup happens
+    on that field instead — email may legitimately be empty for these
+    users. The internal `user_id` stays a normal new_id("user") either way
+    (not the raw sub), so every existing foreign-key relationship
+    (oa_attempts.user_id, etc.) keeps its established id shape."""
+    existing = await db.users.find_one(
+        {"auth0_sub": auth0_sub} if auth0_sub else {"email": email}, {"_id": 0},
+    )
     if existing:
         # Owner-bypass emails always run on the unlimited "founder" plan even if
         # they signed up before being whitelisted.
@@ -286,6 +398,8 @@ async def _create_user_record(
     }
     if password_hash:
         doc["password_hash"] = password_hash
+    if auth0_sub:
+        doc["auth0_sub"] = auth0_sub
     await db.users.insert_one(doc)
     doc.pop("_id", None)
     return doc
@@ -639,11 +753,12 @@ async def analyze_resume(
     if not resume_text.strip():
         raise HTTPException(400, "PDF appears to be empty or is a scanned image (no text layer).")
 
-    system = "You are a senior tech recruiter. Return only strict JSON."
+    system = "You are a senior tech recruiter. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE
     prompt = resume_prompt(company["name"], role, resume_text)
     result = await call_json(system, prompt, model=SONNET)
     if not isinstance(result, dict):
         result = {"strengths": [], "weaknesses": [], "extracted_projects": [], "fit_score": 50, "verdict": "Analysis unavailable."}
+    result = _attach_grading_flag(result, score_key="fit_score")
 
     resume_id = new_id("resume")
     doc = {
@@ -1046,6 +1161,91 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             user_id, attempt_id, cid, section.get("key"), puzzle_ids_by_type,
         )
         data = all_puzzles
+    elif stype == "capgemini_round1":
+        # Capgemini Round 1: Communication Assessment -- ONE section
+        # covering 6 heterogeneous sub-parts sharing a single 60-minute
+        # timer (see companies.py's section-entry comment for why this is
+        # one section, not six). Content is DRAWN from capgemini_round1_
+        # bank, not LLM-generated -- each draw_sectionN_questions call is
+        # called with strip=False so the FULL doc (including correct_option/
+        # rubric) gets persisted into oa_attempts; stripping for the client
+        # happens once, at get_oa response time
+        # (_strip_answer_fields_for_response's "capgemini_round1" branch
+        # below), matching the "store full, strip at response" pattern the
+        # rest of this codebase already uses. Each item is tagged `part` so
+        # the frontend can switch rendering, same convention as comm_mixed's
+        # `mode`. `id` is force-set to each item's natural id field BEFORE
+        # the generic id-normalization at the bottom of this function runs
+        # (same reason gamified_round does `p["id"] = p.get("puzzle_id")`
+        # above) -- otherwise reading_comp's passage-level items especially
+        # would get overwritten with synthetic q1/q2 ids that don't match
+        # anything downstream.
+        grammar_pool = await db.capgemini_round1_bank.find(
+            {"section": "grammar_correction"}, {"_id": 0},
+        ).to_list(None)
+        business_pool = await db.capgemini_round1_bank.find(
+            {"section": "business_writing"}, {"_id": 0},
+        ).to_list(None)
+        situational_pool = await db.capgemini_round1_bank.find(
+            {"section": "situational_response"}, {"_id": 0},
+        ).to_list(None)
+        reading_pool = await db.capgemini_round1_bank.find(
+            {"section": "reading_comprehension"}, {"_id": 0},
+        ).to_list(None)
+        # Section 5 (listening_comprehension) -- wired 2026-08, after Groq
+        # TTS generation. ONLY clips with tts_status == "generated" are ever
+        # fetched here -- a clip with no real audio yet must never reach a
+        # candidate, regardless of how complete its script/question content
+        # is (draw_section5_questions also independently re-filters on this,
+        # so this is belt-and-suspenders, not the only guard). As of this
+        # wiring, 5/22 clips are generated (Groq's free-tier daily token
+        # quota was exhausted mid-batch on the rest); draw_section5_questions
+        # still reliably reaches its fixed 4-question target from those 5 --
+        # confirmed via 300 real draws against this exact pool before wiring,
+        # 0 failures -- so this is safe to ship now rather than waiting for
+        # every clip to finish generating.
+        listening_pool = await db.capgemini_round1_bank.find(
+            {"section": "listening_comprehension", "tts_status": "generated"}, {"_id": 0},
+        ).to_list(None)
+        # Section 6 (spoken_simulation) -- wired 2026-08. Single query for
+        # both item_types (draw_section6_questions splits by item_type
+        # itself, same "hand it the whole pool" contract every other
+        # draw_sectionN_questions here uses). No tts_status-style readiness
+        # gate needed here -- unlike Section 5's audio CLIPS, these items are
+        # TEXT the candidate reads/responds to; the candidate's own spoken
+        # response is what gets recorded, not something pre-generated that
+        # could be "not ready yet".
+        spoken_pool = await db.capgemini_round1_bank.find(
+            {"section": "spoken_simulation"}, {"_id": 0},
+        ).to_list(None)
+
+        grammar_items = capgemini_recruitment_process.draw_section1_questions(grammar_pool, strip=False)
+        business_items = capgemini_recruitment_process.draw_section2_questions(business_pool, strip=False)
+        situational_items = capgemini_recruitment_process.draw_section3_questions(situational_pool, strip=False)
+        reading_items = capgemini_recruitment_process.draw_section4_questions(reading_pool)
+        listening_items = capgemini_recruitment_process.draw_section5_questions(listening_pool, strip=False)
+        spoken_items = capgemini_recruitment_process.draw_section6_questions(spoken_pool, strip=False)
+
+        for q in grammar_items:
+            q["part"] = "grammar"
+            q["id"] = q["question_id"]
+        for q in business_items:
+            q["part"] = "business_writing"
+            q["id"] = q["scenario_id"]
+        for q in situational_items:
+            q["part"] = "situational"
+            q["id"] = q["question_id"]
+        for p in reading_items:
+            p["part"] = "reading_comp"
+            p["id"] = p["passage_id"]
+        for c in listening_items:
+            c["part"] = "listening_comp"
+            c["id"] = c["clip_id"]
+        for it in spoken_items:
+            it["part"] = "spoken_sim"
+            it["id"] = it["item_id"]
+
+        data = grammar_items + business_items + situational_items + reading_items + listening_items + spoken_items
     else:  # mcq / topic_mcq
         skey = section.get("key")
         stype = section.get("type")
@@ -1414,6 +1614,153 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
     return attempt
 
 
+# Response-shape fix (2026-08, security audit): get_oa's Mongo projection
+# previously excluded ONLY `_id` and `_hidden_answer_keys`, so every plain
+# MCQ-shaped question's correct_index/explanation passed straight through
+# into the live, in-progress HTTP response — unlike gamified_round content,
+# which is pre-stripped via puzzle_bank sampling (gamified_round.
+# strip_answer) before it's ever persisted. Confirmed via audit that
+# mcq/topic_mcq/pseudocode/comm/grammar/comprehension sections, plus
+# comm_mixed/voice_mixed's "mcq"-mode items, all carried this exposure;
+# submit_section (re-derives from its own separate unfiltered find_one) and
+# gamified_round were already clean.
+#
+# WHITELIST, not gamified_round.strip_answer()'s blacklist: these MCQ docs
+# carry internal-only fields (correct_index, explanation, topic, difficulty,
+# ground_truth_source, verified_by, source_batch, date_added) that have no
+# reason to reach the live client at all. The kept fields were verified
+# against OARunner.jsx's actual reads (MCQSection, ChartQuestion,
+# CommMixedSection/SpeakingAnswerCard) — not guessed — so this can't
+# silently drop something the frontend needs to render the question.
+#
+# Deliberately response-only: the stored oa_attempts document is untouched,
+# so submit_section's server-side re-derivation keeps reading
+# q.get("correct_index") from its own full find_one exactly as before.
+# oa_review and the review-deck endpoints are POST-completion study
+# features that intentionally reveal answers — not touched here. (Separate,
+# pre-existing gap noted but NOT fixed in this pass, per its
+# response-shape-only scope: oa_review's answer_key is built from every
+# section's stored questions regardless of whether that section has
+# actually been submitted yet, since it never checks section_results/
+# attempt["status"] before building each section's entry — so a candidate
+# could in principle call GET /oa/{id}/review early and see correct_index
+# for sections they haven't answered. That's a gating/flow issue, not a
+# response-shape one, so it's flagged for separate follow-up rather than
+# folded into this fix.)
+_MCQ_ANSWER_BEARING_TYPES = {"mcq", "topic_mcq", "pseudocode", "comm", "grammar", "comprehension"}
+_MIXED_MODE_TYPES = {"comm_mixed", "voice_mixed"}
+_MCQ_CLIENT_SAFE_FIELDS = ("id", "prompt", "options", "chart", "svg_diagram")
+_MCQ_MODE_CLIENT_SAFE_FIELDS = ("id", "mode", "prompt", "options")
+_SPEAKING_MODE_CLIENT_SAFE_FIELDS = ("id", "mode", "topic", "instructions", "min_words", "max_words")
+
+# Capgemini Round 1's six sub-parts, keyed by the `part` tag set in
+# _generate_section_questions's "capgemini_round1" branch -- each part has
+# its own field shape (grammar/situational are plain MCQ, business_writing
+# is free-text with no answer field at all, reading_comp nests sub-questions
+# under a passage). Deliberately NOT reusing capgemini_recruitment_process's
+# own _strip_grammar_for_client/_strip_business_writing_for_client/
+# _strip_situational_for_client helpers here: those return question_id/
+# scenario_id as the id field (their own module's contract), but this
+# app's response shape needs `id` uniformly (matching every other section
+# type's answers[q.id] convention on the frontend) -- the persisted docs
+# keep BOTH the original id field and a copied `id` field (see the
+# generation branch), so this whitelists straight to `id`.
+# "part" is included in every one of these whitelists (2026-08 fix, found by
+# a real Playwright click-through, not caught by earlier data-shape-only
+# verification): Round1CommunicationSection.jsx routes ALL SIX parts by
+# checking `q.part` client-side (`qs.filter(q => q.part === "grammar")`
+# etc.) -- omitting it here meant the client never received the one field
+# it needed to render ANY part at all, so the whole section silently
+# rendered empty (no error, no "empty" message, since section.questions
+# itself wasn't empty -- only every per-part filter was). Not
+# answer-revealing: it's a category tag, same class of field as the
+# already-whitelisted passage_type/clip_type.
+_R1_GRAMMAR_FIELDS = ("id", "part", "prompt", "options")
+_R1_SITUATIONAL_FIELDS = ("id", "part", "scenario_prompt", "options")
+_R1_BUSINESS_WRITING_FIELDS = ("id", "part", "context", "recipient_type", "tone_expected")
+_R1_READING_COMP_PASSAGE_FIELDS = ("id", "part", "passage_text", "passage_type")
+_R1_READING_COMP_SUBQ_FIELDS = ("question_id", "prompt", "question_focus", "options")
+# Section 5 (listening_comprehension) -- added 2026-08, code-wiring pass.
+# `id` (not `clip_id`) matches every other part's own id-field convention
+# above; `script` is deliberately excluded from the top-level whitelist --
+# same reasoning as correct_option/rubric elsewhere: showing the transcript
+# would let a candidate read instead of listen, defeating the section's
+# purpose. Nested SUBQ fields mirror _R1_READING_COMP_SUBQ_FIELDS exactly
+# (question_id is required so the frontend has a key to submit each
+# sub-question's answer under -- omitting it, as an earlier draft of this
+# whitelist did, would silently break answer submission for every listening
+# item). NOT yet reachable in practice: server.py's capgemini_round1
+# generation branch does not fetch a listening pool or tag any item
+# part="listening_comp" yet (see that section of this file) -- this case
+# exists so the whitelist is ready the moment that wiring lands, without
+# ever having shipped an un-whitelisted "unknown part" gap in between.
+_R1_LISTENING_CLIP_FIELDS = ("id", "part", "clip_type", "speaker_count", "audio_url", "estimated_duration_seconds")
+_R1_LISTENING_SUBQ_FIELDS = ("question_id", "prompt", "question_focus", "options")
+# Section 6 (spoken_simulation) -- added 2026-08, code-wiring pass. `id`
+# (not `item_id`) matches every other part's own id-field convention above.
+# read_aloud shows passage_text (not answer-revealing -- the candidate must
+# read it aloud to be graded, unlike an MCQ answer key); respond_to_prompt
+# excludes `rubric` (grading-internal, same no-rubric-shown precedent as
+# business_writing). Both parts share one whitelist tuple since neither
+# field set is ever answer-revealing for spoken_sim's own item_type -- the
+# unused key (passage_text for a respond_to_prompt doc, scenario for a
+# read_aloud doc) is simply absent from that item's stored fields, so the
+# `if k in q` guard drops it naturally rather than needing a per-type branch
+# the way the module-internal _strip_spoken_sim_for_client does.
+_R1_SPOKEN_SIM_FIELDS = ("id", "part", "item_type", "passage_text", "scenario", "estimated_duration_seconds")
+
+
+def _strip_capgemini_round1_question(q: Dict[str, Any]) -> Dict[str, Any]:
+    part = q.get("part")
+    if part == "grammar":
+        return {k: q[k] for k in _R1_GRAMMAR_FIELDS if k in q}
+    if part == "situational":
+        return {k: q[k] for k in _R1_SITUATIONAL_FIELDS if k in q}
+    if part == "business_writing":
+        return {k: q[k] for k in _R1_BUSINESS_WRITING_FIELDS if k in q}
+    if part == "reading_comp":
+        item = {k: q[k] for k in _R1_READING_COMP_PASSAGE_FIELDS if k in q}
+        item["questions"] = [
+            {k: sub[k] for k in _R1_READING_COMP_SUBQ_FIELDS if k in sub}
+            for sub in (q.get("questions") or [])
+        ]
+        return item
+    if part == "listening_comp":
+        item = {k: q[k] for k in _R1_LISTENING_CLIP_FIELDS if k in q}
+        item["questions"] = [
+            {k: sub[k] for k in _R1_LISTENING_SUBQ_FIELDS if k in sub}
+            for sub in (q.get("questions") or [])
+        ]
+        return item
+    if part == "spoken_sim":
+        return {k: q[k] for k in _R1_SPOKEN_SIM_FIELDS if k in q}
+    # Unknown/missing part tag -- fail closed (empty dict) rather than risk
+    # passing an un-whitelisted question through with its answer intact.
+    return {}
+
+
+def _strip_answer_fields_for_response(sections: List[dict]) -> List[dict]:
+    out = []
+    for s in sections:
+        stype = s.get("type")
+        questions = s.get("questions") or []
+        if stype in _MCQ_ANSWER_BEARING_TYPES:
+            new_questions = [{k: q[k] for k in _MCQ_CLIENT_SAFE_FIELDS if k in q} for q in questions]
+            out.append({**s, "questions": new_questions})
+        elif stype in _MIXED_MODE_TYPES:
+            new_questions = []
+            for q in questions:
+                fields = _SPEAKING_MODE_CLIENT_SAFE_FIELDS if q.get("mode") == "speaking" else _MCQ_MODE_CLIENT_SAFE_FIELDS
+                new_questions.append({k: q[k] for k in fields if k in q})
+            out.append({**s, "questions": new_questions})
+        elif stype == "capgemini_round1":
+            new_questions = [_strip_capgemini_round1_question(q) for q in questions]
+            out.append({**s, "questions": new_questions})
+        else:
+            out.append(s)
+    return out
+
+
 @api.get("/oa/{attempt_id}")
 async def get_oa(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
     # _hidden_answer_keys never goes to the client — it's where puzzle types
@@ -1425,6 +1772,7 @@ async def get_oa(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
     )
     if not doc:
         raise HTTPException(404, "Not found")
+    doc["sections"] = _strip_answer_fields_for_response(doc.get("sections", []))
     return doc
 
 
@@ -1606,9 +1954,10 @@ async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
         pct = (tests_pass / tests_total) if tests_total else 0
         # AI grade for note
         note = await call_json_gpt(
-            "You are a coding interviewer. Return only strict JSON.",
+            "You are a coding interviewer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
             grade_coding_prompt(p, code, language, vpass, vtotal, hpass, htotal),
         ) or {"score": int(pct * 100), "complexity_note": "", "correctness_note": "", "style_note": ""}
+        note = _attach_grading_flag(note)
         per_problem.append({
             "problem_id": pid,
             "title": p.get("title"),
@@ -1627,6 +1976,136 @@ async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
     }
 
 
+async def _grade_capgemini_round1_section(section: dict, answers: Dict[str, Any]) -> dict:
+    """Grades all 6 sub-parts of Capgemini's Round 1 Communication
+    Assessment together (one section, see companies.py's single-timer
+    reasoning). Reads correct_option/rubric straight off `section` -- the
+    FULL, unstripped document submit_section already fetched via its own
+    plain find_one (never the get_oa-stripped shape) -- so this is
+    server-side re-derivation, same principle as every other grader here;
+    the client-submitted `answers` dict is only ever compared against, never
+    trusted as the source of truth.
+
+    business_writing grading is a genuine async LLM call
+    (grade_business_writing_submission), AWAITED HERE SYNCHRONOUSLY within
+    this same request -- mirroring _grade_essay_section/_grade_speaking_
+    section's existing pattern exactly (no background job queue anywhere in
+    this codebase; essay/speaking already block the HTTP response on their
+    LLM grading call, so this doesn't introduce a new async model). This
+    matters for /review's completion gate: because grading fully resolves
+    (to "graded" or "grading_failed") before this function returns, and
+    submit_section persists section_results / advances current_section_index
+    only AFTER this returns, there's no window where attempt["status"] can
+    flip to "completed" while a business_writing scenario is still
+    "grading_pending" -- confirmed by test, not assumed (see
+    test_capgemini_round1_e2e.py).
+
+    Each of the 28 drawn items (10 grammar + 6 situational + 4 reading_comp
+    sub-questions + 2 business_writing + 4 listening_comp sub-questions + 2
+    spoken_sim) contributes one 0.0-1.0 score to the section average: binary
+    correct/incorrect for the MCQ-shaped parts, scaled_score/100 for
+    business_writing/spoken_sim (continuous, same convention
+    _grade_essay_section/_grade_speaking_section already use for LLM-scored
+    0-100 items -- spoken_sim's read_aloud items are scaled_score/100 too,
+    even though that score comes from deterministic WER banding rather than
+    an LLM call).
+
+    "listening_comp" re-derives correctness for each clip's nested
+    sub-questions the exact same way "reading_comp" does (question_focus/
+    subquestion nesting is structurally identical between the two banks).
+
+    "spoken_sim" (added 2026-08, follow-up wiring pass) grades the
+    candidate's Whisper transcript (submitted via the existing generic
+    POST /oa/{attempt_id}/transcribe endpoint, then passed through
+    submit_section's normal answers dict exactly like an essay/speaking
+    answer) against the FULL stored item -- read_aloud via deterministic WER
+    (grade_read_aloud_response, no LLM call), respond_to_prompt via the
+    rubric-LLM pipeline reused from business_writing
+    (grade_respond_to_prompt_submission)."""
+    per_item_scores: List[float] = []
+    breakdown: Dict[str, Any] = {
+        "grammar": [], "situational": [], "reading_comp": [], "business_writing": [], "listening_comp": [],
+        "spoken_sim": [],
+    }
+
+    for q in section.get("questions", []):
+        part = q.get("part")
+        qid = str(q.get("id"))
+
+        if part == "grammar" or part == "situational":
+            submitted = answers.get(qid)
+            correct = submitted is not None and str(submitted) == q.get("correct_option")
+            per_item_scores.append(1.0 if correct else 0.0)
+            breakdown[part].append({"id": qid, "submitted": submitted, "correct": correct})
+
+        elif part == "reading_comp" or part == "listening_comp":
+            for subq in q.get("questions", []) or []:
+                sub_qid = str(subq.get("question_id"))
+                submitted = answers.get(sub_qid)
+                correct = submitted is not None and str(submitted) == subq.get("correct_option")
+                per_item_scores.append(1.0 if correct else 0.0)
+                breakdown[part].append({"id": sub_qid, "submitted": submitted, "correct": correct})
+
+        elif part == "business_writing":
+            email_text = answers.get(qid, "") or ""
+            grading = await capgemini_recruitment_process.grade_business_writing_submission(q, email_text)
+            per_item_scores.append((grading.get("scaled_score", 0) or 0) / 100.0)
+            breakdown["business_writing"].append({"id": qid, **grading})
+
+        elif part == "spoken_sim":
+            # `answers[qid]` is the transcript text the frontend already
+            # produced via POST /oa/{attempt_id}/transcribe (the existing
+            # generic Groq-Whisper endpoint -- see its own docstring; it
+            # never branches by section type, so nothing there needed to
+            # change for this section) and submitted exactly like an essay/
+            # speaking answer, keyed by question id. The transcript is never
+            # trusted as ground truth beyond being the thing to grade --
+            # read_aloud compares it against `q["passage_text"]` (the FULL,
+            # unstripped doc this function already has, same re-derivation
+            # principle as every other part here), respond_to_prompt grades
+            # it against `q["rubric"]`.
+            transcript = answers.get(qid, "") or ""
+            item_type = q.get("item_type")
+            if item_type == "read_aloud":
+                grading = capgemini_recruitment_process.grade_read_aloud_response(q, transcript)
+            else:
+                grading = await capgemini_recruitment_process.grade_respond_to_prompt_submission(q, transcript)
+            per_item_scores.append((grading.get("scaled_score", 0) or 0) / 100.0)
+            breakdown["spoken_sim"].append({"id": qid, "item_type": item_type, **grading})
+
+    total = len(per_item_scores)
+    score = (sum(per_item_scores) / total) if total else 0.0
+    return {
+        "score": round(score, 3),
+        "total": total,
+        "breakdown": breakdown,
+        "passed": score >= section.get("cutoff", 0.5),
+    }
+
+
+def _attach_grading_flag(result: Dict[str, Any], max_score: float = 100, score_key: str = "score") -> Dict[str, Any]:
+    """Adds `flagged_for_review`/`flag_reason` (advisory only -- never
+    alters `result[score_key]`) to any LLM grading result shaped like
+    {score, ...free-text fields...} -- essay/speaking's {strengths,
+    weaknesses, rewrite_suggestion}, coding's {complexity_note,
+    correctness_note, style_note}, interview's {signals_hit, missed,
+    one_line_verdict}, or resume analysis's {strengths, weaknesses,
+    verdict} (pass score_key="fit_score" there). See
+    ai_service.flag_suspicious_grading for the heuristic itself."""
+    text_fields: List[str] = []
+    for k, v in result.items():
+        if k == score_key:
+            continue
+        if isinstance(v, str):
+            text_fields.append(v)
+        elif isinstance(v, list):
+            text_fields.extend(x for x in v if isinstance(x, str))
+    reason = flag_suspicious_grading([(result.get(score_key, 0) or 0, max_score)], text_fields)
+    result["flagged_for_review"] = reason is not None
+    result["flag_reason"] = reason
+    return result
+
+
 async def _grade_essay_section(section: dict, answers: Dict[str, Any]) -> dict:
     prompts = section.get("questions", [])
     graded = []
@@ -1638,9 +2117,10 @@ async def _grade_essay_section(section: dict, answers: Dict[str, Any]) -> dict:
         max_w = int(p.get("max_words", 300))
         topic = p.get("topic", "Essay")
         result = await call_json_gpt(
-            "You are a strict essay evaluator. Return only strict JSON.",
+            "You are a strict essay evaluator. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
             grade_essay_prompt(topic, answer_text, min_w, max_w),
         ) or {"score": 0, "strengths": [], "weaknesses": [], "rewrite_suggestion": ""}
+        result = _attach_grading_flag(result)
         graded.append({"prompt_id": qid, "topic": topic, **result})
         total += (result.get("score", 0) or 0) / 100.0
     n = max(1, len(prompts))
@@ -1663,9 +2143,10 @@ async def _grade_speaking_section(section: dict, answers: Dict[str, Any]) -> dic
         max_w = int(p.get("max_words", 170))
         topic = p.get("topic", "Speaking")
         result = await call_json_gpt(
-            "You are a fair, encouraging spoken-English evaluator. Return only strict JSON.",
+            "You are a fair, encouraging spoken-English evaluator. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
             grade_spoken_response_prompt(topic, transcript, min_w, max_w),
         ) or {"score": 0, "strengths": [], "weaknesses": [], "rewrite_suggestion": ""}
+        result = _attach_grading_flag(result)
         graded.append({"prompt_id": qid, "topic": topic, **result})
         total += (result.get("score", 0) or 0) / 100.0
     n = max(1, len(prompts))
@@ -1693,11 +2174,15 @@ async def _grade_comm_mixed_section(section: dict, answers: Dict[str, Any]) -> d
             max_w = int(q.get("max_words", 170))
             topic = q.get("topic", "Speaking")
             result = await call_json_gpt(
-                "You are a fair, encouraging spoken-English evaluator. Return only strict JSON.",
+                "You are a fair, encouraging spoken-English evaluator. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
                 grade_spoken_response_prompt(topic, transcript, min_w, max_w),
             ) or {"score": 0}
+            result = _attach_grading_flag(result)
             item_score = (result.get("score", 0) or 0) / 100.0
-            per_item.append({"question_id": qid, "mode": mode, "score": round(item_score, 3)})
+            per_item.append({
+                "question_id": qid, "mode": mode, "score": round(item_score, 3),
+                "flagged_for_review": result["flagged_for_review"], "flag_reason": result["flag_reason"],
+            })
         else:
             raw_user = answers.get(qid)
             try:
@@ -1758,17 +2243,20 @@ async def _grade_voice_mixed_section(section: dict, answers: Dict[str, Any]) -> 
             max_w = int(q.get("max_words", 170))
             topic = q.get("topic", "Speaking")
             result = await call_json_gpt(
-                "You are a fair, encouraging spoken-English evaluator. Return only strict JSON.",
+                "You are a fair, encouraging spoken-English evaluator. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
                 grade_spoken_response_prompt(topic, transcript, min_w, max_w),
             ) or {"score": 0}
+            result = _attach_grading_flag(result)
             item_score = (result.get("score", 0) or 0) / 100.0
+            flag_info = {"flagged_for_review": result["flagged_for_review"], "flag_reason": result["flag_reason"]}
         else:
             reference = q.get("text", "") or ""
             transcript = answers.get(qid, "") or ""
             item_score = difflib.SequenceMatcher(
                 None, _normalize_for_similarity(reference), _normalize_for_similarity(transcript),
             ).ratio()
-        per_item.append({"question_id": qid, "mode": mode, "score": round(item_score, 3)})
+            flag_info = {}
+        per_item.append({"question_id": qid, "mode": mode, "score": round(item_score, 3), **flag_info})
         total_score += item_score
     score = (total_score / total) if total else 0
     passed = score >= section.get("cutoff", 0.5)
@@ -1996,6 +2484,8 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
         result = await _grade_voice_mixed_section(section, body.answers)
     elif stype == "gamified_round":
         result = await _grade_gamified_round_section(section, body.answers, attempt_id)
+    elif stype == "capgemini_round1":
+        result = await _grade_capgemini_round1_section(section, body.answers)
     else:  # mcq / topic_mcq / pseudocode / comm / grammar / comprehension
         result = _grade_mcq_like(section, body.answers)
 
@@ -2027,6 +2517,20 @@ async def oa_review(attempt_id: str, user: Dict[str, Any] = Depends(require_user
     attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
     if not attempt:
         raise HTTPException(404, "Not found")
+
+    # Gating fix (2026-08, security audit follow-up): review used to build
+    # and return the full answer_key regardless of completion — a candidate
+    # could call this mid-attempt and see correct_index for sections not yet
+    # submitted. Reuses submit_section's EXACT completion signal
+    # (attempt["status"] == "completed", flipped there once
+    # current_section_index >= total sections) rather than inventing a new
+    # per-section check — this is a whole-attempt gate, not a rolling
+    # per-section reveal: some-but-not-all sections submitted is treated
+    # identically to none submitted. Short-circuits before any
+    # composite/verdict/answer_key computation, so no question, answer, or
+    # score content of any kind is included in the "not yet" response.
+    if attempt.get("status") != "completed":
+        return {"available": False, "reason": "oa_incomplete", "attempt_id": attempt_id}
 
     section_results = attempt.get("section_results", {})
     scoring_mode = attempt.get("scoring_mode", "composite")
@@ -2130,6 +2634,7 @@ async def oa_review(attempt_id: str, user: Dict[str, Any] = Depends(require_user
             })
 
     return {
+        "available": True,
         "attempt_id": attempt_id,
         "company_name": attempt["company_name"],
         "scoring_mode": scoring_mode,
@@ -2388,9 +2893,10 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
         raise HTTPException(404, "Question not found")
 
     grade = await call_json(
-        "You grade interview answers as an experienced engineer. Return only strict JSON.",
+        "You grade interview answers as an experienced engineer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
         grade_answer_prompt(question, body.answer),
     ) or {"score": 0, "signals_hit": [], "missed": [], "follow_up": None, "one_line_verdict": ""}
+    grade = _attach_grading_flag(grade)
 
     entry = {"question_id": body.question_id, "answer": body.answer, "grade": grade}
     answers = interview.get("answers", [])

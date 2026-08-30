@@ -10,6 +10,8 @@ import SwitchChallengeSection from "../components/games/SwitchChallengeSection";
 import GridChallengeSection from "../components/games/GridChallengeSection";
 import InductiveChallengeSection from "../components/games/InductiveChallengeSection";
 import MotionChallengeSection from "../components/games/MotionChallengeSection";
+import Round1CommunicationSection from "../components/capgemini/Round1CommunicationSection";
+import { useMicRecorder } from "../hooks/useMicRecorder";
 import { TID } from "../testIds";
 import { Clock, Play, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
 
@@ -246,6 +248,8 @@ export default function OARunner() {
           <VoiceMixedSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
         ) : currentSection.type === "gamified_round" ? (
           <GamifiedRoundSection attemptId={attemptId} section={currentSection} onComplete={submitGamifiedRoundAnswers} />
+        ) : currentSection.type === "capgemini_round1" ? (
+          <Round1CommunicationSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
         ) : (
           <MCQSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
         )}
@@ -450,54 +454,10 @@ function EssaySection({ section, answers, setAnswer }) {
 }
 
 // -------- Voice recording (Cognizant Speaking / Reading & Listening) -------
-// Shared MediaRecorder -> POST /oa/{attemptId}/transcribe flow. Falls back to
-// `status === "unavailable"` (caller renders a typed textarea instead) if
-// getUserMedia is missing, denied, or errors — there is no mic requirement
-// anywhere else in this app, so this has to degrade gracefully.
-function useMicRecorder(attemptId, sectionKey, questionId, onTranscript) {
-  const [status, setStatus] = useState("idle"); // idle | recording | uploading | done | unavailable | error
-  const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
-  const streamRef = useRef(null);
-
-  const start = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) { setStatus("unavailable"); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      chunksRef.current = [];
-      const mr = new MediaRecorder(stream);
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        streamRef.current?.getTracks().forEach(t => t.stop());
-        setStatus("uploading");
-        try {
-          const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-          const fd = new FormData();
-          fd.append("section_key", sectionKey);
-          fd.append("question_id", questionId);
-          fd.append("file", blob, "recording.webm");
-          const { data } = await api.post(`/oa/${attemptId}/transcribe`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-          onTranscript(data.transcript || "");
-          setStatus("done");
-        } catch (err) {
-          toast.error("Transcription failed — you can type your answer instead.");
-          setStatus("error");
-        }
-      };
-      mediaRecorderRef.current = mr;
-      mr.start();
-      setStatus("recording");
-    } catch (err) {
-      setStatus("unavailable");
-    }
-  };
-
-  const stop = () => { mediaRecorderRef.current?.stop(); };
-  const reset = () => setStatus("idle");
-
-  return { status, start, stop, reset };
-}
+// useMicRecorder moved to hooks/useMicRecorder.js (2026-08, Capgemini Round 1
+// Section 6 frontend pass) so Round1CommunicationSection.jsx can reuse it
+// too, without a circular import back into this page file. Same hook,
+// same behavior -- every call site below is unchanged.
 
 // -------- Speaking (30s prep -> 60s record -> transcript review) -----------
 function SpeakingSection({ attemptId, section, answers, setAnswer }) {

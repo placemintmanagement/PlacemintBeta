@@ -34,8 +34,8 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(_BACKEND_DIR, ".env"))
 
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
-import mcq_pool  # noqa: E402
-from ai_service import topic_mcq_prompt, call_json, HAIKU, SONNET, TOPIC_INSTRUCTIONS  # noqa: E402
+import banks.mcq_pool  # noqa: E402
+from services.ai_service import topic_mcq_prompt, call_json, HAIKU, SONNET, TOPIC_INSTRUCTIONS  # noqa: E402
 
 RAW_BATCH_SIZE = 15   # Stage-A ask cap per call — safely under the token-truncation ceiling
 MAX_ROUNDS = 20        # safety cap on Stage-A rounds before giving up short of `count`
@@ -43,7 +43,7 @@ DROP_RATE_BUFFER = 1.3  # ask ~30% more than the shortfall per round to absorb v
 
 # {topic_key: topic_name} — reuses TOPIC_KEY_MAP as the single source of
 # truth (values are (topic_key, topic_name) tuples) rather than duplicating it.
-TOPIC_NAMES = dict(mcq_pool.TOPIC_KEY_MAP.values())
+TOPIC_NAMES = dict(banks.mcq_pool.TOPIC_KEY_MAP.values())
 
 
 async def _generate_verified_batch(topic_key: str, topic_name: str, ask: int) -> list:
@@ -52,7 +52,7 @@ async def _generate_verified_batch(topic_key: str, topic_name: str, ask: int) ->
     if not isinstance(raw, list):
         return []
     tasks = [
-        mcq_pool._process_one_stem("StaticBankSeed", f"static-seed-{topic_key}", stem)
+        banks.mcq_pool._process_one_stem("StaticBankSeed", f"static-seed-{topic_key}", stem)
         for stem in raw if isinstance(stem, dict)
     ]
     docs = await asyncio.gather(*tasks, return_exceptions=True)
@@ -121,7 +121,7 @@ async def main():
 
     client = AsyncIOMotorClient(os.environ["MONGO_URL"])
     db = client[os.environ["DB_NAME"]]
-    mcq_pool.init(db)
+    banks.mcq_pool.init(db)
     try:
         await add_batch(db, args.topic, args.count, args.batch_label)
     finally:

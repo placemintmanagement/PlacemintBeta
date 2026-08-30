@@ -57,11 +57,11 @@ in gamified_round.py or server.py's dispatch should need a per-type branch.
 """
 from typing import Any, Callable, Dict, List, Optional
 
-import deductive_grid
-import switch_challenge
-import grid_challenge
-import inductive_challenge
-import motion_challenge
+from . import deductive_grid
+from . import switch_challenge
+from . import grid_challenge
+from . import inductive_challenge
+from . import motion_challenge
 
 
 def _index_answer_check(puzzle_doc: dict, submitted: Any) -> bool:

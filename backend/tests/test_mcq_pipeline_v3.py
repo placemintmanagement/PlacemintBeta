@@ -65,7 +65,7 @@ def auth_headers(founder_token) -> Dict[str, str]:
 
 class TestPromptShape:
     def test_mcq_prompt_no_correct_index_or_explanation(self):
-        from ai_service import mcq_prompt, topic_mcq_prompt
+        from services.ai_service import mcq_prompt, topic_mcq_prompt
         p1 = mcq_prompt("Infosys", "Aptitude", 3, None).lower()
         p2 = topic_mcq_prompt("TCS", "aptitude", "Aptitude", 3, None).lower()
         for label, p in (("mcq_prompt", p1), ("topic_mcq_prompt", p2)):
@@ -77,7 +77,7 @@ class TestPromptShape:
             assert "{id, prompt, options" in p, f"{label}: schema shape must be stem-only"
 
     def test_solver_prompt_and_explanation_prompt_exist(self):
-        from ai_service import solver_prompt, explanation_prompt
+        from services.ai_service import solver_prompt, explanation_prompt
         s_sys, s_user = solver_prompt("2+2?", ["3", "4", "5", "6"])
         assert "first principles" in s_sys.lower()
         e_sys, e_user = explanation_prompt("2+2?", ["3", "4", "5", "6"], 1)
@@ -89,7 +89,7 @@ class TestPromptShape:
 
 class TestExtractAndExecute:
     def test_extract_python_fence(self):
-        from mcq_pool import _extract_code_block
+        from banks.mcq_pool import _extract_code_block
         p = "What does this print?\n```python\nprint(2+3)\n```"
         got = _extract_code_block(p)
         assert got is not None
@@ -98,17 +98,17 @@ class TestExtractAndExecute:
         assert "print(2+3)" in code
 
     def test_extract_unlabelled_python_heuristic(self):
-        from mcq_pool import _extract_code_block
+        from banks.mcq_pool import _extract_code_block
         p = "Output?\n```\nfor i in range(3):\n    print(i)\n```"
         got = _extract_code_block(p)
         assert got is not None and got[0] == "python"
 
     def test_extract_none_for_text_prompt(self):
-        from mcq_pool import _extract_code_block
+        from banks.mcq_pool import _extract_code_block
         assert _extract_code_block("What is 2+3?") is None
 
     def test_ground_truth_from_execution_matches_option(self):
-        from mcq_pool import _ground_truth_from_execution
+        from banks.mcq_pool import _ground_truth_from_execution
         loop = asyncio.new_event_loop()
         try:
             res = loop.run_until_complete(_ground_truth_from_execution(
@@ -132,7 +132,7 @@ class TestProcessOneStem:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             pytest.skip("ANTHROPIC_API_KEY not set")
 
-        import mcq_pool
+        from banks import mcq_pool
         # Ensure db is inited so _record_outcome doesn't blow up. In test
         # context, we don't want to write to prod db. Point to a temp db.
         from motor.motor_asyncio import AsyncIOMotorClient
@@ -280,7 +280,7 @@ class TestOAEndToEnd:
 
 
 async def _sonnet_solve(prompt_text: str, options: List[str]) -> Optional[int]:
-    from ai_service import call_json, SONNET, solver_prompt
+    from services.ai_service import call_json, SONNET, solver_prompt
     sys_m, user_m = solver_prompt(prompt_text, options)
     try:
         resp = await call_json(sys_m, user_m, model=SONNET)
@@ -343,23 +343,23 @@ class TestServedMcqsInternallyConsistent:
 
 class TestLooksLikeCodeOutputHeuristic:
     def test_pseudocode_begin_end_detected(self):
-        from mcq_pool import _looks_like_code_output_question
+        from banks.mcq_pool import _looks_like_code_output_question
         p = ("What does the following pseudocode print?\n"
              "BEGIN\n  SET x = 3\n  SET y = 4\n  PRINT x + y\nEND")
         assert _looks_like_code_output_question(p) is True
 
     def test_java_style_code_detected(self):
-        from mcq_pool import _looks_like_code_output_question
+        from banks.mcq_pool import _looks_like_code_output_question
         p = ("What does this Java program print?\n"
              "int a = 5; int b = 2; System.out.println(a*b + 3);")
         assert _looks_like_code_output_question(p) is True
 
     def test_non_code_question_rejected(self):
-        from mcq_pool import _looks_like_code_output_question
+        from banks.mcq_pool import _looks_like_code_output_question
         assert _looks_like_code_output_question("What is the capital of France?") is False
 
     def test_empty_prompt(self):
-        from mcq_pool import _looks_like_code_output_question
+        from banks.mcq_pool import _looks_like_code_output_question
         assert _looks_like_code_output_question("") is False
 
 
@@ -371,7 +371,7 @@ class TestTranspileExecute:
         and the correct option index returned."""
         if not os.environ.get("ANTHROPIC_API_KEY"):
             pytest.skip("ANTHROPIC_API_KEY not set")
-        from mcq_pool import _ground_truth_from_pseudocode_transpile
+        from banks.mcq_pool import _ground_truth_from_pseudocode_transpile
         prompt = ("What does the following pseudocode print?\n"
                   "BEGIN\n  SET x = 3\n  SET y = 4\n  PRINT x + y\nEND")
         options = ["5", "7", "12", "34"]
@@ -388,7 +388,7 @@ class TestTranspileExecute:
 
     def test_non_code_question_returns_none(self):
         """Non-code questions should short-circuit before making an LLM call."""
-        from mcq_pool import _ground_truth_from_pseudocode_transpile
+        from banks.mcq_pool import _ground_truth_from_pseudocode_transpile
         loop = asyncio.new_event_loop()
         try:
             res = loop.run_until_complete(
@@ -405,7 +405,7 @@ class TestTranspileExecute:
         """Java-style code without a Python fence should be transpiled+executed."""
         if not os.environ.get("ANTHROPIC_API_KEY"):
             pytest.skip("ANTHROPIC_API_KEY not set")
-        from mcq_pool import _ground_truth_from_pseudocode_transpile
+        from banks.mcq_pool import _ground_truth_from_pseudocode_transpile
         prompt = ("What does the following Java code print?\n"
                   "int a = 5; int b = 2; System.out.println(a*b + 3);")
         options = ["13", "10", "7", "25"]
@@ -430,7 +430,7 @@ class TestProcessOneStemTranspileSource:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             pytest.skip("ANTHROPIC_API_KEY not set")
 
-        import mcq_pool
+        from banks import mcq_pool
         from motor.motor_asyncio import AsyncIOMotorClient
         mongo_url = os.environ.get("MONGO_URL")
         assert mongo_url
@@ -472,7 +472,7 @@ class TestPseudocodeSectionRouting:
     def test_generate_section_questions_pseudocode_uses_pipeline(self, monkeypatch):
         import asyncio as _a
         import server
-        import mcq_pool as _pool
+        from banks import mcq_pool as _pool
 
         raw_called = {"n": 0}
         pipeline_called = {"n": 0}
