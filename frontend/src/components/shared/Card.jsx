@@ -9,7 +9,7 @@ export default function Card({ header = null, tint = "#E8F3FB", interactive = fa
     <div
       className={`${interactive ? "pm-dc-card" : ""} relative flex flex-col overflow-hidden ${className}`}
       style={{
-        background: "#FFFFFF",
+        background: "var(--pm-white)",
         borderRadius: 24,
         border: "1px solid rgba(7,59,67,0.08)",
         boxShadow: "0 14px 28px -18px rgba(7,59,67,0.28)",

@@ -59,8 +59,12 @@ export default function Header({ light = false } = {}) {
       <div className="max-w-7xl mx-auto flex items-center justify-between px-6 lg:px-10 py-4">
         <Link to="/" data-testid={TID.navLogo} className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg grid place-items-center font-display font-extrabold" style={{ background: "var(--pm-lime)", color: "var(--pm-ink)" }}>P</div>
-          <span className="font-display text-xl font-bold tracking-tight" style={{ color: light ? "#0B2A30" : "#FFFFFF" }}>Placemint</span>
-          <span className={`pm-chip ${light ? "pm-chip-primary" : "pm-chip-light"} hidden sm:inline-flex ml-2`}>Beta</span>
+          <span className={`font-display ${light ? "text-lg sm:text-xl" : "text-xl"} font-bold tracking-tight`} style={{ color: light ? "#0B2A30" : "#FFFFFF" }}>Placemint</span>
+          {light ? (
+            <span className="hidden sm:inline-flex ml-2 rounded-full" style={{ background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 13, padding: "4px 10px" }}>Beta</span>
+          ) : (
+            <span className="pm-chip pm-chip-light hidden sm:inline-flex ml-2">Beta</span>
+          )}
         </Link>
 
         <nav className="hidden md:flex items-center gap-8 text-sm" style={{ color: light ? "rgba(11,42,48,0.70)" : "rgba(255,255,255,0.75)" }}>
@@ -97,8 +101,8 @@ export default function Header({ light = false } = {}) {
             </>
           ) : (
             <>
-              <Link to="/login" data-testid={TID.navLogin} className={`${ghostBtnClass} text-sm py-2 px-4`}>Sign in</Link>
-              <Link to="/signup" data-testid={TID.navSignup} className="pm-btn pm-btn-primary text-sm py-2 px-4">Start free</Link>
+              <Link to="/login" data-testid={TID.navLogin} className={`${ghostBtnClass} text-sm py-2 px-3 sm:px-4 whitespace-nowrap`}>Sign in</Link>
+              <Link to="/signup" data-testid={TID.navSignup} className="pm-btn pm-btn-primary text-sm py-2 px-3 sm:px-4 whitespace-nowrap">Start free</Link>
             </>
           )}
         </div>

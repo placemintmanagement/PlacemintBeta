@@ -96,3 +96,6 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Design rollout screenshots (local review only)
+frontend/design-screenshots/

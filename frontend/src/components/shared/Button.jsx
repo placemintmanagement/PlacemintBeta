@@ -13,19 +13,19 @@ const BASE = "inline-flex items-center justify-center gap-2 rounded-full font-di
 
 const VARIANTS = {
   primary: {
-    cls: "hover:bg-[#073B43] focus-visible:outline-[#073B43]",
-    style: { background: "var(--pm-teal-deep)", color: "#FFFFFF" },
+    cls: "hover:bg-[var(--pm-teal-night)] focus-visible:outline-[var(--pm-teal-night)]",
+    style: { background: "var(--pm-teal-deep)", color: "var(--pm-white)" },
   },
   secondary: {
-    cls: "hover:bg-[rgba(15,111,122,0.06)] focus-visible:outline-[#073B43]",
-    style: { background: "#FFFFFF", color: "var(--pm-teal-deep)", border: "1.5px solid var(--pm-teal-deep)" },
+    cls: "hover:bg-[rgba(15,111,122,0.06)] focus-visible:outline-[var(--pm-teal-night)]",
+    style: { background: "var(--pm-white)", color: "var(--pm-teal-deep)", border: "1.5px solid var(--pm-teal-deep)" },
   },
   destructive: {
-    cls: "hover:brightness-95 focus-visible:outline-[#073B43]",
-    style: { background: "var(--pm-error-text)", color: "#FFFFFF" },
+    cls: "hover:brightness-95 focus-visible:outline-[var(--pm-teal-night)]",
+    style: { background: "var(--pm-error-text)", color: "var(--pm-white)" },
   },
   lime: {
-    cls: "hover:brightness-95 focus-visible:outline-[#C6F24E]",
+    cls: "hover:brightness-95 focus-visible:outline-[var(--pm-lime)]",
     style: { background: "var(--pm-lime)", color: "var(--pm-ink)" },
   },
 };

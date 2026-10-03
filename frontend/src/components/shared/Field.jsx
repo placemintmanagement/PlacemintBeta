@@ -18,7 +18,7 @@ export default function Field({ label, helper, error, as = "input", id, classNam
         id={inputId}
         aria-invalid={!!error}
         aria-describedby={error || helper ? helperId : undefined}
-        className="w-full bg-white outline-none focus:outline-[3px] focus:outline-offset-2 focus:outline-[#073B43] focus:border-[var(--pm-teal-deep)]"
+        className="w-full bg-[var(--pm-white)] outline-none focus:outline-[3px] focus:outline-offset-2 focus:outline-[var(--pm-teal-night)] focus:border-[var(--pm-teal-deep)]"
         style={{
           border: `1.5px solid ${borderColor}`,
           borderRadius: 14,
