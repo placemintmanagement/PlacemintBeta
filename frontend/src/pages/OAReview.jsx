@@ -3,7 +3,12 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../api";
 import Header from "../components/Header";
-import { CheckCircle2, XCircle, ArrowRight, ChevronDown, ChevronUp, Circle, MinusCircle, BookmarkPlus, BookmarkCheck } from "lucide-react";
+import { CheckCircle2, XCircle, ArrowRight, ChevronDown, ChevronUp, MinusCircle, BookmarkPlus, BookmarkCheck } from "lucide-react";
+import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } from "../components/shared";
+
+// Body-size meta text (never monospace).
+const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
+const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
 
 export default function OAReview() {
   const { attemptId } = useParams();
@@ -18,25 +23,26 @@ export default function OAReview() {
     api.get(`/oa/${attemptId}/review`).then(r => setReview(r.data));
   }, [attemptId]);
 
-  if (!review) return <div><Header /><div className="p-10 text-center">Loading review…</div></div>;
+  if (!review) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Loading review…</div></PageShell></div>;
 
   if (review.available === false) {
     return (
       <div>
-        <Header />
-        <div className="p-10 text-center">
-          <div className="font-display text-xl font-bold mb-2">Review isn't ready yet</div>
-          <div className="text-pm-text2 mb-6">Finish every section of the OA to unlock your full review and answer key.</div>
-          <Link to={`/oa/${attemptId}`} className="pm-btn pm-btn-primary">Back to OA</Link>
-        </div>
+        <Header light />
+        <PageShell>
+          <div className="p-10 text-center">
+            <CardTitle style={{ fontSize: 22, marginBottom: 8 }}>Review isn't ready yet</CardTitle>
+            <div className="mb-6" style={BODY}>Finish every section of the OA to unlock your full review and answer key.</div>
+            <Button as={Link} to={`/oa/${attemptId}`}>Back to OA</Button>
+          </div>
+        </PageShell>
       </div>
     );
   }
 
-  // Three-tier verdict color, darkest = most serious -- no red/orange in
-  // this palette, so "not ready" is distinguished by being the boldest
-  // ink rather than a different hue.
-  const verdictColor = review.verdict === "clear" ? "text-pm-primary-dark" : review.verdict === "borderline" ? "text-pm-text2" : "text-pm-text";
+  // Three-tier verdict colour: teal for clear, ink 70% for borderline, full
+  // ink for not ready. No hue beyond the palette.
+  const verdictColor = review.verdict === "clear" ? "var(--pm-teal-deep)" : review.verdict === "borderline" ? "rgba(11,42,48,0.7)" : "var(--pm-ink)";
   const verdictText = review.verdict === "clear" ? "You'd likely clear this."
     : review.verdict === "borderline" ? "You're borderline, fixable."
     : "Not ready yet. Keep grinding.";
@@ -95,169 +101,176 @@ export default function OAReview() {
 
   return (
     <div>
-      <Header />
-      <div className="max-w-5xl mx-auto px-6 lg:px-10 py-10 pm-in">
-        <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-2">OA review · {review.company_name}</div>
-        <h1 className={`font-display text-4xl lg:text-5xl font-bold ${verdictColor}`}>{verdictText}</h1>
-        <div className="mt-4 flex flex-wrap items-center gap-4">
-          <div className="pm-card px-5 py-3">
-            <div className="text-xs font-mono uppercase text-pm-text2">Composite</div>
-            <div className="font-display text-2xl font-bold font-mono">{Math.round(review.composite_score * 100)}%</div>
+      <Header light />
+      <PageShell>
+        <div className="max-w-5xl mx-auto pm-in">
+          <SectionLabel>OA review · {review.company_name}</SectionLabel>
+          <PageTitle style={{ color: verdictColor }}>{verdictText}</PageTitle>
+          <div className="mt-6 flex flex-wrap items-stretch gap-4">
+            <Card padding="16px 20px" style={{ borderRadius: 20 }}>
+              <div style={META}>Composite</div>
+              <div className="font-display font-semibold" style={{ fontSize: 26, color: "var(--pm-ink)" }}>{Math.round(review.composite_score * 100)}%</div>
+            </Card>
+            <Card padding="16px 20px" style={{ borderRadius: 20 }}>
+              <div style={META}>Weakest section</div>
+              <div className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{nameByKey[review.weakest_section] || review.weakest_section || "N/A"}</div>
+            </Card>
+            <Card padding="16px 20px" style={{ borderRadius: 20 }}>
+              <div style={META}>Scoring mode</div>
+              <div className="font-display font-semibold capitalize" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{review.scoring_mode}</div>
+            </Card>
           </div>
-          <div className="pm-card px-5 py-3">
-            <div className="text-xs font-mono uppercase text-pm-text2">Weakest section</div>
-            <div className="font-display text-lg font-bold">{nameByKey[review.weakest_section] || review.weakest_section || "N/A"}</div>
-          </div>
-          <div className="pm-card px-5 py-3">
-            <div className="text-xs font-mono uppercase text-pm-text2">Scoring mode</div>
-            <div className="font-display text-lg font-bold capitalize">{review.scoring_mode}</div>
-          </div>
-        </div>
 
-        <h2 className="mt-10 font-display text-2xl font-bold">Section breakdown</h2>
-        <div className="mt-4 space-y-3">
-          {Object.entries(review.section_results).map(([key, res]) => (
-            <div key={key} className="pm-card p-5 flex items-center justify-between">
-              <div>
-                <div className="font-display font-bold">{nameByKey[key] || key}</div>
-                <div className="text-xs font-mono text-pm-text2">score {(res.score * 100).toFixed(0)}%</div>
-              </div>
-              <div className="flex items-center gap-2">
-                {res.passed
-                  ? <span className="pm-chip pm-chip-primary"><CheckCircle2 size={12}/> passed</span>
-                  : <span className="pm-chip pm-chip-coral"><XCircle size={12}/> below cutoff</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Answer key — MCQ-style sections only */}
-        {(review.answer_key || []).length > 0 && (
-          <>
-            <div className="mt-10 flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <h2 className="font-display text-2xl font-bold">Answer key</h2>
-                <p className="mt-1 text-sm text-pm-text2">Every MCQ you saw, your answer, and the correct one, with explanations.</p>
-              </div>
-              {wrongPlusSkipped > 0 && (
-                <button
-                  onClick={saveAllWrongToDeck}
-                  disabled={savingBulk}
-                  data-testid="deck-save-all-wrong"
-                  className="pm-btn pm-btn-secondary text-sm"
-                >
-                  <BookmarkPlus size={14}/>
-                  {savingBulk ? "Saving…" : `Save all ${wrongPlusSkipped} wrong to review deck`}
-                </button>
-              )}
-            </div>
-            <div className="mt-4 space-y-3" data-testid="answer-key-list">
-              {review.answer_key.map((sec) => {
-                const isOpen = !!openKeys[sec.section_key];
-                const totalQ = sec.questions.length;
-                const correctQ = sec.questions.filter(q => q.is_correct).length;
-                const wrongQ = sec.questions.filter(q => q.answered && !q.is_correct).length;
-                const skippedQ = sec.questions.filter(q => !q.answered).length;
-                return (
-                  <div key={sec.section_key} className="pm-card overflow-hidden">
-                    <button
-                      onClick={() => setOpenKeys(o => ({ ...o, [sec.section_key]: !o[sec.section_key] }))}
-                      data-testid={`answer-key-toggle-${sec.section_key}`}
-                      className="w-full flex items-center justify-between p-5 text-left hover:bg-black/[0.02] transition-colors"
-                    >
-                      <div>
-                        <div className="font-display font-bold">{sec.section_name}</div>
-                        <div className="text-xs font-mono text-pm-text2 mt-1 flex flex-wrap gap-3">
-                          <span className="text-pm-primary-dark">✓ {correctQ} correct</span>
-                          <span className="text-pm-text font-semibold">✗ {wrongQ} wrong</span>
-                          {skippedQ > 0 && <span className="text-pm-text2">– {skippedQ} skipped</span>}
-                          <span>· {totalQ} total</span>
-                        </div>
-                      </div>
-                      <div className="text-pm-text2">
-                        {isOpen ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}
-                      </div>
-                    </button>
-                    {isOpen && (
-                      <div className="border-t border-pm-line divide-y divide-pm-line">
-                        {sec.questions.map((q, i) => (
-                          <QuestionRow
-                            key={q.id || i}
-                            q={q}
-                            index={i}
-                            saved={!!savedIds[`${sec.section_key}:${q.id}`]}
-                            onSave={() => saveOneToDeck(sec.section_key, q.id)}
-                          />
-                        ))}
-                      </div>
-                    )}
+          <div className="mt-12 mb-5"><PageTitle as="h2">Section breakdown</PageTitle></div>
+          <div className="space-y-3">
+            {Object.entries(review.section_results).map(([key, res]) => (
+              <Card key={key} padding="20px 24px">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{nameByKey[key] || key}</div>
+                    <div className="mt-1" style={META}>score {(res.score * 100).toFixed(0)}%</div>
                   </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        <div className="mt-10 pm-card p-6 bg-[#0A0A0A] text-white hover:!transform-none flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <div className="pm-chip" style={{ background: "rgba(255,255,255,0.08)", color: "#fff" }}>next up</div>
-            <div className="font-display text-2xl font-bold mt-2">Take the interview round.</div>
-            <div className="text-sm text-white/70 mt-1">2 DSA · 2 project questions · 3 CS fundamentals.</div>
+                  <div className="flex items-center gap-2">
+                    {res.passed
+                      ? <Chip tone="status" icon={<CheckCircle2 size={12}/>}>passed</Chip>
+                      : <Chip icon={<XCircle size={12}/>}>below cutoff</Chip>}
+                  </div>
+                </div>
+              </Card>
+            ))}
           </div>
-          <div className="flex gap-3">
-            <Link to="/dashboard" className="pm-btn pm-btn-ghost text-sm bg-white/5 border-white/10 text-white hover:bg-white/10">Back to dashboard</Link>
-            <button onClick={startInterview} disabled={starting} className="pm-btn pm-btn-primary text-sm">
-              {starting ? "Preparing…" : <>Start interview <ArrowRight size={14}/></>}
-            </button>
+
+          {/* Answer key — MCQ-style sections only */}
+          {(review.answer_key || []).length > 0 && (
+            <>
+              <div className="mt-12 flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <PageTitle as="h2">Answer key</PageTitle>
+                  <p className="mt-2" style={BODY}>Every MCQ you saw, your answer, and the correct one, with explanations.</p>
+                </div>
+                {wrongPlusSkipped > 0 && (
+                  <Button
+                    variant="secondary"
+                    onClick={saveAllWrongToDeck}
+                    disabled={savingBulk}
+                    data-testid="deck-save-all-wrong"
+                    className="!py-2 !px-4"
+                    style={{ fontSize: 14 }}
+                  >
+                    <BookmarkPlus size={14} aria-hidden="true"/>
+                    {savingBulk ? "Saving…" : `Save all ${wrongPlusSkipped} wrong to review deck`}
+                  </Button>
+                )}
+              </div>
+              <div className="mt-5 space-y-3" data-testid="answer-key-list">
+                {review.answer_key.map((sec) => {
+                  const isOpen = !!openKeys[sec.section_key];
+                  const totalQ = sec.questions.length;
+                  const correctQ = sec.questions.filter(q => q.is_correct).length;
+                  const wrongQ = sec.questions.filter(q => q.answered && !q.is_correct).length;
+                  const skippedQ = sec.questions.filter(q => !q.answered).length;
+                  return (
+                    <Card key={sec.section_key} padding="0">
+                      <button
+                        onClick={() => setOpenKeys(o => ({ ...o, [sec.section_key]: !o[sec.section_key] }))}
+                        data-testid={`answer-key-toggle-${sec.section_key}`}
+                        aria-expanded={isOpen}
+                        className="w-full flex items-center justify-between gap-4 p-5 text-left transition-colors hover:bg-[rgba(15,111,122,0.04)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--pm-teal-night)]"
+                      >
+                        <div>
+                          <div className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{sec.section_name}</div>
+                          <div className="mt-1 flex flex-wrap gap-3" style={META}>
+                            <span style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>✓ {correctQ} correct</span>
+                            <span style={{ color: "var(--pm-ink)", fontWeight: 600 }}>✗ {wrongQ} wrong</span>
+                            {skippedQ > 0 && <span>– {skippedQ} skipped</span>}
+                            <span>· {totalQ} total</span>
+                          </div>
+                        </div>
+                        <div style={{ color: "rgba(11,42,48,0.7)" }}>
+                          {isOpen ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}
+                        </div>
+                      </button>
+                      {isOpen && (
+                        <div style={{ borderTop: "1px solid rgba(7,59,67,0.08)" }} className="divide-y" >
+                          {sec.questions.map((q, i) => (
+                            <QuestionRow
+                              key={q.id || i}
+                              q={q}
+                              index={i}
+                              saved={!!savedIds[`${sec.section_key}:${q.id}`]}
+                              onSave={() => saveOneToDeck(sec.section_key, q.id)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          <div className="mt-12 rounded-[24px] p-7 flex items-center justify-between flex-wrap gap-6" style={{ background: "var(--pm-teal-night)", color: "var(--pm-white)" }}>
+            <div>
+              <span className="inline-flex rounded-full" style={{ background: "rgba(255,255,255,0.12)", color: "var(--pm-white)", fontSize: 13, padding: "4px 10px" }}>next up</span>
+              <div className="font-display font-semibold mt-3" style={{ fontSize: 26, color: "var(--pm-white)" }}>Take the interview round.</div>
+              <div className="mt-1" style={{ fontSize: 15, color: "rgba(255,255,255,0.8)" }}>2 DSA · 2 project questions · 3 CS fundamentals.</div>
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <Link to="/dashboard" className="pm-btn pm-btn-ghost-light !py-3 !px-5" style={{ fontSize: 15 }}>Back to dashboard</Link>
+              <Button variant="lime" onClick={startInterview} disabled={starting}>
+                {starting ? "Preparing…" : <>Start interview <ArrowRight size={14} aria-hidden="true"/></>}
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      </PageShell>
     </div>
   );
 }
 
 function QuestionRow({ q, index, saved, onSave }) {
   // Multiline prompt preserved as-is; options rendered as a list with the
-  // correct answer highlighted mint and the user's wrong pick highlighted coral.
+  // correct answer highlighted in teal and the user's wrong pick outlined in ink.
   const correctIdx = q.correct_index;
   const userIdx = q.user_index;
   const state = q.answered ? (q.is_correct ? "correct" : "wrong") : "skipped";
   const badge = state === "correct"
-    ? <span className="pm-chip pm-chip-primary" data-testid={`ak-badge-correct-${index}`}><CheckCircle2 size={12}/> correct</span>
+    ? <Chip tone="status" icon={<CheckCircle2 size={12}/>}><span data-testid={`ak-badge-correct-${index}`}>correct</span></Chip>
     : state === "wrong"
-    ? <span className="pm-chip pm-chip-coral" data-testid={`ak-badge-wrong-${index}`}><XCircle size={12}/> wrong</span>
-    : <span className="pm-chip" style={{background:"rgba(0,0,0,0.06)"}} data-testid={`ak-badge-skipped-${index}`}><MinusCircle size={12}/> skipped</span>;
+    ? <Chip icon={<XCircle size={12}/>}><span data-testid={`ak-badge-wrong-${index}`}>wrong</span></Chip>
+    : <Chip icon={<MinusCircle size={12}/>}><span data-testid={`ak-badge-skipped-${index}`}>skipped</span></Chip>;
   const savable = state !== "correct";
 
   return (
     <div className="p-5" data-testid={`ak-row-${index}`}>
       <div className="flex items-start gap-3">
-        <div className="font-mono text-xs text-pm-text2 shrink-0 mt-1">Q{index + 1}</div>
+        <div className="shrink-0 mt-0.5 pm-eyebrow" style={{ color: "rgba(11,42,48,0.7)" }}>Q{index + 1}</div>
         <div className="flex-1 min-w-0">
-          <div className="whitespace-pre-wrap text-sm">{q.prompt}</div>
+          <div className="whitespace-pre-wrap" style={BODY}>{q.prompt}</div>
           <div className="mt-3 space-y-1.5">
             {(q.options || []).map((opt, i) => {
               const isCorrect = i === correctIdx;
               const isUser = i === userIdx;
-              let cls = "border border-pm-line bg-white";
-              if (isCorrect) cls = "border border-pm-primary bg-pm-primary/10";
-              else if (isUser && !isCorrect) cls = "border border-[rgba(11,42,48,0.35)] bg-[rgba(11,42,48,0.05)]";
+              let style = { border: "1px solid rgba(7,59,67,0.12)", background: "var(--pm-white)" };
+              if (isCorrect) style = { border: "1.5px solid var(--pm-teal-deep)", background: "var(--pm-success-bg)" };
+              else if (isUser && !isCorrect) style = { border: "1.5px solid rgba(11,42,48,0.55)", background: "var(--pm-grey)" };
               return (
-                <div key={i} className={`text-sm px-3 py-2 rounded-md flex items-start gap-2 ${cls}`}>
-                  <span className="font-mono text-[11px] text-pm-text2 shrink-0 mt-0.5">{String.fromCharCode(65 + i)}</span>
+                <div key={i} className="rounded-[12px] px-3 py-2 flex items-start gap-2" style={{ fontSize: 15, color: "var(--pm-ink)", ...style }}>
+                  <span className="shrink-0 mt-0.5 font-semibold" style={{ fontSize: 13, color: "rgba(11,42,48,0.7)" }}>{String.fromCharCode(65 + i)}</span>
                   <span className="flex-1 min-w-0 whitespace-pre-wrap">{opt}</span>
-                  <span className="shrink-0 flex items-center gap-1 text-[11px] font-mono">
-                    {isCorrect && <span className="text-pm-primary-dark">correct</span>}
-                    {isUser && !isCorrect && <span className="text-pm-text font-semibold">your answer</span>}
-                    {isUser && isCorrect && <span className="text-pm-primary-dark">✓ you</span>}
+                  <span className="shrink-0 flex items-center gap-1" style={{ fontSize: 13 }}>
+                    {isCorrect && <span style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>correct</span>}
+                    {isUser && !isCorrect && <span style={{ color: "var(--pm-ink)", fontWeight: 600 }}>your answer</span>}
+                    {isUser && isCorrect && <span style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>✓ you</span>}
                   </span>
                 </div>
               );
             })}
           </div>
           {q.explanation && (
-            <div className="mt-3 text-xs text-pm-text2 border-l-2 border-pm-primary/40 pl-3">
-              <span className="font-mono uppercase tracking-widest text-[10px] text-pm-primary-dark">Why</span>
+            <div className="mt-3 pl-3" style={{ fontSize: 14, color: "rgba(11,42,48,0.85)", borderLeft: "2px solid var(--pm-teal-deep)" }}>
+              <span className="pm-eyebrow" style={{ fontSize: 11, color: "var(--pm-teal-deep)" }}>Why</span>
               <div className="mt-0.5 whitespace-pre-wrap">{q.explanation}</div>
             </div>
           )}
@@ -267,11 +280,10 @@ function QuestionRow({ q, index, saved, onSave }) {
                 onClick={onSave}
                 disabled={saved}
                 data-testid={`deck-save-q-${index}`}
-                className={`inline-flex items-center gap-1.5 text-xs font-mono px-2.5 py-1.5 rounded-md border transition-colors ${
-                  saved
-                    ? "border-pm-primary/40 bg-pm-primary/10 text-pm-primary-dark cursor-default"
-                    : "border-pm-line bg-white hover:bg-black/[0.03] text-pm-text"
-                }`}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)] disabled:cursor-default"
+                style={saved
+                  ? { fontSize: 13, background: "var(--pm-success-bg)", color: "var(--pm-teal-deep)", border: "1px solid rgba(15,111,122,0.35)" }
+                  : { fontSize: 13, background: "var(--pm-white)", color: "var(--pm-teal-deep)", border: "1.5px solid var(--pm-border-control)" }}
               >
                 {saved ? <><BookmarkCheck size={13}/> Saved to deck</> : <><BookmarkPlus size={13}/> Save to review deck</>}
               </button>

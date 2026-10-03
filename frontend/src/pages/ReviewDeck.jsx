@@ -4,6 +4,13 @@ import { toast } from "sonner";
 import api from "../api";
 import Header from "../components/Header";
 import { CheckCircle2, XCircle, Trash2, RotateCw, Sparkles, ArrowRight, Filter } from "lucide-react";
+import { PageShell, SectionLabel, PageTitle, Card, Chip, Button } from "../components/shared";
+
+// Body-size meta text (never monospace).
+const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
+const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
+const FILTER_ON = { border: "1.5px solid var(--pm-teal-deep)", background: "rgba(15,111,122,0.08)", color: "var(--pm-teal-deep)" };
+const FILTER_OFF = { border: "1.5px solid var(--pm-border-control)", background: "var(--pm-white)", color: "rgba(11,42,48,0.85)" };
 
 // Local shuffle so users don't just memorize option position.
 function useShuffled(options, correctIndex, seed) {
@@ -53,7 +60,8 @@ export default function ReviewDeck() {
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filter]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [filter]);
 
   const card = cards[cursor];
   const shuffled = useShuffled(card?.options, card?.correct_index, seed + cursor);
@@ -103,127 +111,135 @@ export default function ReviewDeck() {
   };
 
   if (loading) {
-    return <div><Header /><div className="p-10 text-center text-sm text-pm-text2">Loading your deck…</div></div>;
+    return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Loading your deck…</div></PageShell></div>;
   }
 
   return (
     <div>
-      <Header />
-      <div className="max-w-3xl mx-auto px-6 lg:px-10 py-10 pm-in">
-        <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-2">Review deck</div>
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="font-display text-4xl lg:text-5xl font-bold">
-              {cards.length === 0 ? "Nothing to review yet." : "Drill your misses."}
-            </h1>
-            <p className="mt-2 text-sm text-pm-text2">
-              {cards.length === 0
-                ? "Finish an OA and hit 'Save to review deck' on any question you got wrong. They'll show up here."
-                : "Two correct answers in a row master a card. Mastered cards drop out of your queue."}
-            </p>
-          </div>
-          {cards.length > 0 && (
-            <div className="flex items-center gap-2 text-xs font-mono">
-              <Filter size={12} className="text-pm-text2"/>
-              <button
-                onClick={() => setFilter("unmastered")}
-                data-testid="deck-filter-unmastered"
-                className={`px-2.5 py-1 rounded-md border ${filter === "unmastered" ? "border-pm-primary bg-pm-primary/10 text-pm-primary-dark" : "border-pm-line bg-white text-pm-text2"}`}>Unmastered</button>
-              <button
-                onClick={() => setFilter("all")}
-                data-testid="deck-filter-all"
-                className={`px-2.5 py-1 rounded-md border ${filter === "all" ? "border-pm-primary bg-pm-primary/10 text-pm-primary-dark" : "border-pm-line bg-white text-pm-text2"}`}>All</button>
+      <Header light />
+      <PageShell>
+        <div className="max-w-3xl mx-auto pm-in">
+          <SectionLabel>Review deck</SectionLabel>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <PageTitle>
+                {cards.length === 0 ? "Nothing to review yet." : "Drill your misses."}
+              </PageTitle>
+              <p className="mt-3" style={BODY}>
+                {cards.length === 0
+                  ? "Finish an OA and hit 'Save to review deck' on any question you got wrong. They'll show up here."
+                  : "Two correct answers in a row master a card. Mastered cards drop out of your queue."}
+              </p>
             </div>
-          )}
-        </div>
-
-        {cards.length === 0 ? (
-          <div className="mt-10 pm-card p-8 text-center">
-            <Sparkles className="mx-auto text-pm-primary" size={28}/>
-            <div className="mt-3 font-display text-lg font-bold">Your review deck is empty.</div>
-            <Link to="/dashboard" className="pm-btn pm-btn-primary text-sm mt-5 inline-flex">Back to dashboard <ArrowRight size={14}/></Link>
-          </div>
-        ) : (
-          <>
-            {/* Progress strip */}
-            <div className="mt-6 flex items-center justify-between text-xs font-mono text-pm-text2">
-              <div>Card {cursor + 1} of {cards.length}</div>
-              <div>{card?.company_name} · {card?.section_name}</div>
-            </div>
-
-            {/* Card */}
-            <div className="mt-3 pm-card p-6" data-testid="deck-card">
-              <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-pm-text2 mb-3">
-                <span className="pm-chip" style={{background:"rgba(0,0,0,0.05)"}}>{card?.difficulty || "Medium"}</span>
-                {card?.mastered && <span className="pm-chip pm-chip-primary">mastered</span>}
-                {(card?.attempts || []).length > 0 && !card?.mastered && (
-                  <span>{(card.attempts || []).filter(a => a.correct).length}/{(card.attempts || []).length} correct so far</span>
-                )}
-              </div>
-              <div className="text-sm whitespace-pre-wrap">{card?.prompt}</div>
-
-              <div className="mt-4 space-y-2">
-                {shuffled.opts.map((opt, i) => {
-                  const isChosen = chosen === i;
-                  const isCorrect = revealed && i === shuffled.correct;
-                  const isWrongPick = revealed && isChosen && i !== shuffled.correct;
-                  let cls = "border border-pm-line bg-white hover:bg-black/[0.03]";
-                  if (isChosen && !revealed) cls = "border border-pm-primary bg-pm-primary/10";
-                  if (isCorrect) cls = "border border-pm-primary bg-pm-primary/10";
-                  if (isWrongPick) cls = "border border-[rgba(11,42,48,0.35)] bg-[rgba(11,42,48,0.05)]";
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => !revealed && setChosen(i)}
-                      disabled={revealed}
-                      data-testid={`deck-option-${i}`}
-                      className={`w-full text-left text-sm px-3 py-2.5 rounded-md flex items-start gap-2 transition-colors ${cls}`}>
-                      <span className="font-mono text-[11px] text-pm-text2 shrink-0 mt-0.5">{String.fromCharCode(65 + i)}</span>
-                      <span className="flex-1 min-w-0 whitespace-pre-wrap">{opt}</span>
-                      {isCorrect && <CheckCircle2 size={14} className="text-pm-primary-dark shrink-0 mt-0.5"/>}
-                      {isWrongPick && <XCircle size={14} className="text-pm-text shrink-0 mt-0.5"/>}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {revealed && card?.explanation && (
-                <div className="mt-4 text-xs text-pm-text2 border-l-2 border-pm-primary/40 pl-3">
-                  <span className="font-mono uppercase tracking-widest text-[10px] text-pm-primary-dark">Why</span>
-                  <div className="mt-0.5 whitespace-pre-wrap">{card.explanation}</div>
-                </div>
-              )}
-
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                <button onClick={remove} data-testid="deck-remove-card" className="pm-btn pm-btn-ghost text-xs text-pm-text border-[rgba(11,42,48,0.15)] hover:bg-[rgba(11,42,48,0.05)]">
-                  <Trash2 size={13}/> Remove card
-                </button>
-                {!revealed ? (
-                  <button
-                    onClick={submit}
-                    disabled={chosen === null}
-                    data-testid="deck-submit"
-                    className="pm-btn pm-btn-primary text-sm">
-                    Check answer <ArrowRight size={14}/>
-                  </button>
-                ) : (
-                  <button onClick={next} data-testid="deck-next" className="pm-btn pm-btn-primary text-sm">
-                    {cursor + 1 >= cards.length ? <><RotateCw size={14}/> Reshuffle</> : <>Next card <ArrowRight size={14}/></>}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {lastResult && (
-              <div className={`mt-3 text-xs font-mono ${lastResult.correct ? "text-pm-primary-dark" : "text-pm-text"}`}>
-                {lastResult.correct
-                  ? (lastResult.mastered ? "Mastered. It'll drop out of your queue." : "Correct. One more in a row to master it.")
-                  : "Wrong pick. Streak reset. Try it again next time."}
+            {cards.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <Filter size={14} style={{ color: "rgba(11,42,48,0.7)" }} aria-hidden="true"/>
+                <button
+                  onClick={() => setFilter("unmastered")}
+                  data-testid="deck-filter-unmastered"
+                  aria-pressed={filter === "unmastered"}
+                  className="px-3 py-1.5 rounded-full font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                  style={{ fontSize: 14, ...(filter === "unmastered" ? FILTER_ON : FILTER_OFF) }}>Unmastered</button>
+                <button
+                  onClick={() => setFilter("all")}
+                  data-testid="deck-filter-all"
+                  aria-pressed={filter === "all"}
+                  className="px-3 py-1.5 rounded-full font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                  style={{ fontSize: 14, ...(filter === "all" ? FILTER_ON : FILTER_OFF) }}>All</button>
               </div>
             )}
-          </>
-        )}
-      </div>
+          </div>
+
+          {cards.length === 0 ? (
+            <Card className="mt-10" style={{ textAlign: "center" }}>
+              <div className="flex flex-col items-center">
+                <Sparkles style={{ color: "var(--pm-teal-deep)" }} size={28} aria-hidden="true"/>
+                <div className="mt-3 font-display font-semibold" style={{ fontSize: 22, color: "var(--pm-ink)" }}>Your review deck is empty.</div>
+                <div className="mt-5">
+                  <Button as={Link} to="/dashboard" className="!py-2 !px-4" style={{ fontSize: 14 }}>Back to dashboard <ArrowRight size={14} aria-hidden="true"/></Button>
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <>
+              {/* Progress strip */}
+              <div className="mt-6 flex items-center justify-between gap-4 flex-wrap" style={META}>
+                <div>Card {cursor + 1} of {cards.length}</div>
+                <div>{card?.company_name} · {card?.section_name}</div>
+              </div>
+
+              {/* Card */}
+              <Card className="mt-3" data-testid="deck-card">
+                <div className="flex items-center gap-2 flex-wrap mb-3" style={META}>
+                  <Chip>{card?.difficulty || "Medium"}</Chip>
+                  {card?.mastered && <Chip tone="status">mastered</Chip>}
+                  {(card?.attempts || []).length > 0 && !card?.mastered && (
+                    <span>{(card.attempts || []).filter(a => a.correct).length}/{(card.attempts || []).length} correct so far</span>
+                  )}
+                </div>
+                <div className="whitespace-pre-wrap" style={{ fontSize: 17, color: "var(--pm-ink)", lineHeight: 1.5 }}>{card?.prompt}</div>
+
+                <div className="mt-5 space-y-2">
+                  {shuffled.opts.map((opt, i) => {
+                    const isChosen = chosen === i;
+                    const isCorrect = revealed && i === shuffled.correct;
+                    const isWrongPick = revealed && isChosen && i !== shuffled.correct;
+                    let style = { border: "1px solid rgba(7,59,67,0.12)", background: "var(--pm-white)" };
+                    if (isChosen && !revealed) style = { border: "1.5px solid var(--pm-teal-deep)", background: "rgba(15,111,122,0.08)" };
+                    if (isCorrect) style = { border: "1.5px solid var(--pm-teal-deep)", background: "var(--pm-success-bg)" };
+                    if (isWrongPick) style = { border: "1.5px solid rgba(11,42,48,0.55)", background: "var(--pm-grey)" };
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => !revealed && setChosen(i)}
+                        disabled={revealed}
+                        aria-pressed={isChosen}
+                        data-testid={`deck-option-${i}`}
+                        className="w-full text-left px-4 py-3 rounded-[14px] flex items-start gap-3 transition-colors hover:bg-[rgba(15,111,122,0.06)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                        style={{ fontSize: 15, color: "var(--pm-ink)", ...style }}>
+                        <span className="shrink-0 mt-0.5 font-semibold" style={{ fontSize: 13, color: "rgba(11,42,48,0.7)" }}>{String.fromCharCode(65 + i)}</span>
+                        <span className="flex-1 min-w-0 whitespace-pre-wrap">{opt}</span>
+                        {isCorrect && <CheckCircle2 size={16} className="shrink-0 mt-0.5" style={{ color: "var(--pm-teal-deep)" }} aria-hidden="true"/>}
+                        {isWrongPick && <XCircle size={16} className="shrink-0 mt-0.5" style={{ color: "var(--pm-ink)" }} aria-hidden="true"/>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {revealed && card?.explanation && (
+                  <div className="mt-4 pl-3" style={{ fontSize: 14, color: "rgba(11,42,48,0.85)", borderLeft: "2px solid var(--pm-teal-deep)" }}>
+                    <span className="pm-eyebrow" style={{ fontSize: 11, color: "var(--pm-teal-deep)" }}>Why</span>
+                    <div className="mt-0.5 whitespace-pre-wrap">{card.explanation}</div>
+                  </div>
+                )}
+
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                  <Button variant="secondary" onClick={remove} data-testid="deck-remove-card" className="!py-2 !px-4" style={{ fontSize: 14 }}>
+                    <Trash2 size={13} aria-hidden="true"/> Remove card
+                  </Button>
+                  {!revealed ? (
+                    <Button onClick={submit} disabled={chosen === null} data-testid="deck-submit" className="!py-2 !px-4" style={{ fontSize: 14 }}>
+                      Check answer <ArrowRight size={14} aria-hidden="true"/>
+                    </Button>
+                  ) : (
+                    <Button onClick={next} data-testid="deck-next" className="!py-2 !px-4" style={{ fontSize: 14 }}>
+                      {cursor + 1 >= cards.length ? <><RotateCw size={14} aria-hidden="true"/> Reshuffle</> : <>Next card <ArrowRight size={14} aria-hidden="true"/></>}
+                    </Button>
+                  )}
+                </div>
+              </Card>
+
+              {lastResult && (
+                <div className="mt-3" style={{ fontSize: 14, color: lastResult.correct ? "var(--pm-teal-deep)" : "var(--pm-ink)", fontWeight: 600 }}>
+                  {lastResult.correct
+                    ? (lastResult.mastered ? "Mastered. It'll drop out of your queue." : "Correct. One more in a row to master it.")
+                    : "Wrong pick. Streak reset. Try it again next time."}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </PageShell>
     </div>
   );
 }
