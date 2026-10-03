@@ -31,7 +31,7 @@ test("Debugging Assessment preview: renders 2 problems across languages and grad
   // first load -- dismiss it defensively, same as round1-listening-spoken.spec.js.
   await page.getByTestId("onboard-skip").click({ timeout: 10_000 }).catch(() => {});
 
-  await expect(page.getByText("Debugging Assessment — interface preview")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Debugging Assessment: interface preview")).toBeVisible({ timeout: 20_000 });
 
   // ---- 1. Problem 1 (two-sum, arrays) renders: title, task description, sample tests ----
   await expect(page.getByText("Two Sum", { exact: true })).toBeVisible();

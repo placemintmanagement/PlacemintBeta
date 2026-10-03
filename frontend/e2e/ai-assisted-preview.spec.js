@@ -38,7 +38,7 @@ test("AI-Assisted Coding preview: real click-through of the full good path, real
   await page.goto("/dev/ai-assisted-preview?problem_id=missing-number");
   await page.getByTestId("onboard-skip").click({ timeout: 10_000 }).catch(() => {});
 
-  await expect(page.getByText("AI-Assisted Coding — interface preview")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("AI-Assisted Coding: interface preview")).toBeVisible({ timeout: 20_000 });
 
   // ---- 1. Start Discussion -> real problem drawn, session begins ----
   // (This dev-preview draws the problem AS PART OF starting the session --
