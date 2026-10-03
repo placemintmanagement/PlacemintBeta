@@ -149,11 +149,6 @@ export default function Pricing() {
                   <ul className="mt-3 space-y-1.5" style={{ fontSize: 14, color: "rgba(11,42,48,0.85)" }}>
                     {p.features.map((f, i) => <li key={i} className="flex gap-2"><span style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }} aria-hidden="true">✓</span>{f}</li>)}
                   </ul>
-                  {p.contest_boost && (
-                    <div className="mt-3 rounded-[12px] p-3" style={{ fontSize: 13, color: "var(--pm-ink)", background: "var(--pm-sky)" }}>
-                      Contest window: 3 full runs on any company through Jul 21, 2026.
-                    </div>
-                  )}
                   <div className="mt-auto pt-6">
                     <Button
                       variant={p.highlight ? "primary" : "secondary"}
