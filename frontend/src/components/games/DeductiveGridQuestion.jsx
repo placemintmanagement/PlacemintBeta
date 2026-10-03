@@ -133,10 +133,10 @@ export default function DeductiveGridQuestion({
   return (
     <div className="pm-card p-6">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-xs font-mono uppercase text-pm-text2">
+        <div className="text-xs pm-eyebrow text-pm-text2">
           Q{index + 1} of {total} · Deductive Grid
         </div>
-        <div className={`flex items-center gap-1.5 font-mono text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-pm-text2"}`}>
+        <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-pm-text2"}`}>
           <Clock size={14} />
           00:{String(remaining).padStart(2, "0")}
         </div>
@@ -154,7 +154,7 @@ export default function DeductiveGridQuestion({
           )}
         </div>
 
-        <div className="text-xs font-mono uppercase text-pm-text2 mt-5 mb-3">Pick the missing symbol</div>
+        <div className="text-xs pm-eyebrow text-pm-text2 mt-5 mb-3">Pick the missing symbol</div>
         <div className="flex flex-row gap-3">
           {(q.options || []).map((opt, ix) => (
             <button

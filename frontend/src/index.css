@@ -295,7 +295,7 @@ body::before {
 .pm-chip {
   display: inline-flex; align-items: center; gap: 0.35rem;
   padding: 0.25rem 0.6rem; border-radius: 999px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: inherit;
   font-size: 0.72rem; letter-spacing: 0.01em;
   background: var(--pm-surface-muted); color: var(--pm-text);
 }
@@ -309,11 +309,14 @@ body::before {
    everywhere else, and no red/orange is in the approved palette. */
 .pm-chip-coral   { background: rgba(11,42,48,0.10);  color: var(--pm-ink); font-weight: 600; }
 
+/* Form controls (2026-10 rollout): 1.5px control border (3:1), radius 14,
+   focus = teal-deep border + 3px teal-night outline, 2px offset. */
 .pm-input {
-  width: 100%; padding: 0.75rem 1rem; border-radius: 12px;
-  background: #fff; border: 1px solid var(--pm-border); font-size: 0.95rem;
+  width: 100%; padding: 0.75rem 1rem; border-radius: 14px;
+  background: var(--pm-white); border: 1.5px solid var(--pm-border-control); font-size: 0.95rem;
+  color: var(--pm-ink);
 }
-.pm-input:focus { outline: none; box-shadow: 0 0 0 3px rgba(15,111,122,0.20); border-color: var(--pm-primary); }
+.pm-input:focus { outline: 3px solid var(--pm-teal-night); outline-offset: 2px; border-color: var(--pm-teal-deep); }
 
 /* Editor pane */
 .pm-editor-pane {

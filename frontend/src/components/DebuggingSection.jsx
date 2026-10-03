@@ -76,7 +76,7 @@ export default function DebuggingSection({ problems, answers, setAnswer, onRun, 
               key={p.id}
               data-testid={`debug-problem-tab-${i}`}
               onClick={() => setActiveIdx(i)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-mono ${i === activeIdx ? "bg-pm-primary text-white" : "bg-pm-muted"}`}
+              className={`px-3 py-1.5 rounded-full text-sm font-display font-semibold ${i === activeIdx ? "bg-[var(--pm-teal-deep)] text-white" : "bg-[var(--pm-sky)] text-[var(--pm-ink)]"}`}
             >
               Problem {i + 1} · {p.topic}
             </button>
@@ -93,34 +93,34 @@ export default function DebuggingSection({ problems, answers, setAnswer, onRun, 
           <div className="text-sm text-pm-text2"><MD>{problem.statement}</MD></div>
 
           <div className="mt-4 rounded-xl p-4" style={{ background: "rgba(255, 138, 76, 0.08)", border: "1px solid rgba(255, 138, 76, 0.25)" }}>
-            <div className="text-xs font-mono uppercase text-pm-text2 mb-1">What's wrong with this code</div>
+            <div className="text-xs pm-eyebrow text-pm-text2 mb-1">What's wrong with this code</div>
             <div className="text-sm">{variant.task_description}</div>
           </div>
 
           {problem.input_format && (
             <div className="mt-4">
-              <div className="text-xs font-mono uppercase text-pm-text2 mb-1">Input</div>
+              <div className="text-xs pm-eyebrow text-pm-text2 mb-1">Input</div>
               <div className="text-sm">{problem.input_format}</div>
             </div>
           )}
           {problem.output_format && (
             <div className="mt-3">
-              <div className="text-xs font-mono uppercase text-pm-text2 mb-1">Output</div>
+              <div className="text-xs pm-eyebrow text-pm-text2 mb-1">Output</div>
               <div className="text-sm">{problem.output_format}</div>
             </div>
           )}
           {problem.constraints && (
             <div className="mt-3">
-              <div className="text-xs font-mono uppercase text-pm-text2 mb-1">Constraints</div>
+              <div className="text-xs pm-eyebrow text-pm-text2 mb-1">Constraints</div>
               <div className="text-sm font-mono">{problem.constraints}</div>
             </div>
           )}
 
           <div className="mt-6">
-            <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Sample tests</div>
+            <div className="text-xs pm-eyebrow text-pm-text2 mb-2">Sample tests</div>
             <div className="space-y-2">
               {(problem.visible_tests || []).map((t, i) => (
-                <div key={i} className="border rounded-lg p-3 text-xs font-mono bg-pm-muted/50">
+                <div key={i} className="border rounded-[14px] p-3 text-xs font-mono bg-[var(--pm-grey)]">
                   <div><span className="text-pm-text2">input:</span> {t.input}</div>
                   <div><span className="text-pm-text2">expected:</span> {t.expected_output}</div>
                 </div>
@@ -130,12 +130,12 @@ export default function DebuggingSection({ problems, answers, setAnswer, onRun, 
 
           {runResults && (
             <div className="mt-6" data-testid="debug-run-results">
-              <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Run results</div>
+              <div className="text-xs pm-eyebrow text-pm-text2 mb-2">Run results</div>
               <div className="space-y-2">
                 {runResults.map((r, i) => (
-                  <div key={i} data-testid={`debug-run-result-${i}`} className={`border rounded-lg p-3 text-xs font-mono ${r.passed ? "border-pm-primary/40 bg-pm-primary/5" : "border-pm-secondary/40 bg-pm-secondary/5"}`}>
+                  <div key={i} data-testid={`debug-run-result-${i}`} className={`border rounded-[14px] p-3 text-xs font-mono ${r.passed ? "border-[rgba(15,111,122,0.4)] bg-[var(--pm-success-bg)]" : "border-[rgba(180,35,24,0.4)] bg-[var(--pm-error-bg)]"}`}>
                     <div className="flex items-center gap-2">
-                      {r.passed ? <CheckCircle2 size={14} className="text-pm-primary" /> : <XCircle size={14} className="text-pm-secondary" />}
+                      {r.passed ? <CheckCircle2 size={14} className="text-pm-primary" /> : <XCircle size={14} className="text-[var(--pm-error-text)]" />}
                       Test {i + 1} · {r.passed ? "passed" : "failed"}
                     </div>
                     <div className="mt-1 text-pm-text2">expected: {r.expected}</div>
@@ -168,7 +168,7 @@ export default function DebuggingSection({ problems, answers, setAnswer, onRun, 
               onClick={() => onRun(problem, current)}
               disabled={running}
               className="pm-btn text-xs py-1.5 px-3"
-              style={{ background: "#0F6F7A", color: "#fff" }}
+              style={{ background: "var(--pm-teal-deep)", color: "var(--pm-white)" }}
             >
               <Play size={12} /> {running ? "running…" : "Run sample tests"}
             </button>

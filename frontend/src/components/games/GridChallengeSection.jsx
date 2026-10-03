@@ -39,7 +39,7 @@ const CELL_BASE = "bg-white rounded-xl shadow-[0_6px_20px_-8px_rgba(0,0,0,0.12)]
 
 function CircleCluster({ circles, highlightId, clickable, clickedIds, onClickCircle }) {
   return (
-    <div className="relative w-full aspect-square bg-[#EFEBDD] rounded-2xl overflow-hidden">
+    <div className="relative w-full aspect-square bg-[var(--pm-cream-deep)] rounded-2xl overflow-hidden">
       {(circles || []).map((c) => {
         const isHighlighted = c.id === highlightId;
         const clickedIndex = (clickedIds || []).indexOf(c.id);
@@ -53,12 +53,12 @@ function CircleCluster({ circles, highlightId, clickable, clickedIds, onClickCir
             onClick={() => onClickCircle?.(c.id)}
             className={[
               "absolute rounded-full -translate-x-1/2 -translate-y-1/2 flex items-center justify-center transition-transform",
-              isHighlighted ? "bg-[#0FAE73]" : isClicked ? "bg-[#0C8B5C]" : "bg-[#B9B3A2]",
+              isHighlighted ? "bg-[var(--pm-teal-deep)]" : isClicked ? "bg-[var(--pm-teal-night)]" : "bg-[#B9B3A2]",
               clickable && !isClicked ? "hover:scale-110 cursor-pointer" : "cursor-default",
             ].join(" ")}
             style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: "7%", height: "7%" }}
           >
-            {isClicked && <span className="text-white text-[10px] font-bold font-mono">{clickedIndex + 1}</span>}
+            {isClicked && <span className="text-white text-[10px] font-bold font-display tabular-nums">{clickedIndex + 1}</span>}
           </button>
         );
       })}
@@ -246,7 +246,7 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
   if (screen === "instructions") {
     return (
       <div className="pm-card p-8 max-w-lg mx-auto text-center">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-primary-dark mb-2">Gamified Round</div>
+        <div className="text-xs pm-eyebrow tracking-widest text-pm-primary-dark mb-2">Gamified Round</div>
         <h2 className="font-display text-2xl font-bold mb-4">{instructions.title}</h2>
         <p className="text-pm-text2 mb-6">{instructions.rule}</p>
         <div className="flex flex-col gap-3 text-left mb-8">
@@ -267,7 +267,7 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
   const headerBar = (
     <div className="flex items-center justify-between mb-3 px-1">
       <div className="pm-chip text-xs">BLOCK {blockIndex + 1} OF {NUM_BLOCKS}</div>
-      <div className="text-xs font-mono text-pm-text2">{runningScore} pts</div>
+      <div className="text-xs font-display tabular-nums text-pm-text2">{runningScore} pts</div>
     </div>
   );
 
@@ -294,10 +294,10 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
         {headerBar}
         <div className="pm-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <div className="text-xs font-mono uppercase text-pm-text2">
+            <div className="text-xs pm-eyebrow text-pm-text2">
               Judgment {judgmentIndex + 1} of {judgments.length}
             </div>
-            <div className={`flex items-center gap-1.5 font-mono text-xs font-semibold ${remaining <= 2 ? "text-pm-secondary" : "text-pm-text2"}`}>
+            <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${remaining <= 2 ? "text-pm-secondary" : "text-pm-text2"}`}>
               <Clock size={14} /> 00:{String(remaining).padStart(2, "0")}
             </div>
           </div>
@@ -336,7 +336,7 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
       <div>
         <div className="flex items-center justify-between mb-3 px-1">
           <div className="pm-chip text-xs">RECALL</div>
-          <div className="text-xs font-mono text-pm-text2">{runningScore} pts</div>
+          <div className="text-xs font-display tabular-nums text-pm-text2">{runningScore} pts</div>
         </div>
         <div className="pm-card p-6">
           <div className="font-display text-base font-semibold mb-1 text-center">

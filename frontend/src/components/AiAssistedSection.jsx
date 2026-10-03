@@ -64,17 +64,17 @@ export default function AiAssistedSection({ session, onSendMessage, onConsent, o
           {(session.transcript || []).map((m, i) => {
             if (m.role === "ai") return (
               <div key={i} className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-pm-primary text-white grid place-items-center font-mono font-bold text-xs shrink-0">AI</div>
+                <div className="w-8 h-8 rounded-full bg-pm-primary text-white grid place-items-center font-display tabular-nums font-bold text-xs shrink-0">AI</div>
                 <div data-testid={`ai-assisted-msg-ai-${i}`} className="pm-card p-3 text-sm flex-1">{m.text}</div>
               </div>
             );
             if (m.role === "candidate") return (
               <div key={i} className="flex gap-3 justify-end">
                 <div data-testid={`ai-assisted-msg-candidate-${i}`} className="max-w-[80%] bg-pm-primary text-white p-3 rounded-2xl rounded-tr-sm text-sm">{m.text}</div>
-                <div className="w-8 h-8 rounded-full bg-[#0A0A0A] text-white grid place-items-center font-mono font-bold text-xs shrink-0">You</div>
+                <div className="w-8 h-8 rounded-full bg-[var(--pm-teal-night)] text-white grid place-items-center font-display tabular-nums font-bold text-xs shrink-0">You</div>
               </div>
             );
-            return <div key={i} className="text-xs font-mono text-pm-text2 italic text-center">{m.text}</div>;
+            return <div key={i} className="text-xs font-display tabular-nums text-pm-text2 italic text-center">{m.text}</div>;
           })}
           <div ref={bottomRef} />
         </div>

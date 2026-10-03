@@ -141,10 +141,10 @@ export default function InductiveChallengeQuestion({
   return (
     <div className="pm-card p-6">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-xs font-mono uppercase text-pm-text2">
+        <div className="text-xs pm-eyebrow text-pm-text2">
           Q{index + 1} of {total} · Inductive Challenge
         </div>
-        <div className={`flex items-center gap-1.5 font-mono text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-pm-text2"}`}>
+        <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-pm-text2"}`}>
           <Clock size={14} />
           00:{String(remaining).padStart(2, "0")}
         </div>
@@ -189,7 +189,7 @@ export default function InductiveChallengeQuestion({
               );
             })}
           </div>
-          <div className="text-xs font-mono text-pm-text2 mt-3 flex items-center gap-1.5">
+          <div className="text-xs font-display tabular-nums text-pm-text2 mt-3 flex items-center gap-1.5">
             {selected.length === 2 ? (
               <>
                 <Check size={13} className="text-pm-primary" /> 2 of 2 selected

@@ -31,7 +31,7 @@ function LetteredMCQCard({ id, prompt, options, selected, onSelect, qNum, qTotal
   const letters = Object.keys(options).sort();
   return (
     <div className="pm-card p-6">
-      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">
+      <div className="text-xs pm-eyebrow text-pm-text2 mb-2">
         {label} {qNum} of {qTotal}
       </div>
       <div className="font-display text-lg font-semibold mb-4">{prompt}</div>
@@ -48,7 +48,7 @@ function LetteredMCQCard({ id, prompt, options, selected, onSelect, qNum, qTotal
                 isSelected ? "border-pm-primary bg-pm-primary/5" : "border-pm-border hover:bg-[rgba(0,0,0,0.02)]"
               }`}
             >
-              <div className={`w-6 h-6 rounded-full grid place-items-center font-mono font-bold text-xs ${
+              <div className={`w-6 h-6 rounded-full grid place-items-center font-display tabular-nums font-bold text-xs ${
                 isSelected ? "bg-pm-primary text-white" : "bg-pm-muted"
               }`}>
                 {letter}
@@ -95,7 +95,7 @@ function BusinessWritingPart({ items, answers, setAnswer }) {
       </div>
       {items.map((q, i) => (
         <div key={q.id} className="pm-card p-6">
-          <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Scenario {i + 1} of {items.length}</div>
+          <div className="text-xs pm-eyebrow text-pm-text2 mb-2">Scenario {i + 1} of {items.length}</div>
           <div className="text-sm text-pm-text2 mb-1">
             Recipient: <span className="font-semibold text-pm-text">{q.recipient_type}</span>
             {" · "}Tone: <span className="font-semibold text-pm-text">{q.tone_expected}</span>
@@ -149,7 +149,7 @@ function ReadingCompPart({ items, answers, setAnswer }) {
       </div>
       {items.map((passage) => (
         <div key={passage.id} className="pm-card p-6">
-          <div className="text-xs font-mono uppercase text-pm-text2 mb-2">{passage.passage_type}</div>
+          <div className="text-xs pm-eyebrow text-pm-text2 mb-2">{passage.passage_type}</div>
           <div className="whitespace-pre-wrap text-sm font-sans mb-5 pb-5 border-b border-pm-border">
             {passage.passage_text}
           </div>
@@ -247,7 +247,7 @@ function ListeningCompPart({ items, answers, setAnswer }) {
       </div>
       {items.map((clip) => (
         <div key={clip.id} className="pm-card p-6">
-          <div className="text-xs font-mono uppercase text-pm-text2 mb-2">
+          <div className="text-xs pm-eyebrow text-pm-text2 mb-2">
             {clip.clip_type === "dialogue" ? "Dialogue" : "Monologue"}
             {clip.speaker_count ? ` · ${clip.speaker_count} speaker${clip.speaker_count > 1 ? "s" : ""}` : ""}
           </div>
@@ -293,7 +293,7 @@ function SpokenReadAloudCard({ attemptId, sectionKey, q, value, onChange }) {
 
   return (
     <div className="pm-card p-6">
-      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Read Aloud</div>
+      <div className="text-xs pm-eyebrow text-pm-text2 mb-2">Read Aloud</div>
       <div className="whitespace-pre-wrap text-sm font-sans mb-5 pb-5 border-b border-pm-border">
         {q.passage_text}
       </div>
@@ -345,7 +345,7 @@ function SpokenRespondToPromptCard({ attemptId, sectionKey, q, value, onChange }
 
   return (
     <div className="pm-card p-6">
-      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Respond to Prompt</div>
+      <div className="text-xs pm-eyebrow text-pm-text2 mb-2">Respond to Prompt</div>
       <div className="font-display text-lg font-semibold mb-4">{q.scenario}</div>
       {typedMode ? (
         <>

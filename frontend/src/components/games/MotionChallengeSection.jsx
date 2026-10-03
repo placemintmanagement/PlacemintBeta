@@ -280,7 +280,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   if (phase === "instructions") {
     return (
       <div className="pm-card p-8 max-w-lg mx-auto text-center">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-primary-dark mb-2">Gamified Round</div>
+        <div className="text-xs pm-eyebrow tracking-widest text-pm-primary-dark mb-2">Gamified Round</div>
         <h2 className="font-display text-2xl font-bold mb-4">{instructions.title}</h2>
         <p className="text-pm-text2 mb-6">{instructions.rule}</p>
         <div className="flex flex-col gap-3 text-left mb-8">
@@ -310,7 +310,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
               <div
                 key={p.id ?? p.puzzle_id}
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${
-                  r?.outcome === "won" ? "bg-emerald-600" : r ? "bg-pm-secondary" : "bg-[#D8D3C4]"
+                  r?.outcome === "won" ? "bg-[var(--pm-teal-deep)]" : r ? "bg-pm-secondary" : "bg-[#D8D3C4]"
                 }`}
               >
                 {i + 1}
@@ -377,8 +377,8 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
       <div className="flex items-center justify-between mb-3 px-1">
         <div className="pm-chip text-xs">LEVEL {levelIndex + 1} OF {puzzles.length}</div>
         <div className="flex items-center gap-4">
-          <div className="text-xs font-mono text-pm-text2">{movesUsed} / {current.moveBudget} moves</div>
-          <div className={`flex items-center gap-1.5 font-mono text-xs font-semibold ${poolRemaining <= 30 ? "text-pm-secondary" : "text-pm-text2"}`}>
+          <div className="text-xs font-display tabular-nums text-pm-text2">{movesUsed} / {current.moveBudget} moves</div>
+          <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${poolRemaining <= 30 ? "text-pm-secondary" : "text-pm-text2"}`}>
             <Clock size={14} /> {formatMMSS(poolRemaining)}
           </div>
         </div>
@@ -436,7 +436,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
                         isWall ? "bg-[#2C2C2C]" : "bg-white"
                       }`}
                     >
-                      {isWall && <span className="text-[#8A8A8A] text-xs font-bold">&times;</span>}
+                      {isWall && <span className="text-[#C4C4C4] text-xs font-bold">&times;</span>}
                     </div>
                   );
                 })
