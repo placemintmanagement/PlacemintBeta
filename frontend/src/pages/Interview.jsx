@@ -5,6 +5,7 @@ import api from "../api";
 import Header from "../components/Header";
 import { TID } from "../testIds";
 import { SendHorizontal } from "lucide-react";
+import { PageShell, SectionLabel, PageTitle, Card, Button } from "../components/shared";
 
 // Defensive: never trust a prompt/text field is a string. Legacy interview
 // documents in the DB may have object prompts from earlier LLM outputs.
@@ -14,6 +15,20 @@ const asText = (v) => {
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   try { return JSON.stringify(v, null, 2); } catch { return String(v); }
 };
+
+// Body-size meta text (never monospace).
+const META = { fontSize: 14, color: "rgba(11,42,48,0.7)" };
+const BODY = { fontSize: 15, color: "var(--pm-ink)", lineHeight: 1.6 };
+
+// Avatar disc: teal-deep for the interviewer, teal-night for the candidate.
+function Avatar({ tone, children }) {
+  return (
+    <div className="w-9 h-9 rounded-full grid place-items-center font-display font-semibold shrink-0"
+         style={{ fontSize: 14, background: tone === "you" ? "var(--pm-teal-night)" : "var(--pm-teal-deep)", color: "var(--pm-white)" }}>
+      {children}
+    </div>
+  );
+}
 
 export default function Interview() {
   const { interviewId } = useParams();
@@ -79,64 +94,68 @@ export default function Interview() {
     } finally { setSubmitting(false); }
   };
 
-  if (!interview) return <div><Header /><div className="p-10 text-center">Loading…</div></div>;
+  if (!interview) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Loading…</div></PageShell></div>;
 
   return (
     <div>
-      <Header />
-      <div className="max-w-4xl mx-auto px-6 py-8 pm-in">
-        <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-2">{interview.company_name} · interview</div>
-        <h1 className="font-display text-3xl font-bold">Adaptive interview</h1>
-        <div className="mt-1 text-sm text-pm-text2">Question {Math.min((interview.current_index ?? 0) + 1, interview.questions.length)} of {interview.questions.length}</div>
+      <Header light />
+      <PageShell>
+        <div className="max-w-4xl mx-auto pm-in">
+          <SectionLabel>{interview.company_name} · interview</SectionLabel>
+          <PageTitle as="h2" style={{ fontSize: "clamp(1.75rem, 3vw, 2.25rem)" }}>Adaptive interview</PageTitle>
+          <div className="mt-2" style={META}>Question {Math.min((interview.current_index ?? 0) + 1, interview.questions.length)} of {interview.questions.length}</div>
 
-        {/* Chat */}
-        <div className="mt-6 pm-card p-6 space-y-4 max-h-[60vh] overflow-y-auto">
-          {transcript.map((m, i) => {
-            if (m.role === "interviewer") return (
-              <div key={i} className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-pm-primary text-white grid place-items-center font-mono font-bold text-xs shrink-0">I</div>
-                <div className="flex-1">
-                  {m.kind && <div className="text-[10px] font-mono uppercase text-pm-text2 mb-1">{m.kind}</div>}
-                  <div className="pm-card p-4 !hover:transform-none">{m.text}</div>
+          {/* Chat */}
+          <Card className="mt-6 space-y-5 max-h-[60vh] overflow-y-auto" padding="24px">
+            {transcript.map((m, i) => {
+              if (m.role === "interviewer") return (
+                <div key={i} className="flex gap-3">
+                  <Avatar tone="interviewer">I</Avatar>
+                  <div className="flex-1 min-w-0">
+                    {m.kind && <div className="pm-eyebrow mb-1" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>{m.kind}</div>}
+                    <div className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "var(--pm-grey)", border: "1px solid rgba(7,59,67,0.08)" }}>{m.text}</div>
+                  </div>
                 </div>
-              </div>
-            );
-            if (m.role === "you") return (
-              <div key={i} className="flex gap-3 justify-end">
-                <div className="max-w-[80%] bg-pm-primary text-white p-4 rounded-2xl rounded-tr-sm">{m.text}</div>
-                <div className="w-8 h-8 rounded-full bg-[#0A0A0A] text-white grid place-items-center font-mono font-bold text-xs shrink-0">You</div>
-              </div>
-            );
-            return (
-              <div key={i} className="flex gap-3">
-                <div className="w-8 h-8"></div>
-                <div className="text-xs font-mono text-pm-text2 italic">{m.text}</div>
-              </div>
-            );
-          })}
-          <div ref={bottomRef} />
-        </div>
+              );
+              if (m.role === "you") return (
+                <div key={i} className="flex gap-3 justify-end">
+                  <div className="max-w-[80%] p-4 rounded-[18px] rounded-tr-[4px] whitespace-pre-wrap" style={{ fontSize: 15, lineHeight: 1.6, background: "var(--pm-teal-deep)", color: "var(--pm-white)" }}>{m.text}</div>
+                  <Avatar tone="you">You</Avatar>
+                </div>
+              );
+              return (
+                <div key={i} className="flex gap-3">
+                  <div className="w-9 h-9 shrink-0" aria-hidden="true"></div>
+                  <div style={{ ...META, fontStyle: "italic" }}>{m.text}</div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </Card>
 
-        {/* Input */}
-        {currentQ && (
-          <div className="mt-4 flex gap-2 items-end">
-            <textarea
-              data-testid={TID.intvAnswerInput}
-              value={answer}
-              onChange={e => setAnswer(e.target.value)}
-              rows={3}
-              placeholder="Type your answer. Be specific. Real interviewers dislike vague answers."
-              className="pm-input font-sans flex-1"
-            />
-            <button
-              data-testid={TID.intvSubmitAnswer}
-              onClick={send} disabled={submitting || !answer.trim()}
-              className="pm-btn pm-btn-primary h-[54px] px-5">
-              {submitting ? "…" : <><SendHorizontal size={16}/> Send</>}
-            </button>
-          </div>
-        )}
-      </div>
+          {/* Input */}
+          {currentQ && (
+            <div className="mt-4 flex gap-3 items-end">
+              <textarea
+                data-testid={TID.intvAnswerInput}
+                value={answer}
+                onChange={e => setAnswer(e.target.value)}
+                rows={3}
+                placeholder="Type your answer. Be specific. Real interviewers dislike vague answers."
+                className="pm-input flex-1"
+                style={{ fontSize: 15 }}
+              />
+              <Button
+                data-testid={TID.intvSubmitAnswer}
+                onClick={send} disabled={submitting || !answer.trim()}
+                className="h-[54px] !px-5"
+              >
+                {submitting ? "…" : <><SendHorizontal size={16} aria-hidden="true"/> Send</>}
+              </Button>
+            </div>
+          )}
+        </div>
+      </PageShell>
     </div>
   );
 }
