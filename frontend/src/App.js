@@ -43,6 +43,11 @@ import Auth0TokenSync from "@/auth/Auth0TokenSync";
 // branch below dead code in any real deployment.
 const _TEST_AUTH_BYPASS_ACTIVE = Boolean(process.env.REACT_APP_TEST_AUTH_TOKEN);
 
+// /dev/* preview routes: available in development and in the TEST-ONLY
+// Playwright build (the bypass flag above). A real production build has
+// neither, so these paths fall through to the 404 page.
+const DEV_ROUTES_ENABLED = process.env.NODE_ENV !== "production" || _TEST_AUTH_BYPASS_ACTIVE;
+
 function Protected({ children }) {
   const { user, loading } = useAuth();
   if (_TEST_AUTH_BYPASS_ACTIVE) return children;
@@ -80,19 +85,19 @@ function AppRouter() {
       <Route path="/interview/:interviewId" element={<Protected><Interview /></Protected>} />
       <Route path="/attempt/:attemptId/report" element={<Protected><FinalReport /></Protected>} />
       {/* Standing dev tool — DI chart question visual check, not gated behind auth */}
-      <Route path="/dev/chart-preview" element={<DevChartPreview />} />
+      {DEV_ROUTES_ENABLED && <Route path="/dev/chart-preview" element={<DevChartPreview />} />}
       {/* Standing dev tool — gamified-round component visual check, not gated behind auth */}
-      <Route path="/dev/game-preview" element={<DevGamePreview />} />
-      <Route path="/dev/switch-preview" element={<DevSwitchChallengePreview />} />
-      <Route path="/dev/grid-challenge-preview" element={<DevGridChallengePreview />} />
-      <Route path="/dev/inductive-preview" element={<DevInductiveChallengePreview />} />
-      <Route path="/dev/motion-challenge-preview" element={<DevMotionChallengePreview />} />
+      {DEV_ROUTES_ENABLED && <Route path="/dev/game-preview" element={<DevGamePreview />} />}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/switch-preview" element={<DevSwitchChallengePreview />} />}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/grid-challenge-preview" element={<DevGridChallengePreview />} />}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/inductive-preview" element={<DevInductiveChallengePreview />} />}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/motion-challenge-preview" element={<DevMotionChallengePreview />} />}
       {/* Standing dev tool — Auth0 login/logout/ProtectedRoute preview, not wired into any live route yet */}
-      <Route path="/dev/auth0-preview" element={<DevAuth0Preview />} />
+      {DEV_ROUTES_ENABLED && <Route path="/dev/auth0-preview" element={<DevAuth0Preview />} />}
       {/* Standing dev tool — Debugging Assessment (Round 3) interface preview, not wired into companies.py or the live OA flow yet */}
-      <Route path="/dev/debugging-preview" element={<DevDebuggingPreview />} />
+      {DEV_ROUTES_ENABLED && <Route path="/dev/debugging-preview" element={<DevDebuggingPreview />} />}
       {/* Standing dev tool — AI-Assisted Coding (Round 4) interface preview, not wired into companies.py or the live OA flow yet */}
-      <Route path="/dev/ai-assisted-preview" element={<DevAiAssistedPreview />} />
+      {DEV_ROUTES_ENABLED && <Route path="/dev/ai-assisted-preview" element={<DevAiAssistedPreview />} />}
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
