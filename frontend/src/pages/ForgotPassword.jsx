@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../api";
 import Header from "../components/Header";
+import { PageShell, PageTitle, Card, Button } from "../components/shared";
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
@@ -30,42 +31,46 @@ export default function ForgotPassword() {
 
   return (
     <div>
-      <Header />
-      <div className="max-w-md mx-auto px-6 py-16">
-        <h1 className="font-display text-4xl font-bold mb-2">Forgot password?</h1>
-        <p className="text-pm-text2 mb-8">We'll send you a reset link. It expires in 30 minutes.</p>
+      <Header light />
+      <PageShell>
+        <div className="max-w-md mx-auto py-16">
+          <PageTitle as="h1" style={{ fontSize: "clamp(2rem, 4vw, 2.75rem)" }}>Forgot password?</PageTitle>
+          <p className="mt-3 mb-8" style={{ fontSize: 16, color: "rgba(11,42,48,0.85)" }}>We'll send you a reset link. It expires in 30 minutes.</p>
 
-        {!sent ? (
-          <form onSubmit={submit} className="space-y-4">
-            <input
-              data-testid="forgot-email"
-              type="email" required placeholder="you@campus.edu"
-              value={email} onChange={e => setEmail(e.target.value)}
-              className="pm-input"
-            />
-            <button data-testid="forgot-submit" disabled={loading} className="w-full pm-btn pm-btn-primary py-3">
-              {loading ? "Sending…" : "Send reset link"}
-            </button>
-          </form>
-        ) : (
-          <div className="pm-card p-6">
-            <div className="font-display text-lg font-bold">Check your email.</div>
-            <p className="text-sm text-pm-text2 mt-1">If <span className="font-mono">{email}</span> is registered, a reset link was sent.</p>
-            {devLink && (
-              <div className="mt-4 border-t pt-4">
-                <div className="text-xs font-mono uppercase text-pm-secondary mb-2">dev mode · test link</div>
-                <Link to={devLink} data-testid="forgot-dev-link" className="text-pm-primary-dark underline break-all text-xs font-mono">
-                  {window.location.origin + devLink}
-                </Link>
-              </div>
-            )}
+          {!sent ? (
+            <form onSubmit={submit} className="space-y-4">
+              <input
+                data-testid="forgot-email"
+                type="email" required placeholder="you@campus.edu"
+                aria-label="Email"
+                value={email} onChange={e => setEmail(e.target.value)}
+                className="pm-input"
+                style={{ fontSize: 15 }}
+              />
+              <Button type="submit" data-testid="forgot-submit" disabled={loading} className="w-full">
+                {loading ? "Sending…" : "Send reset link"}
+              </Button>
+            </form>
+          ) : (
+            <Card>
+              <div className="font-display font-semibold" style={{ fontSize: 20, color: "var(--pm-ink)" }}>Check your email.</div>
+              <p className="mt-1" style={{ fontSize: 15, color: "rgba(11,42,48,0.85)" }}>If <span style={{ fontWeight: 600 }}>{email}</span> is registered, a reset link was sent.</p>
+              {devLink && (
+                <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(7,59,67,0.08)" }}>
+                  <div className="pm-eyebrow mb-2" style={{ fontSize: 12, color: "var(--pm-ink)" }}>dev mode · test link</div>
+                  <Link to={devLink} data-testid="forgot-dev-link" className="underline underline-offset-2 break-all" style={{ fontSize: 13, color: "var(--pm-teal-deep)", fontWeight: 600 }}>
+                    {window.location.origin + devLink}
+                  </Link>
+                </div>
+              )}
+            </Card>
+          )}
+
+          <div className="mt-6 text-center" style={{ fontSize: 15, color: "rgba(11,42,48,0.85)" }}>
+            Remembered it? <Link to="/login" className="font-semibold underline underline-offset-2" style={{ color: "var(--pm-teal-deep)" }}>Sign in</Link>
           </div>
-        )}
-
-        <div className="text-sm text-pm-text2 mt-6 text-center">
-          Remembered it? <Link to="/login" className="text-pm-primary-dark font-semibold">Sign in</Link>
         </div>
-      </div>
+      </PageShell>
     </div>
   );
 }
