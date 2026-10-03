@@ -30,18 +30,20 @@ const VARIANTS = {
   },
 };
 
-export default function Button({ variant = "primary", type = "button", disabled = false, className = "", style = {}, children, ...rest }) {
+// `as` renders the same styling on a router Link or an anchor; type and
+// disabled only apply to the native button.
+export default function Button({ as: Tag = "button", variant = "primary", type = "button", disabled = false, className = "", style = {}, children, ...rest }) {
   const v = VARIANTS[variant] || VARIANTS.primary;
   const disabledStyle = disabled ? { background: "var(--pm-sky-deep)", color: "rgba(11,42,48,0.35)", border: "none" } : {};
+  const nativeProps = Tag === "button" ? { type, disabled } : {};
   return (
-    <button
-      type={type}
-      disabled={disabled}
+    <Tag
+      {...nativeProps}
       className={`${BASE} ${disabled ? "" : v.cls} ${className}`}
       style={{ ...v.style, ...disabledStyle, ...style }}
       {...rest}
     >
       {children}
-    </button>
+    </Tag>
   );
 }

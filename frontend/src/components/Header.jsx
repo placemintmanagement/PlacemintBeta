@@ -56,7 +56,7 @@ export default function Header({ light = false } = {}) {
         : { background: "rgba(10,60,66,0.82)" }
       }
     >
-      <div className="max-w-7xl mx-auto flex items-center justify-between px-6 lg:px-10 py-4">
+      <div className={`max-w-7xl mx-auto flex items-center justify-between ${light ? "px-4 sm:px-6 lg:px-10" : "px-6 lg:px-10"} py-4`}>
         <Link to="/" data-testid={TID.navLogo} className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg grid place-items-center font-display font-extrabold" style={{ background: "var(--pm-lime)", color: "var(--pm-ink)" }}>P</div>
           <span className={`font-display ${light ? "text-lg sm:text-xl" : "text-xl"} font-bold tracking-tight`} style={{ color: light ? "#0B2A30" : "#FFFFFF" }}>Placemint</span>
@@ -89,20 +89,23 @@ export default function Header({ light = false } = {}) {
                   )}
                 </div>
               )}
-              <Link to="/dashboard" data-testid={TID.navDashboard} className={`${ghostBtnClass} text-sm py-2 px-4`}>Dashboard</Link>
-              <Link to="/deck" data-testid="nav-deck" className={`${ghostBtnClass} text-sm py-2 px-4 hidden sm:inline-flex`}>Review deck</Link>
+              <Link to="/dashboard" data-testid={TID.navDashboard} className={light ? `${ghostBtnClass} text-sm pm-hdr-btn` : `${ghostBtnClass} text-sm py-2 px-4`}>Dashboard</Link>
+              {/* Wrapper, not the link: .pm-btn sets display itself and would win over a hidden class. */}
+              <div className="hidden sm:flex">
+                <Link to="/deck" data-testid="nav-deck" className={`${ghostBtnClass} text-sm py-2 px-4`}>Review deck</Link>
+              </div>
               <button
                 data-testid={TID.navLogout}
                 onClick={() => setConfirmOpen(true)}
-                className={`${ghostBtnClass} text-sm py-2 px-4`}
+                className={light ? `${ghostBtnClass} text-sm pm-hdr-btn` : `${ghostBtnClass} text-sm py-2 px-4`}
               >
                 Sign out
               </button>
             </>
           ) : (
             <>
-              <Link to="/login" data-testid={TID.navLogin} className={`${ghostBtnClass} text-sm py-2 px-3 sm:px-4 whitespace-nowrap`}>Sign in</Link>
-              <Link to="/signup" data-testid={TID.navSignup} className="pm-btn pm-btn-primary text-sm py-2 px-3 sm:px-4 whitespace-nowrap">Start free</Link>
+              <Link to="/login" data-testid={TID.navLogin} className={light ? `${ghostBtnClass} text-sm pm-hdr-btn whitespace-nowrap` : `${ghostBtnClass} text-sm py-2 px-3 sm:px-4 whitespace-nowrap`}>Sign in</Link>
+              <Link to="/signup" data-testid={TID.navSignup} className={light ? "pm-btn pm-btn-primary text-sm pm-hdr-btn whitespace-nowrap" : "pm-btn pm-btn-primary text-sm py-2 px-3 sm:px-4 whitespace-nowrap"}>Start free</Link>
             </>
           )}
         </div>

@@ -3,8 +3,10 @@ import React from "react";
 // White card: radius 24px, 1px rgba(7,59,67,.08) border, soft teal shadow.
 // header + tint: optional tinted header zone (#E8F3FB, #EAF9C4, #F2EDDF,
 // #E3EEF0) rendered edge to edge above the body.
+// padding: body padding, default 24px 28px. Pass "0" when the content
+// sets its own inner padding (stat tiles, banners).
 // interactive: hover/focus lift via index.css (.pm-dc-card), reduced-motion safe.
-export default function Card({ header = null, tint = "#E8F3FB", interactive = false, children, className = "", style = {} }) {
+export default function Card({ header = null, tint = "#E8F3FB", interactive = false, padding = "24px 28px", children, className = "", style = {} }) {
   return (
     <div
       className={`${interactive ? "pm-dc-card" : ""} relative flex flex-col overflow-hidden ${className}`}
@@ -21,7 +23,7 @@ export default function Card({ header = null, tint = "#E8F3FB", interactive = fa
           {header}
         </div>
       )}
-      <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", flex: 1 }}>{children}</div>
+      <div style={{ padding, display: "flex", flexDirection: "column", flex: 1 }}>{children}</div>
     </div>
   );
 }

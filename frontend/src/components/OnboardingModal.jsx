@@ -5,6 +5,7 @@ import { useAuth } from "../auth";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "./ui/dialog";
+import { Field, Button } from "./shared";
 
 const YEARS = [2026, 2027, 2028, 2029, 2030];
 const ROLES = [
@@ -67,52 +68,45 @@ export default function OnboardingModal() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent data-testid="onboarding-modal" className="sm:max-w-md bg-pm-surface" onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent data-testid="onboarding-modal" className="sm:max-w-md" style={{ background: "var(--pm-white)", borderRadius: 24, border: "1px solid rgba(7,59,67,0.08)", boxShadow: "0 14px 28px -18px rgba(7,59,67,0.28)", padding: 28 }} onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl">Quick: three fields.</DialogTitle>
-          <DialogDescription className="text-pm-text2">
+          <DialogTitle className="font-display font-light" style={{ fontSize: 28, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--pm-ink)" }}>Quick: three fields.</DialogTitle>
+          <DialogDescription style={{ fontSize: 15, color: "rgba(11,42,48,0.85)" }}>
             We tailor OA questions and interview follow-ups based on your college batch and target role. Takes 15 seconds.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={submit} className="space-y-4 pt-2">
-          <div>
-            <label className="text-xs font-mono uppercase text-pm-text2">College</label>
-            <input
-              data-testid="onboard-college"
-              required autoFocus placeholder="e.g. IIT Kharagpur"
-              value={college} onChange={e => setCollege(e.target.value)}
-              className="pm-input mt-1"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-mono uppercase text-pm-text2">Target role</label>
-            <select
-              data-testid="onboard-role"
-              value={targetRole} onChange={e => setTargetRole(e.target.value)}
-              className="pm-input mt-1"
-            >
-              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-mono uppercase text-pm-text2">Graduation year</label>
-            <select
-              data-testid="onboard-year"
-              value={graduationYear} onChange={e => setGraduationYear(e.target.value)}
-              className="pm-input mt-1"
-            >
-              {YEARS.map(y => <option key={y} value={String(y)}>{y}</option>)}
-            </select>
-          </div>
+          <Field
+            label="College"
+            data-testid="onboard-college"
+            required autoFocus placeholder="e.g. IIT Kharagpur"
+            value={college} onChange={e => setCollege(e.target.value)}
+          />
+          <Field
+            as="select"
+            label="Target role"
+            data-testid="onboard-role"
+            value={targetRole} onChange={e => setTargetRole(e.target.value)}
+          >
+            {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+          </Field>
+          <Field
+            as="select"
+            label="Graduation year"
+            data-testid="onboard-year"
+            value={graduationYear} onChange={e => setGraduationYear(e.target.value)}
+          >
+            {YEARS.map(y => <option key={y} value={String(y)}>{y}</option>)}
+          </Field>
 
           <DialogFooter className="pt-2 flex-row gap-2">
-            <button type="button" data-testid="onboard-skip" onClick={() => setOpen(false)} className="pm-btn pm-btn-ghost text-sm py-2 px-4 flex-1">
+            <Button variant="secondary" data-testid="onboard-skip" onClick={() => setOpen(false)} className="flex-1 !px-4 !py-2" style={{ fontSize: 14 }}>
               Skip for now
-            </button>
-            <button type="submit" data-testid="onboard-save" disabled={saving} className="pm-btn pm-btn-primary text-sm py-2 px-4 flex-1">
+            </Button>
+            <Button type="submit" data-testid="onboard-save" disabled={saving} className="flex-1 !px-4 !py-2" style={{ fontSize: 14 }}>
               {saving ? "Saving…" : "Save & continue"}
-            </button>
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

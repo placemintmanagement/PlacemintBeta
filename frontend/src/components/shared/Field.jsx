@@ -1,6 +1,6 @@
 import React, { useId } from "react";
 
-// Label above, input below. White, 1.5px rgba(7,59,67,.2), radius 14px,
+// Label above, input below. White, 1.5px var(--pm-border-control), radius 14px,
 // padding 12px 16px. Focus: teal-deep border + 3px teal-night outline,
 // 2px offset. Error: error border and helper text.
 // Pass `as="textarea"` or `as="select"` for those controls; `children`
@@ -10,7 +10,7 @@ export default function Field({ label, helper, error, as = "input", id, classNam
   const inputId = id || autoId;
   const helperId = `${inputId}-help`;
   const Control = as;
-  const borderColor = error ? "var(--pm-error-text)" : "rgba(7,59,67,0.2)";
+  const borderColor = error ? "var(--pm-error-text)" : "var(--pm-border-control)";
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <label htmlFor={inputId} style={{ fontSize: 14, color: "rgba(11,42,48,0.85)" }}>{label}</label>

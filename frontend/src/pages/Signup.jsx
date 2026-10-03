@@ -14,7 +14,7 @@ function startGoogleLogin() {
 }
 
 const INPUT_CLASS = "w-full bg-[var(--pm-white)] outline-none focus:outline-[3px] focus:outline-offset-2 focus:outline-[var(--pm-teal-night)] focus:border-[var(--pm-teal-deep)]";
-const INPUT_STYLE = { border: "1.5px solid rgba(7,59,67,0.2)", borderRadius: 14, padding: "12px 16px", fontSize: 15, color: "var(--pm-ink)" };
+const INPUT_STYLE = { border: "1.5px solid var(--pm-border-control)", borderRadius: 14, padding: "12px 16px", fontSize: 15, color: "var(--pm-ink)" };
 
 export default function Signup() {
   const [name, setName] = useState("");

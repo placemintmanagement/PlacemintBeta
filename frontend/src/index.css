@@ -77,6 +77,12 @@
   --pm-warning-bg: #FFF4D6;
   --pm-success-bg: #EAF9C4;
 
+  /* Control boundary (2026-10) -- 1.5px border on inputs, selects,
+     textareas, checkboxes, radios, toggles and code boxes. About 3.3:1
+     on white, so it meets WCAG 1.4.11 (3:1 for UI component boundaries).
+     Cards and dividers keep rgba(7,59,67,.08). */
+  --pm-border-control: rgba(7,59,67,0.55);
+
   --background: 180 25% 96%;
   --foreground: 190 63% 12%;
   --card: 0 0% 100%;
@@ -272,6 +278,11 @@ body::before {
    become unreadable on teal. */
 .pm-btn-ghost-light { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.35); }
 .pm-btn-ghost-light:hover { background: rgba(255,255,255,0.1); }
+/* Light site-header buttons (Header.jsx light variant). Plain CSS so it
+   sits alongside .pm-btn, whose own padding would otherwise win over
+   Tailwind padding utilities. */
+.pm-hdr-btn { padding: 0.5rem 0.75rem; }
+@media (min-width: 640px) { .pm-hdr-btn { padding: 0.5rem 1rem; } }
 
 @layer components {
   .pm-card {
