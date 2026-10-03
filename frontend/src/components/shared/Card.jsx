@@ -6,9 +6,10 @@ import React from "react";
 // padding: body padding, default 24px 28px. Pass "0" when the content
 // sets its own inner padding (stat tiles, banners).
 // interactive: hover/focus lift via index.css (.pm-dc-card), reduced-motion safe.
-export default function Card({ header = null, tint = "#E8F3FB", interactive = false, padding = "24px 28px", children, className = "", style = {} }) {
+export default function Card({ header = null, tint = "#E8F3FB", interactive = false, padding = "24px 28px", children, className = "", style = {}, ...rest }) {
   return (
     <div
+      {...rest}
       className={`${interactive ? "pm-dc-card" : ""} relative flex flex-col overflow-hidden ${className}`}
       style={{
         background: "var(--pm-white)",
