@@ -92,7 +92,7 @@ export default function DebuggingSection({ problems, answers, setAnswer, onRun, 
           </div>
           <div className="text-sm text-pm-text2"><MD>{problem.statement}</MD></div>
 
-          <div className="mt-4 rounded-xl p-4" style={{ background: "rgba(255, 138, 76, 0.08)", border: "1px solid rgba(255, 138, 76, 0.25)" }}>
+          <div className="mt-4 rounded-xl p-4" style={{ background: "var(--pm-warning-bg)", border: "1px solid rgba(11,42,48,0.12)" }}>
             <div className="text-xs pm-eyebrow text-pm-text2 mb-1">What's wrong with this code</div>
             <div className="text-sm">{variant.task_description}</div>
           </div>
@@ -161,7 +161,7 @@ export default function DebuggingSection({ problems, answers, setAnswer, onRun, 
                   <option key={l.value} value={l.value}>{l.label}</option>
                 ))}
               </select>
-              <span className="pm-chip pm-chip-coral">buggy code pre-filled · fix it</span>
+              <span className="inline-flex rounded-full text-white" style={{ fontSize: 12, padding: "3px 10px", background: "rgba(255,255,255,0.12)" }}>buggy code pre-filled · fix it</span>
             </div>
             <button
               data-testid="debug-run-btn"

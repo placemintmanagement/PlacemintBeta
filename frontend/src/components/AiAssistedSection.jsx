@@ -132,7 +132,7 @@ export default function AiAssistedSection({ session, onSendMessage, onConsent, o
       {/* Right: read-only Monaco editor -- empty -> flawed_code -> corrected_code */}
       <div className="pm-editor-pane rounded-2xl overflow-hidden flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-          <span className="pm-chip pm-chip-coral">{revealed ? revealed.label : "Code will appear here when requested during AI interaction..."}</span>
+          <span className="inline-flex rounded-full text-white" style={{ fontSize: 12, padding: "3px 10px", background: "rgba(255,255,255,0.12)" }}>{revealed ? revealed.label : "Code will appear here when requested during AI interaction..."}</span>
         </div>
         <div className="flex-1 min-h-[400px]">
           <Editor
