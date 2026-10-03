@@ -27,7 +27,7 @@ export default function ResetPassword() {
       toast.success("Password reset. Sign in with your new password.");
       navigate("/login");
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Reset failed — link may be expired");
+      toast.error(err.response?.data?.detail || "Reset failed. Link may be expired");
     } finally { setLoading(false); }
   };
 

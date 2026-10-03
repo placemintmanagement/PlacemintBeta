@@ -35,7 +35,7 @@ export default function DepartmentCard({ department }) {
         </div>
       </div>
       <div className="mt-auto pt-2 flex items-center justify-end">
-        <span className="pm-btn pm-btn-primary text-sm py-2 px-4">
+        <span className="pm-btn text-sm py-2 px-4" style={{ background: "var(--pm-lime)", color: "#0B2A30" }}>
           Explore <ChevronRight size={14} />
         </span>
       </div>

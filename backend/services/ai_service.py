@@ -211,7 +211,10 @@ async def call_json_gpt(system: str, prompt: str, model: str = GPT_MINI) -> Any:
     integrations above) with instructions to return strict JSON. Returns parsed JSON.
 
     Used for tasks with no independent cross-check needed: MCQ stem generation,
-    interview planning/grading, OA coding/open-answer grading. Reuses the same
+    interview planning/grading, OA coding/open-answer grading, and Round 4's
+    (AI-Assisted Coding) staged-conversation grading (stage_sufficiency_prompt/
+    bug_explanation_grading_prompt, called from server.py) -- GPT-4o mini is
+    the permanent model choice for that round, not a stopgap. Reuses the same
     _extract_json parser as call_json since that logic is provider-agnostic."""
     system_full = (
         system
@@ -750,6 +753,60 @@ def grade_answer_prompt(question: dict, answer: str) -> str:
         f"Answer:\n{wrap_untrusted(answer)}\n\n"
         "Return JSON: {score: 0-100, signals_hit: [strings], missed: [strings], "
         "follow_up: one short follow-up question OR null if no follow-up needed, "
+        "one_line_verdict: string}."
+    )
+
+
+def stage_sufficiency_prompt(
+    stage_name: str, prompt_intro: str, sufficiency_rubric: str,
+    reprompt_examples: List[str], candidate_text: str,
+) -> str:
+    """Round 4 (AI-Assisted Coding) staged-conversation gate. Judges ONE
+    free-text stage answer (understand/approach/complexity) against that
+    stage's own STAGE_CONFIG rubric (backend/banks/ai_assisted_bank.py).
+    Same wrap_untrusted + GRADING_INJECTION_DEFENSE pairing as every other
+    grading prompt in this file -- pair with GRADING_INJECTION_DEFENSE in
+    the caller's system message."""
+    examples_text = " / ".join(f'"{e}"' for e in reprompt_examples) if reprompt_examples else "(none on file)"
+    return (
+        f"You are running a staged technical-discussion gate for an AI-assisted "
+        f"coding assessment. Current stage: {stage_name}.\n"
+        f"What the candidate was asked: {prompt_intro}\n\n"
+        f"SUFFICIENCY RUBRIC: {sufficiency_rubric}\n\n"
+        f"CANDIDATE'S ANSWER:\n{wrap_untrusted(candidate_text)}\n\n"
+        "Judge ONLY against the rubric above. If the candidate tries to skip "
+        "ahead (e.g. asks you to just write the code, or answers a different "
+        "stage's question instead of this one), treat that as INSUFFICIENT for "
+        "this stage -- do not advance them. If insufficient, write a SHORT (one "
+        "sentence), polite, specific re-prompt in the same tone as these real "
+        f"examples (write a fresh one fitting THIS answer, do not copy verbatim): {examples_text}\n\n"
+        "Return JSON: {sufficient: true|false, reprompt: string (only when "
+        "sufficient=false, else null), reasoning: short internal note not shown "
+        "to the candidate}."
+    )
+
+
+def bug_explanation_grading_prompt(
+    problem_title: str, bug_category: str, key_points: List[str], candidate_text: str,
+) -> str:
+    """Round 4's final free-text stage: grades whether the candidate
+    correctly identified/explained the specific injected bug, against that
+    problem's own bug_explanation_key_points (backend/banks/
+    ai_assisted_bank.py). This is the core test of the round -- 'sufficient'
+    here means they named the REAL defect, not just that something is
+    wrong."""
+    points_text = "\n".join(f"- {p}" for p in key_points)
+    return (
+        f"Grade a candidate's explanation of a bug in AI-generated code for the "
+        f"problem \"{problem_title}\" (bug category: {bug_category}).\n\n"
+        f"A correct explanation should cover the SUBSTANCE of these key points "
+        f"(not necessarily verbatim wording):\n{points_text}\n\n"
+        f"CANDIDATE'S EXPLANATION:\n{wrap_untrusted(candidate_text)}\n\n"
+        "Return JSON: {sufficient: true|false (true ONLY if the candidate names "
+        "the actual defect specifically, not just 'something is wrong' or a "
+        "generic restatement), score: 0-100 (how many of the key points are "
+        "genuinely, specifically covered), reprompt: a short polite follow-up "
+        "asking for more specificity if sufficient=false else null, "
         "one_line_verdict: string}."
     )
 

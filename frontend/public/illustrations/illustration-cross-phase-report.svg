@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="One report with a check mark">
+  <rect width="640" height="360" fill="#F2EDDF"/>
+  <rect x="236" y="52" width="168" height="224" rx="24" fill="#FFFFFF"/>
+  <rect x="264" y="92" width="104" height="14" rx="7" fill="#0F6F7A"/>
+  <rect x="264" y="124" width="76" height="14" rx="7" fill="#0F6F7A" opacity=".3"/>
+  <rect x="264" y="156" width="90" height="14" rx="7" fill="#0F6F7A" opacity=".3"/>
+  <circle cx="404" cy="252" r="40" fill="#C6F24E" stroke="#F2EDDF" stroke-width="8"/>
+  <path d="M386 252 l13 14 l24 -28" fill="none" stroke="#073B43" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

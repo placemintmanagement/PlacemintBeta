@@ -3,44 +3,117 @@
 @tailwind utilities;
 
 :root {
-  --pm-bg: #FAF8F3;
+  /* Teal / lime / white design language (2026-10), site-wide -- strict
+     palette, no red/orange/coral/green anywhere, including former
+     "warning" uses. --pm-primary is teal-deep (was green #0FAE73);
+     --pm-secondary (was coral, then briefly plain red) is now --pm-ink --
+     fail/attention states are distinguished by being darker/bolder than
+     body text, not by hue, since lime already means "highlight/positive"
+     and no other hue is in the approved palette. --pm-ink/--pm-page-bg/
+     --pm-muted are the new names used directly in new code; the --pm-*
+     aliases below keep every existing component/page working without a
+     per-file rewrite. The page itself is teal top to bottom -- see
+     html/body below. --pm-bg is kept only as the "page is teal" flag
+     color for the handful of components (Header's scroll backdrop, IDE
+     mockup panel) that need a literal value rather than the gradient. */
+  --pm-ink: #0B2A30;
+  --pm-muted: rgba(11,42,48,0.65);
+  --pm-muted-on-teal: rgba(255,255,255,0.85);
+
+  --pm-bg: var(--pm-teal-deep);
   --pm-surface: #FFFFFF;
-  --pm-surface-muted: #F3F0E6;
-  --pm-primary: #0FAE73;
-  --pm-primary-dark: #0C8B5C;
-  --pm-secondary: #FF6F4D;
-  --pm-text: #0A0A0A;
-  --pm-text-2: #4B5563;
-  --pm-text-muted: #9CA3AF;
-  --pm-border: rgba(10,10,10,0.10);
+  --pm-surface-muted: #E3EFEF;
+  --pm-primary: #0F6F7A;
+  --pm-primary-dark: #0A5760;
+  --pm-secondary: var(--pm-ink);
+  --pm-text: var(--pm-ink);
+  --pm-text-2: #52696E;
+  --pm-text-muted: #8CA3A8;
+  --pm-border: rgba(11,42,48,0.10);
   --pm-editor-bg: #0F111A;
 
-  --background: 44 33% 96%;
-  --foreground: 0 0% 4%;
+  --pm-teal-deep: #0F6F7A;
+  --pm-teal-light: #2A9AA3;
+  --pm-teal-night: #07424A;
+  --pm-lime: #C6F24E;
+  --pm-lime-dark: #AEDB3A;
+  --pm-white: #FFFFFF;
+
+  /* Single source of truth for the display typeface (2026-10) -- read by
+     tailwind.config.js's fontFamily.display, which is what the
+     `font-display` utility class actually uses everywhere in the app.
+     Components use that class, never a hardcoded font-family of their
+     own (grepped for stragglers when this was introduced -- see below). */
+  --pm-font-display: "Outfit", system-ui, sans-serif;
+
+  /* Section-label/eyebrow typeface (2026-10) -- Poppins 600 ONLY (no
+     other weight is loaded, see index.html). Used via .pm-eyebrow below,
+     not hardcoded per component, same reasoning as --pm-font-display. */
+  --pm-font-label: "Poppins", system-ui, sans-serif;
+
+  /* Cream (2026-10) -- allowed now, but ONLY as a light-section background
+     (like this one), not a page-wide background and not a text color. */
+  --pm-cream: #FAF6EC;
+  --pm-cream-deep: #F2EDDF;
+
+  /* Sky blue (2026-10) -- a second allowed light-section background,
+     alongside cream, so adjacent light sections can be told apart
+     without falling back to dark teal between every one of them. Also
+     not a page-wide background and not a text color. */
+  --pm-sky: #E8F3FB;
+  --pm-sky-deep: #D3E8F6;
+
+  /* Neutral light grey (2026-10) -- a third light-section background,
+     deliberately hueless (unlike cream's warm and sky's blue tint) for
+     CrackInterviewsSection, which sits directly between the hero (teal)
+     and Contrarian (cream) and had been plain white. */
+  --pm-grey: #F5F6F7;
+
+  --background: 180 25% 96%;
+  --foreground: 190 63% 12%;
   --card: 0 0% 100%;
-  --card-foreground: 0 0% 4%;
+  --card-foreground: 190 63% 12%;
   --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 4%;
-  --primary: 158 84% 37%;
+  --popover-foreground: 190 63% 12%;
+  --primary: 186 78% 27%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 44 27% 92%;
-  --secondary-foreground: 0 0% 9%;
-  --muted: 44 27% 92%;
-  --muted-foreground: 220 9% 46%;
-  --accent: 12 100% 65%;
-  --accent-foreground: 0 0% 100%;
+  --secondary: 180 25% 92%;
+  --secondary-foreground: 190 63% 12%;
+  --muted: 180 25% 92%;
+  --muted-foreground: 191 15% 38%;
+  --accent: 76 86% 63%;
+  --accent-foreground: 190 63% 12%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 91%;
-  --input: 0 0% 91%;
-  --ring: 158 84% 37%;
+  --border: 180 15% 88%;
+  --input: 180 15% 88%;
+  --ring: 186 78% 27%;
   --radius: 0.75rem;
 }
 
 * { border-color: hsl(var(--border)); }
 
+/* The whole document sits on ONE continuous teal gradient (2026-10) --
+   deep at the top to night at the bottom, nothing else paints a base
+   background anywhere on the page (sections only add scrims/cards on top
+   of this). Painted on html (not body) so it always covers the full
+   scrollable height even as body's own height is driven by content.
+   Previously this had a teal-light stop at 50% AND the hero separately
+   painted its own 135deg teal-deep/teal-light gradient -- two different
+   gradient systems meeting at the hero's bottom edge produced a visible
+   seam there, since the hero's own gradient's exit color never matched
+   the page gradient's color at that exact scroll position. Now there is
+   only this one gradient; the hero adds just a scrim (semi-transparent)
+   on top of it, never a competing opaque background. */
+html {
+  background: linear-gradient(180deg, var(--pm-teal-deep) 0%, var(--pm-teal-night) 100%);
+  width: 100%;
+  margin: 0;
+  overflow-x: clip;
+  overflow-x: hidden; /* fallback for browsers without overflow:clip */
+}
+
 html, body, #root {
-  background: var(--pm-bg);
   color: var(--pm-text);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -49,7 +122,32 @@ html, body, #root {
 
 body {
   margin: 0;
+  width: 100%;
   min-height: 100vh;
+  position: relative;
+  overflow-x: clip;
+  overflow-x: hidden;
+}
+
+/* Faint grid texture over the whole page, anchored to the viewport so it
+   reads as one continuous surface while scrolling rather than per-section
+   tiles. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+#root {
+  width: 100%;
+  position: relative;
+  z-index: 1;
 }
 
 /* Subtle grain overlay on light surfaces */
@@ -63,8 +161,90 @@ body {
   mix-blend-mode: multiply;
 }
 
-.font-display { font-family: 'Outfit', system-ui, sans-serif; letter-spacing: -0.02em; }
+/* font-family itself comes from Tailwind's generated .font-display utility
+   (tailwind.config.js, fontFamily.display -> var(--pm-font-display)) --
+   this rule only adds letter-spacing, so there's one definition of the
+   actual typeface, not two fighting over the same class. */
+.font-display { letter-spacing: -0.02em; }
 .font-mono    { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+/* Section-label/eyebrow style (2026-10, was font-mono + tracking-widest
+   i.e. ~0.1em letter-spacing + tabular mono spacing) -- every small
+   uppercase label that sits directly above a landing-page h1/h2 heading
+   uses this (Landing.jsx, WhatYouGetSection.jsx, InsideYourReportSection
+   .jsx). Deliberately NOT applied to the hero's own badge ("company-
+   specific placement prep") or any app-page label (Dashboard, Pricing,
+   OA review, etc.) -- those keep font-mono, out of scope for this
+   change. font-size is mobile-first (13px) with a 768px step to 14px,
+   per spec; color is set per-instance (teal-deep on light sections,
+   would be lime on dark ones, though none of the current labels sit on
+   a dark section). */
+.pm-eyebrow {
+  font-family: var(--pm-font-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  font-style: normal;
+}
+@media (min-width: 768px) {
+  .pm-eyebrow { font-size: 14px; }
+}
+
+/* Subtle hover/keyboard-focus lift (2026-10) -- DifferentiatorCards.jsx's
+   three "Real order/cutoffs/pressure" cards. :focus-within is currently
+   inert (the cards have no focusable content of their own -- no link, no
+   button), kept only so this still works unchanged if one gains
+   interactive content later; no tabIndex was added just to exercise it,
+   since that would create a keyboard focus stop that does nothing. */
+.pm-card-lift { transition: transform 200ms ease; }
+.pm-card-lift:hover, .pm-card-lift:focus-within { transform: translateY(-4px); }
+@media (prefers-reduced-motion: reduce) {
+  .pm-card-lift { transition: none; }
+  .pm-card-lift:hover, .pm-card-lift:focus-within { transform: none; }
+}
+
+/* Company-selection page cards (CompanyCard.jsx, 2026-10) -- scoped to
+   this component rather than .pm-card/.pm-btn-primary (shared with
+   Pricing, Dashboard, etc., out of scope for that restyle). */
+.pm-dc-card { transition: transform 200ms ease, box-shadow 200ms ease; }
+.pm-dc-card:hover, .pm-dc-card:focus-within {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 36px -18px rgba(7,59,67,0.38);
+}
+.pm-dc-start-btn { transition: background-color 150ms ease, transform 120ms ease; }
+.pm-dc-start-btn:hover { background: var(--pm-teal-night) !important; }
+.pm-dc-start-btn:active { transform: scale(0.97); }
+.pm-dc-start-btn:focus-visible { outline: 3px solid var(--pm-lime); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .pm-dc-card, .pm-dc-start-btn {
+    transition: none;
+  }
+  .pm-dc-card:hover, .pm-dc-card:focus-within { transform: none; }
+  .pm-dc-start-btn:active { transform: none; }
+}
+
+/* "Section order" step connector (CompanyCard.jsx, 2026-10) -- a 2px
+   line joining consecutive 22px circles, "behind the circles" (spec):
+   ::before paints before the circle (a later sibling in the same
+   stacking context always paints over an earlier one), and the circle
+   itself is opaque, so the line never shows through it either way.
+   .pm-dc-step-connected is applied to every row except the first (i>0)
+   -- the fixed 10px height matches the list's own row gap exactly, so
+   consecutive segments read as one continuous line through each gap.
+   Not applied at all on a single-item list (no sibling to connect to). */
+.pm-dc-step { position: relative; }
+.pm-dc-step-connected::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -10px;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  background: rgba(15,111,122,0.2);
+}
 
 .pm-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
@@ -72,19 +252,25 @@ body {
   transition: transform 120ms ease, background-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
 }
 .pm-btn:active { transform: scale(0.97); }
-.pm-btn-primary { background: var(--pm-primary); color: #fff; box-shadow: 0 6px 20px -6px rgba(15,174,115,0.4); }
+.pm-btn-primary { background: var(--pm-primary); color: #fff; box-shadow: 0 6px 20px -6px rgba(15,111,122,0.4); }
 .pm-btn-primary:hover { background: var(--pm-primary-dark); }
-.pm-btn-secondary { background: #0A0A0A; color: #fff; }
-.pm-btn-secondary:hover { background: #1F1F1F; }
+.pm-btn-secondary { background: var(--pm-ink); color: #fff; }
+.pm-btn-secondary:hover { background: #123A42; }
 .pm-btn-ghost { background: transparent; color: var(--pm-text); border: 1px solid var(--pm-border); }
-.pm-btn-ghost:hover { background: rgba(0,0,0,0.03); }
+.pm-btn-ghost:hover { background: rgba(11,42,48,0.04); }
+/* Ghost/chip variants for chrome that sits directly on the teal page
+   background (the site header, nav) rather than inside a white card --
+   the plain pm-btn-ghost/pm-chip-* colors assume a light backdrop and
+   become unreadable on teal. */
+.pm-btn-ghost-light { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.35); }
+.pm-btn-ghost-light:hover { background: rgba(255,255,255,0.1); }
 
 @layer components {
   .pm-card {
     background-color: var(--pm-surface); border: 1px solid var(--pm-border); border-radius: 16px;
     transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
   }
-  .pm-card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px -12px rgba(0,0,0,0.10); }
+  .pm-card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px -12px rgba(11,42,48,0.14); }
 }
 
 .pm-chip {
@@ -95,14 +281,20 @@ body {
   background: var(--pm-surface-muted); color: var(--pm-text);
 }
 
-.pm-chip-primary { background: rgba(15,174,115,0.10); color: var(--pm-primary-dark); }
-.pm-chip-coral   { background: rgba(255,111,77,0.14);  color: #B23E23; }
+.pm-chip-primary { background: rgba(15,111,122,0.10); color: var(--pm-primary-dark); }
+.pm-chip-light { background: rgba(255,255,255,0.15); color: #fff; }
+.pm-chip-lime { background: var(--pm-lime); color: var(--pm-ink); }
+/* Fail/attention chip (test failures, unverified/coming-soon badges,
+   cutoffs missed) -- ink, not a hue, bolder than pm-chip-primary's teal
+   tint. NOT lime, since lime already reads as "highlight/positive"
+   everywhere else, and no red/orange is in the approved palette. */
+.pm-chip-coral   { background: rgba(11,42,48,0.10);  color: var(--pm-ink); font-weight: 600; }
 
 .pm-input {
   width: 100%; padding: 0.75rem 1rem; border-radius: 12px;
   background: #fff; border: 1px solid var(--pm-border); font-size: 0.95rem;
 }
-.pm-input:focus { outline: none; box-shadow: 0 0 0 3px rgba(15,174,115,0.20); border-color: var(--pm-primary); }
+.pm-input:focus { outline: none; box-shadow: 0 0 0 3px rgba(15,111,122,0.20); border-color: var(--pm-primary); }
 
 /* Editor pane */
 .pm-editor-pane {
@@ -118,7 +310,7 @@ body {
 kbd {
   font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
   padding: 0.1rem 0.4rem; border-radius: 6px;
-  background: #F3F0E6; border: 1px solid var(--pm-border);
+  background: var(--pm-surface-muted); border: 1px solid var(--pm-border);
 }
 
 /* Company card dashed unverified */
@@ -129,4 +321,16 @@ kbd {
 .pm-in { animation: pm-in 320ms ease-out both; }
 
 /* Selection */
-::selection { background: rgba(15,174,115,0.25); }
+::selection { background: rgba(15,111,122,0.25); }
+
+/* HeroV2 floating glass cards */
+@keyframes pm-float { 0%, 100% { transform: translateY(-6px); } 50% { transform: translateY(6px); } }
+.pm-float { animation: pm-float 6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pm-float { animation: none; }
+}
+
+/* Hides the scrollbar on the seam cards' mobile horizontal scroll-snap
+   row (HeroV2.jsx, StraddleStats) without disabling scroll itself. */
+.scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }

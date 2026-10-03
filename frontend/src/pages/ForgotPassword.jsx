@@ -19,7 +19,7 @@ export default function ForgotPassword() {
       // Dev mode: the backend echoes back the reset link so we can test without email.
       if (data.dev_link) {
         setDevLink(data.dev_link);
-        toast.success("Dev mode: reset link below — no email sent.");
+        toast.success("Dev mode: reset link below. No email sent.");
       } else {
         toast.success("Reset link sent (check your inbox).");
       }

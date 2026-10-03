@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { Twitter, Linkedin, Github, Mail } from "lucide-react";
+import { SHOW_PRICING } from "../featureFlags";
 
 /**
  * Dark, multi-column marketing footer. Rendered on the landing page and
@@ -9,16 +10,16 @@ import { Twitter, Linkedin, Github, Mail } from "lucide-react";
  */
 export default function Footer() {
   return (
-    <footer className="bg-[#0A0A0A] text-white/80 mt-24">
+    <footer className="text-white/80 mt-24 relative z-10" style={{ background: "var(--pm-teal-night)" }}>
       <div className="max-w-7xl mx-auto px-6 lg:px-10 py-16 grid grid-cols-1 md:grid-cols-6 gap-10">
         {/* Brand + tagline */}
         <div className="md:col-span-2">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-pm-primary grid place-items-center text-white font-display font-extrabold">P</div>
+            <div className="w-9 h-9 rounded-lg grid place-items-center text-[#0B2A30] font-display font-extrabold" style={{ background: "var(--pm-lime)" }}>P</div>
             <span className="font-display text-2xl font-bold text-white">Placemint</span>
           </Link>
           <p className="text-sm text-white/60 leading-relaxed mt-5 max-w-xs">
-            Placement prep the way companies actually test you. Real OA structure, real cutoffs, real interview rounds — across 14 top Indian tech recruiters.
+            Placement prep the way companies actually test you. Real OA structure, real cutoffs, real interview rounds, across 14 top Indian tech recruiters.
           </p>
           <div className="mt-6 flex items-center gap-3">
             <a href="https://twitter.com" target="_blank" rel="noreferrer" aria-label="Twitter"
@@ -40,7 +41,7 @@ export default function Footer() {
         <FooterColumn title="Product">
           <FooterLink href="/#companies">14 Companies</FooterLink>
           <FooterLink href="/#pipeline">How it works</FooterLink>
-          <FooterLink to="/pricing">Pricing</FooterLink>
+          {SHOW_PRICING && <FooterLink to="/pricing">Pricing</FooterLink>}
           <FooterLink to="/signup">Resume Checker</FooterLink>
           <FooterLink to="/dashboard">Dashboard</FooterLink>
         </FooterColumn>
@@ -50,7 +51,11 @@ export default function Footer() {
           <FooterLink href="/#faq">FAQ</FooterLink>
           <FooterLink to="/pricing">What is a run?</FooterLink>
           <FooterLink href="mailto:hello@placemint.app">Help &amp; Support</FooterLink>
-          <FooterLink href="/#pricing">Founder pricing</FooterLink>
+          {/* Was href="/#pricing" -- that anchor's section no longer
+              renders while SHOW_PRICING is false, so it would be dead.
+              Gated behind the same flag rather than repointed, since
+              "Founder pricing" is itself a pricing-tier claim. */}
+          {SHOW_PRICING && <FooterLink href="/#pricing">Founder pricing</FooterLink>}
         </FooterColumn>
 
         {/* Column: Legal */}
@@ -77,10 +82,10 @@ export default function Footer() {
         <div className="max-w-7xl mx-auto px-6 lg:px-10 py-6 flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-white/40">
           <div>&copy; {new Date().getFullYear()} Placemint. Built for the fresher who’s tired of “one mock test fits all”.</div>
           <div className="flex items-center gap-4">
-            <Link to="/legal/privacy" className="hover:text-white transition">Privacy</Link>
-            <Link to="/legal/terms" className="hover:text-white transition">Terms</Link>
+            <Link to="/legal/privacy" className="hover:text-[var(--pm-lime)] transition">Privacy</Link>
+            <Link to="/legal/terms" className="hover:text-[var(--pm-lime)] transition">Terms</Link>
             <span className="inline-flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-pm-primary animate-pulse"></span>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--pm-lime)" }}></span>
               beta
             </span>
           </div>
@@ -100,7 +105,7 @@ function FooterColumn({ title, children }) {
 }
 
 function FooterLink({ to, href, children }) {
-  const cls = "text-sm text-white/70 hover:text-white transition py-1";
+  const cls = "text-sm text-white/70 transition py-1 hover:text-[var(--pm-lime)]";
   if (to) return <Link to={to} className={cls}>{children}</Link>;
   return <a href={href} className={cls}>{children}</a>;
 }

@@ -69,7 +69,7 @@ export default function OnboardingModal() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent data-testid="onboarding-modal" className="sm:max-w-md bg-pm-surface" onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl">Quick — three fields.</DialogTitle>
+          <DialogTitle className="font-display text-2xl">Quick: three fields.</DialogTitle>
           <DialogDescription className="text-pm-text2">
             We tailor OA questions and interview follow-ups based on your college batch and target role. Takes 15 seconds.
           </DialogDescription>

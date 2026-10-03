@@ -367,7 +367,7 @@ export default function DevMotionChallengePreview() {
         <Header />
         <div className="max-w-3xl mx-auto px-6 py-10">
           <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-1">dev preview · not a real route</div>
-          <h1 className="font-display text-2xl font-bold mb-2">Motion Challenge — live preview</h1>
+          <h1 className="font-display text-2xl font-bold mb-2">Motion Challenge: live preview</h1>
           <div className="pm-card p-6 text-sm text-pm-text2">
             No auth token found. This page makes real, authenticated <code>/move</code>/<code>/undo</code>/<code>/state</code> calls against a real backend
             fixture, so it needs a <code>pm_token</code> belonging to the fixture's owning user. Ask whoever set up the fixture for a link with
@@ -383,7 +383,7 @@ export default function DevMotionChallengePreview() {
       <Header />
       <div className="max-w-3xl mx-auto px-6 py-10">
         <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-1">dev preview · not a real route</div>
-        <h1 className="font-display text-2xl font-bold mb-2">Motion Challenge — live preview</h1>
+        <h1 className="font-display text-2xl font-bold mb-2">Motion Challenge: live preview</h1>
         <p className="text-sm text-pm-text2 mb-6">
           Uses a real backend fixture (attemptId=<code>{attemptId}</code>, sectionKey=<code>{sectionKey}</code>) for real /move and /undo round trips -- swap via <code>?attemptId=...&amp;sectionKey=...</code>
         </p>

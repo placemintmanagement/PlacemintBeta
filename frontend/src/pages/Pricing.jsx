@@ -19,7 +19,7 @@ export default function Pricing() {
       const { data } = await api.post("/payments/order", orderRequest);
       if (data.mock) {
         await api.post("/payments/verify", { order_id: data.order.order_id });
-        toast.success(`Mock purchase complete — ${itemName} unlocked.`);
+        toast.success(`Mock purchase complete. ${itemName} unlocked.`);
         refresh();
         setBusy(null);
         return;
@@ -32,7 +32,7 @@ export default function Pricing() {
         description,
         order_id: data.order.razorpay_order_id,
         prefill: { name: user.name, email: user.email },
-        theme: { color: "#0FAE73" },
+        theme: { color: "#0F6F7A" },
         handler: async (resp) => {
           try {
             await api.post("/payments/verify", {
@@ -85,7 +85,7 @@ export default function Pricing() {
       <div className="max-w-7xl mx-auto px-6 lg:px-10 py-10 pm-in">
         <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark">pricing</div>
         <h1 className="font-display text-4xl font-bold mt-1">Pick your run bundle.</h1>
-        <p className="text-pm-text2 mt-2 max-w-xl">Run limits exist as a circuit breaker — not a marketing gate. Resume checker is free forever.</p>
+        <p className="text-pm-text2 mt-2 max-w-xl">Run limits exist as a circuit breaker, not a marketing gate. Resume checker is free forever.</p>
 
         {/* What counts as a run */}
         <div className="pm-card p-5 mt-6 flex flex-wrap items-center gap-x-8 gap-y-3">
@@ -106,14 +106,14 @@ export default function Pricing() {
             <span className="text-2xl">⚡</span>
             <div>
               <div className="font-display font-bold text-pm-primary-dark">You have Founder access.</div>
-              <div className="text-sm text-pm-text2">Payment isn't required — every track and every run is unlocked on your account.</div>
+              <div className="text-sm text-pm-text2">Payment isn't required. Every track and every run is unlocked on your account.</div>
             </div>
           </div>
         )}
 
         {!pricing.razorpay_enabled && !isFounder && (
           <div className="mt-6 pm-card p-4 pm-chip-coral flex items-start gap-2 text-sm">
-            ⚠️ Razorpay keys are placeholders — checkouts run in <strong>mock mode</strong> and auto-verify. Drop real <code className="font-mono">rzp_test_…</code> keys in <code className="font-mono">backend/.env</code> to enable real Razorpay.
+            ⚠️ Razorpay keys are placeholders, so checkouts run in <strong>mock mode</strong> and auto-verify. Drop real <code className="font-mono">rzp_test_…</code> keys in <code className="font-mono">backend/.env</code> to enable real Razorpay.
           </div>
         )}
 

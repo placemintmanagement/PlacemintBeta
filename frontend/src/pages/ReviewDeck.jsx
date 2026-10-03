@@ -67,8 +67,8 @@ export default function ReviewDeck() {
       const { data } = await api.post(`/deck/${card.card_id}/attempt`, { chosen_index: originalIndex });
       setLastResult({ correct: data.correct, mastered: data.mastered });
       setRevealed(true);
-      if (data.correct) toast.success(data.mastered ? "Mastered — nice!" : "Correct");
-      else toast.error("Not quite — check the explanation");
+      if (data.correct) toast.success(data.mastered ? "Mastered, nice!" : "Correct");
+      else toast.error("Not quite. Check the explanation");
     } catch (e) {
       toast.error(e.response?.data?.detail || "Couldn't record answer");
     }
@@ -114,7 +114,7 @@ export default function ReviewDeck() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="font-display text-4xl lg:text-5xl font-bold">
-              {cards.length === 0 ? "Nothing to review — yet." : "Drill your misses."}
+              {cards.length === 0 ? "Nothing to review yet." : "Drill your misses."}
             </h1>
             <p className="mt-2 text-sm text-pm-text2">
               {cards.length === 0
@@ -170,7 +170,7 @@ export default function ReviewDeck() {
                   let cls = "border border-pm-line bg-white hover:bg-black/[0.03]";
                   if (isChosen && !revealed) cls = "border border-pm-primary bg-pm-primary/10";
                   if (isCorrect) cls = "border border-pm-primary bg-pm-primary/10";
-                  if (isWrongPick) cls = "border border-red-400 bg-red-50";
+                  if (isWrongPick) cls = "border border-[rgba(11,42,48,0.35)] bg-[rgba(11,42,48,0.05)]";
                   return (
                     <button
                       key={i}
@@ -181,7 +181,7 @@ export default function ReviewDeck() {
                       <span className="font-mono text-[11px] text-pm-text2 shrink-0 mt-0.5">{String.fromCharCode(65 + i)}</span>
                       <span className="flex-1 min-w-0 whitespace-pre-wrap">{opt}</span>
                       {isCorrect && <CheckCircle2 size={14} className="text-pm-primary-dark shrink-0 mt-0.5"/>}
-                      {isWrongPick && <XCircle size={14} className="text-red-600 shrink-0 mt-0.5"/>}
+                      {isWrongPick && <XCircle size={14} className="text-pm-text shrink-0 mt-0.5"/>}
                     </button>
                   );
                 })}
@@ -195,7 +195,7 @@ export default function ReviewDeck() {
               )}
 
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                <button onClick={remove} data-testid="deck-remove-card" className="pm-btn pm-btn-ghost text-xs text-red-600 border-red-200 hover:bg-red-50">
+                <button onClick={remove} data-testid="deck-remove-card" className="pm-btn pm-btn-ghost text-xs text-pm-text border-[rgba(11,42,48,0.15)] hover:bg-[rgba(11,42,48,0.05)]">
                   <Trash2 size={13}/> Remove card
                 </button>
                 {!revealed ? (
@@ -215,10 +215,10 @@ export default function ReviewDeck() {
             </div>
 
             {lastResult && (
-              <div className={`mt-3 text-xs font-mono ${lastResult.correct ? "text-pm-primary-dark" : "text-red-600"}`}>
+              <div className={`mt-3 text-xs font-mono ${lastResult.correct ? "text-pm-primary-dark" : "text-pm-text"}`}>
                 {lastResult.correct
-                  ? (lastResult.mastered ? "Mastered — it'll drop out of your queue." : "Correct. One more in a row to master it.")
-                  : "Wrong pick — streak reset. Try it again next time."}
+                  ? (lastResult.mastered ? "Mastered. It'll drop out of your queue." : "Correct. One more in a row to master it.")
+                  : "Wrong pick. Streak reset. Try it again next time."}
               </div>
             )}
           </>

@@ -17,7 +17,7 @@ function ProtectedContent() {
   const { user } = useAuth0();
   return (
     <div className="pm-card p-6 max-w-xl mx-auto mt-6">
-      <div className="font-display text-lg font-semibold mb-2">You're in — Auth0ProtectedRoute passed</div>
+      <div className="font-display text-lg font-semibold mb-2">You're in: Auth0ProtectedRoute passed</div>
       <div className="text-sm text-pm-text2">Signed in as {user?.email || user?.name}</div>
     </div>
   );
@@ -30,7 +30,7 @@ export default function DevAuth0Preview() {
       <div className="max-w-3xl mx-auto px-6 py-10">
         <div className="font-display text-2xl font-bold mb-2">Auth0 integration preview</div>
         <div className="text-sm text-pm-text2 mb-6">
-          Not wired into the live app yet — this route exists to demonstrate login/logout and
+          Not wired into the live app yet. This route exists to demonstrate login/logout and
           route protection working end-to-end on the frontend.
         </div>
         <Auth0AuthButtons />

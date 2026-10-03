@@ -28,7 +28,7 @@ export default function IDEMockup() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 rounded-2xl overflow-hidden border border-white/5 shadow-2xl">
       {/* LEFT: problem panel */}
-      <div className="bg-[#FAF8F3] p-6 md:p-7 min-h-[360px]">
+      <div className="bg-pm-muted p-6 md:p-7 min-h-[360px]">
         <div className="flex items-center justify-between mb-3">
           <div className="font-display text-xl font-bold">Two Sum</div>
           <span className="pm-chip pm-chip-primary">Easy</span>

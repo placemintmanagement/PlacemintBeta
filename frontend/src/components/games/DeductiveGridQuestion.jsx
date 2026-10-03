@@ -142,7 +142,7 @@ export default function DeductiveGridQuestion({
         </div>
       </div>
       <div className="font-display text-lg font-semibold mb-4">
-        Neither a row nor a column should have similar symbols — which symbol fits?
+        Neither a row nor a column should have similar symbols. Which symbol fits?
       </div>
 
       <div className="max-w-sm">

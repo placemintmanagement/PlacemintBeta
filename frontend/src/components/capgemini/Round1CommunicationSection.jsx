@@ -228,7 +228,7 @@ function ListeningAudioPlayer({ audioUrl }) {
         </button>
         <div className="text-xs text-pm-text2">
           {playState === "unplayed"
-            ? "You can only play this clip once — listen carefully."
+            ? "You can only play this clip once. Listen carefully."
             : "This clip cannot be replayed."}
         </div>
       </div>
@@ -299,7 +299,7 @@ function SpokenReadAloudCard({ attemptId, sectionKey, q, value, onChange }) {
       </div>
       {typedMode ? (
         <>
-          <div className="text-xs text-pm-text2 mb-2">Mic unavailable — type what you would say instead.</div>
+          <div className="text-xs text-pm-text2 mb-2">Mic unavailable. Type what you would say instead.</div>
           <textarea
             data-testid={TID.oaMicFallbackInput ? TID.oaMicFallbackInput(q.id) : undefined}
             className="pm-input min-h-[120px] font-sans"
@@ -349,7 +349,7 @@ function SpokenRespondToPromptCard({ attemptId, sectionKey, q, value, onChange }
       <div className="font-display text-lg font-semibold mb-4">{q.scenario}</div>
       {typedMode ? (
         <>
-          <div className="text-xs text-pm-text2 mb-2">Mic unavailable — type your response instead.</div>
+          <div className="text-xs text-pm-text2 mb-2">Mic unavailable. Type your response instead.</div>
           <textarea
             data-testid={TID.oaMicFallbackInput ? TID.oaMicFallbackInput(q.id) : undefined}
             className="pm-input min-h-[120px] font-sans"

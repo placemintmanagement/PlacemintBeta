@@ -5,17 +5,28 @@ module.exports = {
     theme: {
         extend: {
             colors: {
+                // Teal / lime / white design language (2026-10), strict
+                // palette -- no red/orange/coral anywhere. "secondary" keeps
+                // a semantic fail/attention role (test failures, cutoffs
+                // missed, unverified badges) but is ink, not a hue: it reads
+                // as "attention" by being the darkest/boldest text color,
+                // since lime already means "highlight/positive" and no
+                // other hue is in the approved palette.
                 pm: {
-                    bg: "#FAF8F3",
+                    bg: "#0F6F7A",
                     surface: "#FFFFFF",
-                    muted: "#F3F0E6",
-                    primary: "#0FAE73",
-                    "primary-dark": "#0C8B5C",
-                    secondary: "#FF6F4D",
-                    text: "#0A0A0A",
-                    text2: "#4B5563",
+                    muted: "#E3EFEF",
+                    primary: "#0F6F7A",
+                    "primary-dark": "#0A5760",
+                    secondary: "#0B2A30",
+                    text: "#0B2A30",
+                    text2: "#52696E",
+                    "text-muted": "#8CA3A8",
                     editor: "#0F111A",
-                    border: "rgba(10,10,10,0.10)",
+                    border: "rgba(11,42,48,0.10)",
+                    lime: "#C6F24E",
+                    "lime-dark": "#AEDB3A",
+                    ink: "#0B2A30",
                 },
                 background: "hsl(var(--background))",
                 foreground: "hsl(var(--foreground))",
@@ -48,7 +59,10 @@ module.exports = {
                 ring: "hsl(var(--ring))",
             },
             fontFamily: {
-                display: ["Outfit", "system-ui", "sans-serif"],
+                // Reads --pm-font-display (index.css :root) so the typeface
+                // has one definition, not one hardcoded here and another
+                // hardcoded per component.
+                display: ["var(--pm-font-display)", "system-ui", "sans-serif"],
                 sans: ["Inter", "system-ui", "sans-serif"],
                 mono: ["JetBrains Mono", "ui-monospace", "monospace"],
             },

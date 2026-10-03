@@ -97,7 +97,7 @@ export default function CompanyDetail() {
               <FileText size={18} className="text-pm-primary" />
               <div className="font-display text-lg font-bold">Optional: upload your resume</div>
             </div>
-            <p className="text-sm text-pm-text2 mb-4">An AI recruiter reads your resume against this exact role. Free — always.</p>
+            <p className="text-sm text-pm-text2 mb-4">An AI recruiter reads your resume against this exact role. Always free.</p>
             <label className="text-xs font-mono uppercase text-pm-text2">Target role</label>
             <input data-testid={TID.resumeRoleInput} value={role} onChange={e => setRole(e.target.value)} className="pm-input mt-1 mb-3" placeholder="e.g. Software Engineer (Backend)" />
             <input data-testid={TID.resumeUploadInput} type="file" accept="application/pdf" onChange={e => setFile(e.target.files?.[0] || null)} className="pm-input mb-3" />
@@ -111,7 +111,7 @@ export default function CompanyDetail() {
             <div>
               <div className="pm-chip" style={{ background: "rgba(255,255,255,0.08)", color: "#fff" }}>ready when you are</div>
               <div className="font-display text-2xl font-bold mt-4 leading-tight">
-                Start the full {company.name} run — with real section timing.
+                Start the full {company.name} run, with real section timing.
               </div>
               <div className="text-sm text-white/70 mt-3">Total: <span className="font-mono">{company.time_minutes} minutes</span> · {company.sections.length} sections</div>
               {company.cluster_options?.length > 0 && (
@@ -158,8 +158,8 @@ export default function CompanyDetail() {
               <div className="text-center">
                 <div className="text-xs font-mono uppercase text-pm-text2">Fit score</div>
                 <div className="font-display font-bold font-mono text-5xl leading-none mt-1"
-                     style={{ color: (analysis.fit_score ?? 0) >= 70 ? "#0FAE73" : (analysis.fit_score ?? 0) >= 50 ? "#FF6F4D" : "#DC2626" }}>
-                  {analysis.fit_score ?? "—"}
+                     style={{ color: (analysis.fit_score ?? 0) >= 70 ? "#0A5760" : (analysis.fit_score ?? 0) >= 50 ? "#52696E" : "#0B2A30" }}>
+                  {analysis.fit_score ?? "N/A"}
                 </div>
                 <div className="text-[10px] font-mono text-pm-text2 mt-1">/ 100</div>
               </div>

@@ -11,6 +11,8 @@ import GridChallengeSection from "../components/games/GridChallengeSection";
 import InductiveChallengeSection from "../components/games/InductiveChallengeSection";
 import MotionChallengeSection from "../components/games/MotionChallengeSection";
 import Round1CommunicationSection from "../components/capgemini/Round1CommunicationSection";
+import DebuggingSection from "../components/DebuggingSection";
+import AiAssistedSection from "../components/AiAssistedSection";
 import { useMicRecorder } from "../hooks/useMicRecorder";
 import { TID } from "../testIds";
 import { Clock, Play, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
@@ -82,7 +84,7 @@ export default function OARunner() {
       <div>
         <Header />
         <div className="max-w-md mx-auto px-6 py-24 text-center">
-          <h1 className="font-display text-3xl font-bold text-red-600">Generation failed.</h1>
+          <h1 className="font-display text-3xl font-bold text-pm-text">Generation failed.</h1>
           <p className="text-pm-text2 mt-3">Please try starting a new run. Your run quota was not consumed.</p>
         </div>
       </div>
@@ -116,8 +118,8 @@ export default function OARunner() {
           </h1>
           <p className="text-pm-text2 mt-3">
             {ready === 0
-              ? "Sections generate in parallel — the first one usually lands in under 20 seconds."
-              : "Almost there — you can start this section the moment it's ready."}
+              ? "Sections generate in parallel. The first one usually lands in under 20 seconds."
+              : "Almost there. You can start this section the moment it's ready."}
           </p>
           <div className="mt-8 pm-card p-5 text-left">
             <div className="text-xs font-mono uppercase text-pm-text2 mb-3">progress</div>
@@ -161,7 +163,7 @@ export default function OARunner() {
         section_key: sectionKey,
         answers: sectionAnswers,
       });
-      toast.success(`Section done — score ${(data.section_result.score * 100).toFixed(0)}%`);
+      toast.success(`Section done. Score ${(data.section_result.score * 100).toFixed(0)}%`);
       // Refresh attempt to move forward
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
@@ -187,7 +189,7 @@ export default function OARunner() {
         section_key: sectionKey,
         answers: answersMap,
       });
-      toast.success(`Section done — score ${(data.section_result.score * 100).toFixed(0)}%`);
+      toast.success(`Section done. Score ${(data.section_result.score * 100).toFixed(0)}%`);
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
       if (data.status === "completed") {
@@ -250,6 +252,10 @@ export default function OARunner() {
           <GamifiedRoundSection attemptId={attemptId} section={currentSection} onComplete={submitGamifiedRoundAnswers} />
         ) : currentSection.type === "capgemini_round1" ? (
           <Round1CommunicationSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+        ) : currentSection.type === "debugging" ? (
+          <DebuggingRoundSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+        ) : currentSection.type === "ai_assisted" ? (
+          <AiAssistedRoundSection attemptId={attemptId} section={currentSection} />
         ) : (
           <MCQSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
         )}
@@ -497,7 +503,7 @@ function SpeakingSection({ attemptId, section, answers, setAnswer }) {
 
       {typedMode ? (
         <>
-          <div className="text-xs text-pm-text2">Mic unavailable — type your response instead.</div>
+          <div className="text-xs text-pm-text2">Mic unavailable. Type your response instead.</div>
           <textarea
             data-testid={TID.oaMicFallbackInput(q.id)}
             className="pm-input min-h-[160px] font-sans"
@@ -572,7 +578,7 @@ function ReadAloudCard({ attemptId, sectionKey, q, idx, total, value, onChange }
 
   return (
     <div className="pm-card p-6">
-      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Sentence {idx + 1} of {total} — read aloud</div>
+      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Sentence {idx + 1} of {total}: read aloud</div>
       <div className="font-display text-lg font-semibold mb-4">{q.text}</div>
       {typedMode ? (
         <input
@@ -622,12 +628,12 @@ function SpeakingAnswerCard({ attemptId, sectionKey, q, idx, total, value, onCha
 
   return (
     <div className="pm-card p-6">
-      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Q{idx + 1} of {total} — spoken response</div>
+      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Q{idx + 1} of {total}: spoken response</div>
       <div className="font-display text-lg font-semibold mb-1">{q.topic}</div>
       <div className="text-sm text-pm-text2 mb-4">{q.instructions}</div>
       {typedMode ? (
         <>
-          <div className="text-xs text-pm-text2 mb-2">Mic unavailable — type your response instead.</div>
+          <div className="text-xs text-pm-text2 mb-2">Mic unavailable. Type your response instead.</div>
           <textarea
             data-testid={TID.oaMicFallbackInput(q.id)}
             className="pm-input min-h-[120px] font-sans"
@@ -850,7 +856,7 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
               placeholder="Write your full program here. No autocomplete. No test runner. Just like paper."
               autoComplete="off" autoCorrect="off" spellCheck={false}
               className="pm-input flex-1 min-h-[400px] font-mono text-sm"
-              style={{ background: "#F3F0E6", color: "#0A0A0A", lineHeight: 1.6, tabSize: 4 }}
+              style={{ background: "#E3EFEF", color: "#0B2A30", lineHeight: 1.6, tabSize: 4 }}
             />
             <div className="mt-2 text-xs font-mono text-pm-text2">{(current.code || "").split("\n").length} lines · {(current.code || "").length} chars</div>
           </div>
@@ -873,7 +879,7 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
               {automataFix && <span className="pm-chip pm-chip-coral">automata fix · code pre-filled</span>}
             </div>
             <button data-testid={TID.oaRunBtn} onClick={runCode} disabled={running}
-              className="pm-btn text-xs py-1.5 px-3" style={{ background: "#0FAE73", color: "#fff" }}>
+              className="pm-btn text-xs py-1.5 px-3" style={{ background: "#0F6F7A", color: "#fff" }}>
               <Play size={12}/> {running ? "running…" : "Run visible tests"}
             </button>
           </div>
@@ -892,5 +898,136 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
         )}
       </div>
     </div>
+  );
+}
+
+// -------- Debugging Assessment (Round 3) ------------------------------------
+// Thin wrapper around DebuggingSection (the same presentational component
+// /dev/debugging-preview uses, already click-through verified there) --
+// this wrapper owns only the Run button's running/runResults state and
+// posts to the existing, generic /oa/run route above (unchanged: it looks
+// up the problem by id inside the section's server-stored questions and
+// runs visible_tests, exactly like CodingSection's own runCode does, with
+// no section-type check of its own). "Submit section" needs nothing
+// debugging-specific here -- the top-level submitSection() already posts
+// sectionAnswers generically to /oa/{attemptId}/section, which server.py's
+// submit_section now dispatches to _grade_debugging_section() for this
+// section's type.
+function DebuggingRoundSection({ attemptId, section, answers, setAnswer }) {
+  const [running, setRunning] = useState(false);
+  const [runResults, setRunResults] = useState(null);
+
+  const onRun = async (problem, current) => {
+    setRunning(true);
+    try {
+      const { data } = await api.post("/oa/run", {
+        attempt_id: attemptId,
+        section_key: section.key,
+        problem_id: problem.id,
+        language: current.language,
+        code: current.code,
+      });
+      setRunResults(data.results);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Run failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <DebuggingSection
+      problems={section.questions || []}
+      answers={answers}
+      setAnswer={setAnswer}
+      onRun={onRun}
+      running={running}
+      runResults={runResults}
+    />
+  );
+}
+
+// -------- AI-Assisted Coding (Round 4) ---------------------------------
+// Thin wrapper around AiAssistedSection (the same presentational
+// component /dev/ai-assisted-preview uses, already click-through
+// verified there). UNLIKE every other section, Round 4's live state
+// lives entirely server-side in db.ai_assisted_sessions (created at
+// generation time, see server.py's "ai_assisted" _generate_section_
+// questions branch) -- section.questions here holds only an opaque
+// {session_id, problem_id} pointer, not the conversation itself, so this
+// wrapper fetches the live session on mount and re-fetches it (via each
+// action's response body) after every turn, rather than deriving
+// anything from `section` the way CodingSection/DebuggingRoundSection
+// do. Talks to the LIVE, attempt-scoped
+// /oa/{attemptId}/ai-assisted/{section.key}/... routes -- a separate
+// code path from /dev/ai-assisted/*, not a wrapper around it (see
+// server.py's own comment on that same separation). "Submit section"
+// needs nothing special here either: the top-level submitSection()
+// posts sectionAnswers (whatever they are, even {}) to
+// /oa/{attemptId}/section, and server.py's submit_section dispatches to
+// _finalize_ai_assisted_section() for this type, which ignores the
+// answers payload entirely and re-derives the score from the stored
+// session -- covering both natural completion AND "candidate clicked
+// Submit / timer expired mid-conversation" the same way.
+function AiAssistedRoundSection({ attemptId, section }) {
+  const [session, setSession] = useState(null);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/oa/${attemptId}/ai-assisted/${section.key}`).then(r => {
+      if (!cancelled) setSession(r.data);
+    }).catch(err => {
+      if (!cancelled) toast.error(err.response?.data?.detail || "Failed to load session");
+    });
+    return () => { cancelled = true; };
+  }, [attemptId, section.key]);
+
+  const onSendMessage = async (text) => {
+    setSending(true);
+    try {
+      const { data } = await api.post(`/oa/${attemptId}/ai-assisted/${section.key}/message`, { text });
+      setSession(data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to send message");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const onConsent = async (value) => {
+    setSending(true);
+    try {
+      const { data } = await api.post(`/oa/${attemptId}/ai-assisted/${section.key}/consent`, { value });
+      setSession(data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to submit consent");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const onSelfReview = async (value) => {
+    setSending(true);
+    try {
+      const { data } = await api.post(`/oa/${attemptId}/ai-assisted/${section.key}/self_review`, { value });
+      setSession(data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to submit self-review");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!session) return <div className="pm-card p-6 text-pm-text2">Loading your problem…</div>;
+
+  return (
+    <AiAssistedSection
+      session={session}
+      onSendMessage={onSendMessage}
+      onConsent={onConsent}
+      onSelfReview={onSelfReview}
+      sending={sending}
+    />
   );
 }

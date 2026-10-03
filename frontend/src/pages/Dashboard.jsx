@@ -25,7 +25,7 @@ export default function Dashboard() {
       } else if (data.dev_link) {
         toast.success("Dev mode: verification link below.", { duration: 8000, description: data.dev_link });
       } else {
-        toast.success("Verification email sent — check your inbox.");
+        toast.success("Verification email sent. Check your inbox.");
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Could not send verification email");
@@ -127,7 +127,7 @@ export default function Dashboard() {
               <FileText />
               <div className="flex-1">
                 <div className="font-display font-bold">No resumes uploaded yet.</div>
-                <div className="text-pm-text2 text-sm">Upload one when you start a company — it's free and personalises everything.</div>
+                <div className="text-pm-text2 text-sm">Upload one when you start a company. It's free and personalises everything.</div>
               </div>
             </div>
           ) : (
@@ -136,7 +136,7 @@ export default function Dashboard() {
                 <div key={r.resume_id} className="pm-card p-5">
                   <div className="font-display font-bold">{r.role} · {r.company_id}</div>
                   <div className="text-xs font-mono text-pm-text2 mt-2">fit score</div>
-                  <div className="font-mono text-3xl font-bold">{r.fit_score ?? "—"}</div>
+                  <div className="font-mono text-3xl font-bold">{r.fit_score ?? "N/A"}</div>
                 </div>
               ))}
             </div>

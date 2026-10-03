@@ -33,10 +33,13 @@ export default function OAReview() {
     );
   }
 
-  const verdictColor = review.verdict === "clear" ? "text-pm-primary-dark" : review.verdict === "borderline" ? "text-pm-secondary" : "text-red-600";
+  // Three-tier verdict color, darkest = most serious -- no red/orange in
+  // this palette, so "not ready" is distinguished by being the boldest
+  // ink rather than a different hue.
+  const verdictColor = review.verdict === "clear" ? "text-pm-primary-dark" : review.verdict === "borderline" ? "text-pm-text2" : "text-pm-text";
   const verdictText = review.verdict === "clear" ? "You'd likely clear this."
-    : review.verdict === "borderline" ? "You're borderline — fixable."
-    : "Not ready yet — keep grinding.";
+    : review.verdict === "borderline" ? "You're borderline, fixable."
+    : "Not ready yet. Keep grinding.";
 
   const startInterview = async () => {
     setStarting(true);
@@ -103,7 +106,7 @@ export default function OAReview() {
           </div>
           <div className="pm-card px-5 py-3">
             <div className="text-xs font-mono uppercase text-pm-text2">Weakest section</div>
-            <div className="font-display text-lg font-bold">{nameByKey[review.weakest_section] || review.weakest_section || "—"}</div>
+            <div className="font-display text-lg font-bold">{nameByKey[review.weakest_section] || review.weakest_section || "N/A"}</div>
           </div>
           <div className="pm-card px-5 py-3">
             <div className="text-xs font-mono uppercase text-pm-text2">Scoring mode</div>
@@ -134,7 +137,7 @@ export default function OAReview() {
             <div className="mt-10 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h2 className="font-display text-2xl font-bold">Answer key</h2>
-                <p className="mt-1 text-sm text-pm-text2">Every MCQ you saw, your answer, and the correct one — with explanations.</p>
+                <p className="mt-1 text-sm text-pm-text2">Every MCQ you saw, your answer, and the correct one, with explanations.</p>
               </div>
               {wrongPlusSkipped > 0 && (
                 <button
@@ -166,7 +169,7 @@ export default function OAReview() {
                         <div className="font-display font-bold">{sec.section_name}</div>
                         <div className="text-xs font-mono text-pm-text2 mt-1 flex flex-wrap gap-3">
                           <span className="text-pm-primary-dark">✓ {correctQ} correct</span>
-                          <span className="text-red-600">✗ {wrongQ} wrong</span>
+                          <span className="text-pm-text font-semibold">✗ {wrongQ} wrong</span>
                           {skippedQ > 0 && <span className="text-pm-text2">– {skippedQ} skipped</span>}
                           <span>· {totalQ} total</span>
                         </div>
@@ -238,14 +241,14 @@ function QuestionRow({ q, index, saved, onSave }) {
               const isUser = i === userIdx;
               let cls = "border border-pm-line bg-white";
               if (isCorrect) cls = "border border-pm-primary bg-pm-primary/10";
-              else if (isUser && !isCorrect) cls = "border border-red-400 bg-red-50";
+              else if (isUser && !isCorrect) cls = "border border-[rgba(11,42,48,0.35)] bg-[rgba(11,42,48,0.05)]";
               return (
                 <div key={i} className={`text-sm px-3 py-2 rounded-md flex items-start gap-2 ${cls}`}>
                   <span className="font-mono text-[11px] text-pm-text2 shrink-0 mt-0.5">{String.fromCharCode(65 + i)}</span>
                   <span className="flex-1 min-w-0 whitespace-pre-wrap">{opt}</span>
                   <span className="shrink-0 flex items-center gap-1 text-[11px] font-mono">
                     {isCorrect && <span className="text-pm-primary-dark">correct</span>}
-                    {isUser && !isCorrect && <span className="text-red-600">your answer</span>}
+                    {isUser && !isCorrect && <span className="text-pm-text font-semibold">your answer</span>}
                     {isUser && isCorrect && <span className="text-pm-primary-dark">✓ you</span>}
                   </span>
                 </div>

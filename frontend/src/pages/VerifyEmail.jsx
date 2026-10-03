@@ -45,7 +45,7 @@ export default function VerifyEmail() {
           <>
             <XCircle className="mx-auto text-pm-secondary" size={48} />
             <h1 className="font-display text-3xl font-bold mt-4">Couldn't verify.</h1>
-            <p className="text-pm-text2 mt-2">{message}. Links expire after 30 minutes — request a new one from your dashboard.</p>
+            <p className="text-pm-text2 mt-2">{message}. Links expire after 30 minutes. Request a new one from your dashboard.</p>
             <Link to="/dashboard" className="pm-btn pm-btn-ghost mt-6 inline-flex">Go to dashboard</Link>
           </>
         )}

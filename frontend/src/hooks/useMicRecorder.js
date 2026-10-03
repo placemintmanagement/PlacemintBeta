@@ -42,7 +42,7 @@ export function useMicRecorder(attemptId, sectionKey, questionId, onTranscript) 
           onTranscript(data.transcript || "");
           setStatus("done");
         } catch (err) {
-          toast.error("Transcription failed — you can type your answer instead.");
+          toast.error("Transcription failed. You can type your answer instead.");
           setStatus("error");
         }
       };

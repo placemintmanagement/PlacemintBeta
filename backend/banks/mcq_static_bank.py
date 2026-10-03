@@ -21,10 +21,30 @@ import random
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-# The 9 canonical topics (matches ai_service.TOPIC_INSTRUCTIONS /
-# mcq_pool.TOPIC_KEY_MAP's topic_key values exactly, plus "puzzles" which is
-# static-bank-only — no live mcq_pool worker generates puzzles content).
-CANONICAL_TOPICS = {"aptitude", "verbal", "reasoning", "oops", "dbms", "os", "cn", "architecture", "puzzles"}
+# The 10 canonical topics (matches ai_service.TOPIC_INSTRUCTIONS /
+# mcq_pool.TOPIC_KEY_MAP's topic_key values exactly, plus "puzzles" and
+# "pseudocode" which are static-bank-only — no live mcq_pool worker
+# generates puzzles or pseudocode content). "pseudocode" added 2026-09
+# (Phase 0 live-generation migration): 130 questions were already seeded
+# here but unwired -- server.py's "pseudocode" branch now draws from this
+# bank first via sample_mixed_static_part, same 90/10 split as every other
+# canonical topic, falling back to mcq_pool.fallback_live_verify's 3-stage
+# ground-truth pipeline for the remaining 10% + any shortfall.
+#
+# "programming_logic"/"dsa"/"swe_fundamentals"/"modern_engineering" added
+# 2026-09/10 (Capgemini Round 2 Technical Assessment wiring): all four are
+# static-bank-only, same as "puzzles"/"pseudocode" -- no live mcq_pool
+# worker or TOPIC_INSTRUCTIONS entry exists for any of them, so a static
+# shortfall would fall through to _generate_extra_topics's live-fallback
+# path with only a generic topic hint (see ai_service.topic_mcq_prompt's
+# graceful default) rather than a topic-specific one. Registering them
+# here is what lets _generate_extra_topics (already used for Capgemini's
+# OOPS/DBMS/OS/CN) route to these banks automatically -- see server.py's
+# new "capgemini_round2_technical" branch.
+CANONICAL_TOPICS = {
+    "aptitude", "verbal", "reasoning", "oops", "dbms", "os", "cn", "architecture", "puzzles", "pseudocode",
+    "programming_logic", "dsa", "swe_fundamentals", "modern_engineering",
+}
 
 # Company section keys (mcq_pool.POOLED_SECTION_KEYS) that map cleanly to one
 # canonical topic, and therefore get the 90/10 static/live split on their

@@ -51,11 +51,16 @@ import pdfplumber
 from companies import COMPANIES, DEPARTMENTS, get_company, get_department
 from services.code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
 from banks.problem_bank import sample_problems as _sample_problems
+from banks import problem_bank
+from banks import debugging_bank
+from banks import ai_assisted_bank
 from services.ai_service import (
     call_json,
     call_json_gpt,
     call_text,
     SONNET,
+    stage_sufficiency_prompt,
+    bug_explanation_grading_prompt,
     resume_prompt,
     mcq_prompt,
     coding_prompt,
@@ -92,6 +97,7 @@ from core import auth0_middleware
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini import (
     capgemini_recruitment_process,
 )
+from collections import Counter
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -971,6 +977,12 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         # expected_output" bug class entirely.
         needs_buggy = bool(section.get("automata_fix"))
         difficulty_targets = section.get("difficulty_targets")
+        # Cross-attempt repetition fix (2026-09, Phase 0 migration): merge
+        # this candidate's already-seen problem ids into the exclusion set
+        # from the start, so a retaken assessment doesn't repeat a coding
+        # problem. `exclude_ids` previously only prevented duplicates WITHIN
+        # one draw (the per-difficulty-target loop below).
+        seen_ids = await problem_bank.get_seen_ids(user_id)
         if difficulty_targets:
             # Per-problem difficulty (e.g. Wipro: Problem 1 easy-medium,
             # Problem 2 hard) — sample each individually rather than one
@@ -979,7 +991,7 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             # both easy_medium and hard's top-up) can't draw the same
             # problem twice across separate calls.
             picks = []
-            excluded: set = set()
+            excluded: set = set(seen_ids)
             for t in difficulty_targets:
                 got = _sample_problems(1, difficulty_target=t, needs_buggy=needs_buggy, exclude_ids=excluded)
                 picks.extend(got)
@@ -988,12 +1000,91 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
                 extra = _sample_problems(count - len(picks), difficulty_target=diff, needs_buggy=needs_buggy, exclude_ids=excluded)
                 picks.extend(extra)
         else:
-            picks = _sample_problems(count, difficulty_target=diff, needs_buggy=needs_buggy)
+            picks = _sample_problems(count, difficulty_target=diff, needs_buggy=needs_buggy, exclude_ids=seen_ids)
+        if len(picks) < count:
+            # Graceful shortfall: seen-exclusion left too few UNSEEN problems
+            # to satisfy `count` (small 29-problem bank, long candidate
+            # history) -- backfill by allowing repeats rather than
+            # under-serving the section, same "never a hard failure"
+            # philosophy mcq_static_bank's shortfall handling already uses.
+            picked_ids = {p.get("id") for p in picks if p.get("id")}
+            extra = _sample_problems(count - len(picks), difficulty_target=diff, needs_buggy=needs_buggy, exclude_ids=picked_ids)
+            picks.extend(extra)
         # Normalize ids to strings (bank ids are already strings but be safe)
         for i, p in enumerate(picks):
             p.setdefault("id", f"q{i+1}")
             p["id"] = str(p["id"])
+        await problem_bank.mark_seen(user_id, [p["id"] for p in picks])
         return picks
+    elif stype == "debugging":
+        # Round 3: Debugging Assessment. Draws exactly 1 problem via
+        # debugging_bank.sample_debug_session() (2026-09, R3/R4-config-
+        # correction pass: was 2 problems from 2 different topics --
+        # reversed per explicit instruction; see that function's own
+        # docstring). NOT the same code path as /dev/debugging-preview,
+        # which uses its own hardcoded 2-problem sample array and never
+        # calls sample_debug_session() at all -- confirmed via audit
+        # before this change, so this change has zero effect on it.
+        # Cross-attempt repetition uses debugging_bank's OWN seen tracker
+        # (debugging_bank_seen collection), kept deliberately separate from
+        # problem_bank's tracker -- this is its own ~25-item pool, not a
+        # sub-split of the 104-item coding bank (see debugging_bank.py's
+        # own comment on this).
+        seen_ids = await debugging_bank.get_seen_ids(user_id)
+        picks = debugging_bank.sample_debug_session(exclude_ids=seen_ids)
+        await debugging_bank.mark_seen(user_id, [p["id"] for p in picks])
+        return picks
+    elif stype == "ai_assisted":
+        # Round 4: AI-Assisted Coding. Draws exactly 1 problem via
+        # ai_assisted_bank.sample_one() -- its own seen tracker
+        # (ai_assisted_bank_seen collection), same "own pool, own
+        # tracker" convention as Round 3's debugging_bank. UNLIKE every
+        # other branch here, this ALSO creates the live conversation's
+        # session doc right now (not lazily on first message) in its own
+        # db.ai_assisted_sessions collection, attempt+section_key+user
+        # scoped -- so the conversation is ready the instant the
+        # candidate reaches this section. This section's `questions`
+        # deliberately holds only an OPAQUE {session_id, problem_id}
+        # pointer, never problem/answer content -- see companies.py's
+        # round4_ai_assisted comment and _strip_ai_assisted_problem's
+        # docstring for why (flawed_code/corrected_code/bug_explanation_
+        # key_points must never reach get_oa's response; they only ever
+        # travel through session["revealed_code"], server-controlled).
+        #
+        # Deliberately NOT calling into /dev/ai-assisted/start's route
+        # body (which builds an equivalent but NOT attempt-scoped session
+        # doc for the standalone dev-preview) -- kept as two independent
+        # code paths, same "dev route stays untouched, real flow is its
+        # own thing" separation Round 3 used for /api/dev/debugging/run
+        # vs. the real coding/debugging dispatch.
+        seen_ids = await ai_assisted_bank.get_seen_ids(user_id)
+        problem = ai_assisted_bank.sample_one(exclude_ids=seen_ids)
+        await ai_assisted_bank.mark_seen(user_id, [problem["id"]])
+        session_id = new_id("aas")
+        welcome = f"Let's talk through \"{problem['title']}\". " + _AI_ASSISTED_STAGE_OPENERS["understand"]
+        session = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "attempt_id": attempt_id,
+            "section_key": section["key"],
+            "company_name": company_name,
+            "problem_id": problem["id"],
+            "problem": _strip_ai_assisted_problem(problem),
+            "current_stage": "understand",
+            "transcript": [{"role": "ai", "stage": "understand", "text": welcome, "at": iso(now_utc())}],
+            "stage_attempts": {"understand": 0, "approach": 0, "complexity": 0, "explain_bug": 0},
+            "consent_given": None,
+            "self_review_result": None,
+            "bug_explanation_text": None,
+            "bug_explanation_score": None,
+            "revealed_code": None,
+            "final_outcome": None,
+            "status": "in_progress",
+            "created_at": iso(now_utc()),
+            "completed_at": None,
+        }
+        await db.ai_assisted_sessions.insert_one(session)
+        return [{"session_id": session_id, "problem_id": problem["id"]}]
     elif stype == "pseudocode":
         # Pseudocode sections go through the 3-stage ground-truth pipeline
         # (transpile-execute preferred; solver-agreement fallback). Ground
@@ -1010,9 +1101,22 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         # across pseudocode + all extra topics).
         extra_topics = section.get("extra_topics") or []
         pseudo_count = section.get("pseudocode_count", count) if extra_topics else count
-        data = await mcq_pool.fallback_live_verify(
-            company_name, section_name, section.get("key") or "pseudocode", pseudo_count, diff,
-        )
+        # 90/10 static-bank/live split (2026-09 Phase 0 migration), same
+        # pattern as every other canonical topic (mcq_static_bank.py) --
+        # "pseudocode" has 130 once-verified seeded questions instead of
+        # always calling the live 3-stage ground-truth pipeline. Live
+        # fallback (transpile-execute/solver-agreement) stays as the safety
+        # net for the 10% + any shortfall, kept deliberately rather than
+        # removed now, since 130 questions isn't yet proven enough depth to
+        # guarantee zero shortfalls across every company's pseudocode_count.
+        static_items, live_n = await mcq_static_bank.sample_mixed_static_part(user_id, "pseudocode", pseudo_count)
+        data = list(static_items)
+        if live_n > 0:
+            live_data = await mcq_pool.fallback_live_verify(
+                company_name, section_name, section.get("key") or "pseudocode", live_n, diff,
+            )
+            data.extend(live_data)
+        random.shuffle(data)
         for q in data:
             if isinstance(q, dict):
                 q["topic"] = "Pseudocode"
@@ -1118,6 +1222,23 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         game_types_list = (config.get("gameTypes") if config else None) or ["deductive_grid"]
         # EVERY game type listed in gameTypes runs in EVERY session -- not a
         # random pick-1-of-N (that was the old model, replaced 2026-08).
+        #
+        # drawCount (2026-10, R5-random-draw pass): OPTIONAL per-company
+        # override -- when a company's gamified_round_config doc sets this
+        # (currently only Capgemini, drawCount=4), that many game TYPES are
+        # drawn at random from gameTypes for THIS session (no repeats within
+        # the draw, since random.sample draws without replacement), instead
+        # of running the full list. Every other company's config doc has no
+        # drawCount field, so `config.get("drawCount")` is None for them and
+        # this is a complete no-op -- game_types_list stays the full list,
+        # identical to pre-2026-10 behavior. Nothing downstream (grading's
+        # types_present, OARunner.jsx's groups) needs to know this happened:
+        # both already derive which types are "present" from the actual
+        # served puzzles, not from gameTypes' length, which is exactly what
+        # makes this safe to add here alone.
+        draw_count = (config.get("drawCount") if config else None)
+        if draw_count and 0 < draw_count < len(game_types_list):
+            game_types_list = random.sample(game_types_list, draw_count)
         # perType holds per-type tunables: subPuzzlesPerGame for the flat-list
         # types (deductive_grid/switch_challenge), instancesPerGame for
         # grid_challenge (always 1 -- it's one instance with internal blocks,
@@ -1219,12 +1340,23 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             {"section": "spoken_simulation"}, {"_id": 0},
         ).to_list(None)
 
-        grammar_items = capgemini_recruitment_process.draw_section1_questions(grammar_pool, strip=False)
-        business_items = capgemini_recruitment_process.draw_section2_questions(business_pool, strip=False)
-        situational_items = capgemini_recruitment_process.draw_section3_questions(situational_pool, strip=False)
-        reading_items = capgemini_recruitment_process.draw_section4_questions(reading_pool)
-        listening_items = capgemini_recruitment_process.draw_section5_questions(listening_pool, strip=False)
-        spoken_items = capgemini_recruitment_process.draw_section6_questions(spoken_pool, strip=False)
+        # Cross-attempt repetition fix (2026-09, Phase 0 migration): each
+        # draw call now gets this candidate's already-seen ids for that
+        # specific section, keyed by the same `section` value used in the
+        # queries above -- see capgemini_recruitment_process.get_seen_ids.
+        grammar_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "grammar_correction")
+        business_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "business_writing")
+        situational_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "situational_response")
+        reading_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "reading_comprehension")
+        listening_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "listening_comprehension")
+        spoken_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "spoken_simulation")
+
+        grammar_items = capgemini_recruitment_process.draw_section1_questions(grammar_pool, strip=False, exclude_ids=grammar_seen)
+        business_items = capgemini_recruitment_process.draw_section2_questions(business_pool, strip=False, exclude_ids=business_seen)
+        situational_items = capgemini_recruitment_process.draw_section3_questions(situational_pool, strip=False, exclude_ids=situational_seen)
+        reading_items = capgemini_recruitment_process.draw_section4_questions(reading_pool, exclude_ids=reading_seen)
+        listening_items = capgemini_recruitment_process.draw_section5_questions(listening_pool, strip=False, exclude_ids=listening_seen)
+        spoken_items = capgemini_recruitment_process.draw_section6_questions(spoken_pool, strip=False, exclude_ids=spoken_seen)
 
         for q in grammar_items:
             q["part"] = "grammar"
@@ -1245,7 +1377,70 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             it["part"] = "spoken_sim"
             it["id"] = it["item_id"]
 
+        await capgemini_recruitment_process.mark_seen(user_id, "grammar_correction", [q["question_id"] for q in grammar_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "business_writing", [q["scenario_id"] for q in business_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "situational_response", [q["question_id"] for q in situational_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "reading_comprehension", [p["passage_id"] for p in reading_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "listening_comprehension", [c["clip_id"] for c in listening_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "spoken_simulation", [it["item_id"] for it in spoken_items])
+
         data = grammar_items + business_items + situational_items + reading_items + listening_items + spoken_items
+    elif stype == "capgemini_round2_ai_literacy":
+        # Round 2 -- AI Literacy (2026-09, Phase 0 migration, Task 2). Content
+        # is DRAWN from capgemini_round2_bank (separate collection from
+        # Round 1's capgemini_round1_bank), not LLM-generated -- same "store
+        # full, strip at response" pattern as capgemini_round1 above.
+        # NOT YET reachable in practice: companies.py's Capgemini Round 2
+        # config doesn't have a section with this `type` yet (see this
+        # module's top docstring) -- this branch exists, tested, so that
+        # decision (where in Round 2, what count/weight) can be made
+        # separately without ever having shipped un-wired dispatch code in
+        # between, same precedent as Section 5 before its own wiring pass.
+        ai_literacy_pool = await db.capgemini_round2_bank.find({}, {"_id": 0}).to_list(None)
+        ai_literacy_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "ai_literacy")
+        ai_literacy_items = capgemini_recruitment_process.draw_section7_questions(
+            ai_literacy_pool, strip=False, exclude_ids=ai_literacy_seen,
+        )
+        for s in ai_literacy_items:
+            s["part"] = "ai_literacy"
+            s["id"] = s["scenario_id"]
+        await capgemini_recruitment_process.mark_seen(user_id, "ai_literacy", [s["scenario_id"] for s in ai_literacy_items])
+        data = ai_literacy_items
+    elif stype == "capgemini_round2_technical":
+        # Round 2 -- Technical Assessment (2026-09/10, Round 2 wiring pass).
+        # Fixed 20-question, 4-way split: 5 from "programming_logic", 5 from
+        # "dsa", 5 mixed across oops/dbms/swe_fundamentals (balanced,
+        # randomized per draw -- not a fixed per-topic count, unlike a plain
+        # extra_topics section), and 5 mixed across cn/modern_engineering
+        # (weighted 3:2 toward cn). All four source topics are now in
+        # mcq_static_bank.CANONICAL_TOPICS (see that module), so this
+        # delegates the actual draw -- static/live 90/10 split, seen-
+        # tracking, shuffling -- to the SAME shared _generate_extra_topics
+        # helper OOPS/DBMS/OS/CN already go through elsewhere in this file;
+        # the only new logic here is picking each mixed pool's per-topic
+        # counts fresh on every call, via weighted random.choices over 5
+        # slots (so the split varies draw to draw around its target ratio
+        # rather than being identical every time -- verified via a 500-draw
+        # simulation before wiring: swe-mix lands close to an even 3-way
+        # split with no source systematically favored, modern-mix lands
+        # close to 3:2 cn:modern_engineering on average).
+        swe_mix_counts = Counter(random.choices(["oops", "dbms", "swe_fundamentals"], k=5))
+        modern_mix_counts = Counter(random.choices(["cn", "modern_engineering"], weights=[3, 2], k=5))
+        _TOPIC_DISPLAY_NAMES = {
+            "programming_logic": "Programming Logic", "dsa": "DSA", "oops": "OOPS", "dbms": "DBMS",
+            "swe_fundamentals": "SWE Fundamentals", "cn": "Computer Networks", "modern_engineering": "Modern Engineering",
+        }
+        extra_topics = [
+            {"key": "programming_logic", "name": _TOPIC_DISPLAY_NAMES["programming_logic"], "count": 5},
+            {"key": "dsa", "name": _TOPIC_DISPLAY_NAMES["dsa"], "count": 5},
+        ] + [
+            {"key": k, "name": _TOPIC_DISPLAY_NAMES[k], "count": c}
+            for k, c in swe_mix_counts.items() if c > 0
+        ] + [
+            {"key": k, "name": _TOPIC_DISPLAY_NAMES[k], "count": c}
+            for k, c in modern_mix_counts.items() if c > 0
+        ]
+        data = await _generate_extra_topics(company_name, extra_topics, diff, user_id)
     else:  # mcq / topic_mcq
         skey = section.get("key")
         stype = section.get("type")
@@ -1647,11 +1842,21 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
 # for sections they haven't answered. That's a gating/flow issue, not a
 # response-shape one, so it's flagged for separate follow-up rather than
 # folded into this fix.)
-_MCQ_ANSWER_BEARING_TYPES = {"mcq", "topic_mcq", "pseudocode", "comm", "grammar", "comprehension"}
+_MCQ_ANSWER_BEARING_TYPES = {"mcq", "topic_mcq", "pseudocode", "comm", "grammar", "comprehension", "capgemini_round2_technical"}
 _MIXED_MODE_TYPES = {"comm_mixed", "voice_mixed"}
 _MCQ_CLIENT_SAFE_FIELDS = ("id", "prompt", "options", "chart", "svg_diagram")
 _MCQ_MODE_CLIENT_SAFE_FIELDS = ("id", "mode", "prompt", "options")
 _SPEAKING_MODE_CLIENT_SAFE_FIELDS = ("id", "mode", "topic", "instructions", "min_words", "max_words")
+# Round 3 (Debugging Assessment) -- deliberately excludes hidden_tests and
+# reference_solution (the two fields debugging_bank.grade_debugging_
+# submission() needs server-side, that must never reach the client).
+# debugging_variant is already client-safe as stored (buggy_code/
+# bug_category/task_description only, no answer).
+_DEBUGGING_CLIENT_SAFE_FIELDS = (
+    "id", "title", "difficulty", "topic", "statement",
+    "input_format", "output_format", "constraints",
+    "visible_tests", "debugging_variant",
+)
 
 # Capgemini Round 1's six sub-parts, keyed by the `part` tag set in
 # _generate_section_questions's "capgemini_round1" branch -- each part has
@@ -1709,6 +1914,23 @@ _R1_LISTENING_SUBQ_FIELDS = ("question_id", "prompt", "question_focus", "options
 # the way the module-internal _strip_spoken_sim_for_client does.
 _R1_SPOKEN_SIM_FIELDS = ("id", "part", "item_type", "passage_text", "scenario", "estimated_duration_seconds")
 
+# Round 2 -- AI Literacy (added 2026-09, Phase 0 migration, Task 2). `id`
+# (not `scenario_id`) matches every Round 1 part's own id-field convention
+# above. Nested question fields exclude correct_option/explanation, same
+# answer-revealing exclusion as every other section -- `options` itself (the
+# letter-keyed dict of answer text) is not answer-revealing on its own.
+_R2_AI_LITERACY_SCENARIO_FIELDS = ("id", "part", "domain")
+_R2_AI_LITERACY_QUESTION_FIELDS = ("question_id", "prompt", "topic_tag", "options")
+
+
+def _strip_capgemini_round2_ai_literacy_question(q: Dict[str, Any]) -> Dict[str, Any]:
+    item = {k: q[k] for k in _R2_AI_LITERACY_SCENARIO_FIELDS if k in q}
+    item["questions"] = [
+        {k: sub[k] for k in _R2_AI_LITERACY_QUESTION_FIELDS if k in sub}
+        for sub in (q.get("questions") or [])
+    ]
+    return item
+
 
 def _strip_capgemini_round1_question(q: Dict[str, Any]) -> Dict[str, Any]:
     part = q.get("part")
@@ -1755,6 +1977,22 @@ def _strip_answer_fields_for_response(sections: List[dict]) -> List[dict]:
             out.append({**s, "questions": new_questions})
         elif stype == "capgemini_round1":
             new_questions = [_strip_capgemini_round1_question(q) for q in questions]
+            out.append({**s, "questions": new_questions})
+        elif stype == "capgemini_round2_ai_literacy":
+            new_questions = [_strip_capgemini_round2_ai_literacy_question(q) for q in questions]
+            out.append({**s, "questions": new_questions})
+        elif stype == "debugging":
+            new_questions = [{k: q[k] for k in _DEBUGGING_CLIENT_SAFE_FIELDS if k in q} for q in questions]
+            out.append({**s, "questions": new_questions})
+        elif stype == "ai_assisted":
+            # Whitelist is really a no-op in practice -- the generation
+            # branch already only ever stores {session_id, problem_id} in
+            # `questions` (see _generate_section_questions's "ai_assisted"
+            # branch), never problem/answer content. Kept explicit anyway,
+            # matching this function's whitelist-everywhere convention,
+            # rather than relying on "nothing sensitive is in there by
+            # construction" alone.
+            new_questions = [{k: q[k] for k in ("session_id", "problem_id") if k in q} for q in questions]
             out.append({**s, "questions": new_questions})
         else:
             out.append(s)
@@ -1976,6 +2214,53 @@ async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
     }
 
 
+async def _grade_debugging_section(section: dict, answers: Dict[str, Any]) -> dict:
+    """Grades Round 3 (Debugging Assessment) by reusing debugging_bank.
+    grade_debugging_submission() per problem -- the exact same code_runner.
+    run_tests() pipeline _grade_coding_section (above) already uses for the
+    existing "coding" round, and the same grading primitive
+    /api/dev/debugging/run calls for the standalone dev-preview. No AI note
+    here (unlike coding) -- a debugging problem's correctness is fully
+    determined by test pass/fail, there's nothing subjective to comment on.
+
+    grade_debugging_submission() itself returns full per-test detail
+    (including hidden test input/expected/got) -- fine for the dev-only
+    route, which has no live attempt to protect, but this response is
+    persisted into section_results and handed straight back to the client
+    in submit_section's HTTP response. Strip to aggregate counts only here,
+    matching _grade_coding_section's own convention above (which never
+    exposes hidden test detail either) -- otherwise a candidate could read
+    off the hidden tests' exact inputs/expected outputs from their own
+    submit response.
+    """
+    problems = section.get("questions", [])
+    per_problem = []
+    total_score = 0.0
+    for p in problems:
+        pid = str(p.get("id"))
+        sub = answers.get(pid) or {}
+        code = sub.get("code", "")
+        language = sub.get("language", "python")
+        result = await asyncio.to_thread(debugging_bank.grade_debugging_submission, p, code, language)
+        per_problem.append({
+            "problem_id": result["problem_id"],
+            "language": result["language"],
+            "title": p.get("title"),
+            "visible": {"passed": result["visible"]["passed"], "total": result["visible"]["total"]},
+            "hidden": {"passed": result["hidden"]["passed"], "total": result["hidden"]["total"]},
+            "score": result["score"],
+            "passed": result["passed"],
+        })
+        total_score += result["score"]
+    n = max(1, len(problems))
+    score = total_score / n
+    return {
+        "score": round(score, 3),
+        "problems": per_problem,
+        "passed": score >= section.get("cutoff", 0.5),
+    }
+
+
 async def _grade_capgemini_round1_section(section: dict, answers: Dict[str, Any]) -> dict:
     """Grades all 6 sub-parts of Capgemini's Round 1 Communication
     Assessment together (one section, see companies.py's single-timer
@@ -2077,6 +2362,38 @@ async def _grade_capgemini_round1_section(section: dict, answers: Dict[str, Any]
     score = (sum(per_item_scores) / total) if total else 0.0
     return {
         "score": round(score, 3),
+        "total": total,
+        "breakdown": breakdown,
+        "passed": score >= section.get("cutoff", 0.5),
+    }
+
+
+async def _grade_capgemini_round2_ai_literacy_section(section: dict, answers: Dict[str, Any]) -> dict:
+    """Grades Round 2's AI Literacy section (2026-09/10, Round 2 wiring
+    pass). Doesn't fit the generic _grade_mcq_like: items here are
+    scenario-nested (scenario -> questions: [...]), same nesting shape as
+    capgemini_round1's reading_comp/listening_comp sub-questions, but each
+    leaf question uses a LETTER-KEYED correct_option ("A".."D", matching
+    how this bank was authored -- see draw_section7_questions' docstring)
+    instead of reading_comp/listening_comp's own correct_option convention
+    or the flat MCQ types' int correct_index. Re-derives correctness from
+    `section` -- the FULL, unstripped doc submit_section already fetched --
+    never the client-submitted answer, same principle as every grader
+    here."""
+    per_item_scores: List[float] = []
+    breakdown: List[Dict[str, Any]] = []
+    for scenario in section.get("questions", []):
+        for subq in scenario.get("questions") or []:
+            sub_qid = str(subq.get("question_id"))
+            submitted = answers.get(sub_qid)
+            correct = submitted is not None and str(submitted).strip().upper() == subq.get("correct_option")
+            per_item_scores.append(1.0 if correct else 0.0)
+            breakdown.append({"id": sub_qid, "submitted": submitted, "correct": correct})
+    total = len(per_item_scores)
+    score = (sum(per_item_scores) / total) if total else 0.0
+    return {
+        "score": round(score, 3),
+        "correct": int(sum(per_item_scores)),
         "total": total,
         "breakdown": breakdown,
         "passed": score >= section.get("cutoff", 0.5),
@@ -2300,6 +2617,34 @@ async def run_code(body: RunCodeIn, user: Dict[str, Any] = Depends(require_user)
     return {"results": results, "language": body.language, "supported_languages": SUPPORTED_LANGUAGES}
 
 
+class DevDebuggingRunIn(BaseModel):
+    problem_id: str
+    language: str
+    code: str
+
+
+@api.post("/dev/debugging/run")
+async def dev_debugging_run(body: DevDebuggingRunIn, user: Dict[str, Any] = Depends(require_user)):
+    """DEV/TEST-ONLY: backs /dev/debugging-preview's run+submit actions on
+    the frontend (see DevDebuggingPreview.jsx). Exercises
+    debugging_bank.grade_debugging_submission() -- which itself reuses
+    code_runner.run_tests(), the exact same pipeline _grade_coding_section
+    already uses for the real "coding" round -- through a genuine HTTP round
+    trip, so the dev-preview's click-through tests real grading wired to a
+    real UI action, not a client-side simulation.
+
+    Reads no oa_attempts document and writes nothing -- NOT part of any OA
+    attempt/section flow. Round 3 (Debugging Assessment) is still not wired
+    into companies.py or any real company's round list; this route exists
+    solely so the standalone dev-preview can be verified end-to-end.
+    """
+    problem = debugging_bank.get_problem(body.problem_id)
+    if not problem:
+        raise HTTPException(404, "Unknown debugging problem id")
+    result = await asyncio.to_thread(debugging_bank.grade_debugging_submission, problem, body.code, body.language)
+    return result
+
+
 @api.post("/oa/{attempt_id}/transcribe")
 async def oa_transcribe(
     attempt_id: str,
@@ -2472,6 +2817,14 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
     stype = section["type"]
     if stype == "coding":
         result = await _grade_coding_section(section, body.answers)
+    elif stype == "debugging":
+        result = await _grade_debugging_section(section, body.answers)
+    elif stype == "ai_assisted":
+        # body.answers is deliberately IGNORED here -- see
+        # _finalize_ai_assisted_section's docstring for why (Round 4's
+        # true state lives in db.ai_assisted_sessions, not an answers
+        # payload; a client-supplied score/stage claim has no effect).
+        result = await _finalize_ai_assisted_section(section, attempt_id, user["user_id"])
     elif stype == "essay":
         result = await _grade_essay_section(section, body.answers)
     elif stype == "speaking":
@@ -2486,7 +2839,9 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
         result = await _grade_gamified_round_section(section, body.answers, attempt_id)
     elif stype == "capgemini_round1":
         result = await _grade_capgemini_round1_section(section, body.answers)
-    else:  # mcq / topic_mcq / pseudocode / comm / grammar / comprehension
+    elif stype == "capgemini_round2_ai_literacy":
+        result = await _grade_capgemini_round2_ai_literacy_section(section, body.answers)
+    else:  # mcq / topic_mcq / pseudocode / comm / grammar / comprehension / capgemini_round2_technical
         result = _grade_mcq_like(section, body.answers)
 
     # Persist
@@ -2915,6 +3270,616 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
 
 
 # =============================================================================
+#  DEV/TEST-ONLY: Capgemini Round 4 (AI-Assisted Coding) -- live staged
+#  conversation backend. Modeled directly on the /interview/* trio above
+#  (own dedicated Mongo collection, own *_id, user_id-scoped ownership,
+#  grow-a-transcript-in-place per turn) -- the closest existing analog for
+#  genuine multi-turn stateful LLM interaction in this codebase (see the
+#  audit that preceded this pass). Schema/content/design this is built
+#  against lives in banks/ai_assisted_bank.py (STAGE_ORDER, STAGE_CONFIG,
+#  CONSENT_GATE, SELF_REVIEW, FINAL_SUMMARY_TEMPLATE).
+#
+#  NOT wired into companies.py or any real company's round list yet --
+#  same sequencing discipline as Round 3 (debugging_bank): dev-preview
+#  first, verified end-to-end, before any live-flow wiring. Backs
+#  /dev/ai-assisted-preview (DevAiAssistedPreview.jsx / AiAssistedSection.jsx).
+#
+#  current_stage/progression is derived SERVER-SIDE from actual LLM
+#  sufficiency judgments (stage_sufficiency_prompt/bug_explanation_grading_
+#  prompt, both wrap_untrusted + GRADING_INJECTION_DEFENSE hardened, same
+#  pairing as grade_answer_prompt above) or from the two deterministic
+#  button gates below -- never from a client-submitted claim of what stage
+#  it should be on.
+# =============================================================================
+
+_AI_ASSISTED_FREE_TEXT_STAGES = ("understand", "approach", "complexity", "explain_bug")
+
+# Fixed, natural candidate-facing opener per free-text stage. STAGE_CONFIG's
+# own `prompt_intro` (ai_assisted_bank.py) is written as an INSTRUCTION FOR
+# THE GRADER ("Ask the candidate...") -- reused as-is for the LLM's judging
+# context in stage_sufficiency_prompt, but not natural as literal chat text,
+# so this is the actual shown phrasing (a deliberate, small implementation
+# choice, not data-driven, since it's always the same ~3 openers).
+_AI_ASSISTED_STAGE_OPENERS = {
+    "understand": "First, in your own words -- what is this problem asking you to do? Talk me through the inputs, outputs, and any constraints that matter.",
+    "approach": "Good. Now, what's your strategy? Walk me through the algorithmic approach you'd use to solve this.",
+    "complexity": "And what's the time and space complexity of that approach?",
+}
+
+_AI_ASSISTED_CLIENT_SAFE_FIELDS = ("id", "title", "difficulty", "topic", "statement", "input_format", "output_format", "constraints")
+
+
+def _strip_ai_assisted_problem(problem: Dict[str, Any]) -> Dict[str, Any]:
+    """Client-safe projection -- deliberately excludes the ENTIRE
+    ai_assisted_variant (flawed_code, corrected_code, bug_category,
+    bug_explanation_key_points). The editor starts empty; flawed_code is
+    revealed only via the consent="yes" action, corrected_code only at
+    completion -- both delivered through session["revealed_code"], never
+    through this problem projection."""
+    return {k: problem[k] for k in _AI_ASSISTED_CLIENT_SAFE_FIELDS if k in problem}
+
+
+def _ai_assisted_lang_display(lang: str) -> str:
+    return {"cpp": "C++", "c": "C", "python": "Python", "java": "Java"}.get(lang, lang)
+
+
+def _score_ai_assisted_session(session: Dict[str, Any]) -> Dict[str, Any]:
+    """PROPOSED SCORING DEFAULT -- NOT CONFIRMED. Flagged exactly like
+    Section 2's rubric weighting was flagged earlier as an assumption
+    pending sign-off; implemented as the working default, not a locked
+    decision.
+
+    Weights: self-review correctness 0.5 (the core test per the confirmed
+    evidence -- did they correctly say "No" to the flawed code) +
+    bug-explanation quality 0.35 (graded against that problem's
+    bug_explanation_key_points) + stage-completion efficiency 0.15 across
+    understand/approach/complexity (fewer re-prompts needed = higher
+    signal of genuine understanding, min(1.0, 1/attempts) per stage,
+    averaged).
+
+    If self_review_result == "yes" (candidate blindly accepted the flawed
+    code -- the UNCONFIRMED/assumed-default path, see ai_assisted_bank.
+    SELF_REVIEW["on_yes"]), self_review_correct AND bug_explanation_quality
+    are BOTH 0 by construction (that path never reaches explain_bug), so
+    this formula alone caps the score at 0.15 * stage_efficiency <= 0.15 --
+    well under any reasonable passing cutoff (0.5), with no special-cased
+    override needed. That's the intentional "missing the actual point of
+    the round should dominate the outcome" behavior, achieved by the
+    weighting itself rather than an if-branch.
+    """
+    attempts = session.get("stage_attempts", {})
+    effs = [min(1.0, 1.0 / max(1, attempts.get(st, 1))) for st in ("understand", "approach", "complexity")]
+    stage_efficiency = sum(effs) / len(effs) if effs else 0.0
+
+    self_review_correct = 1.0 if session.get("self_review_result") == "no" else 0.0
+    bug_explanation_quality = (session.get("bug_explanation_score") or 0) / 100.0
+
+    score = 0.5 * self_review_correct + 0.35 * bug_explanation_quality + 0.15 * stage_efficiency
+    passed = score >= 0.5
+    if not self_review_correct:
+        reason = "candidate accepted the flawed code as correct -- missed the core test of this round"
+    elif bug_explanation_quality >= 0.5:
+        reason = "candidate correctly caught the flawed code and explained the real bug"
+    else:
+        reason = "candidate caught the flaw but the bug explanation was weak or generic"
+    return {
+        "score": round(score, 3),
+        "passed": passed,
+        "reason": reason,
+        "components": {
+            "self_review_correct": self_review_correct,
+            "bug_explanation_quality": round(bug_explanation_quality, 3),
+            "stage_efficiency": round(stage_efficiency, 3),
+        },
+    }
+
+
+async def _finalize_ai_assisted_section(section: dict, attempt_id: str, user_id: str) -> dict:
+    """submit_section's "ai_assisted" dispatch target. UNLIKE every other
+    section's grading function, this deliberately does NOT take
+    body.answers at all -- Round 4 is a stateful, multi-turn conversation
+    whose true state lives in db.ai_assisted_sessions (created at
+    generation time), not in an answers payload the client submits. A
+    client-supplied score or stage claim has NO code path into this
+    function to have any effect; everything is re-derived from the
+    stored session server-side, via the exact same _score_ai_assisted_
+    session() formula the live self_review="Yes"/explain_bug-sufficient
+    paths already use.
+
+    Also covers "the candidate ran out the timer or left mid-
+    conversation" -- _score_ai_assisted_session is already null-safe
+    against an in-progress session (self_review_result/
+    bug_explanation_score simply score as 0 in the formula when unset),
+    so scoring an abandoned session needs no special-casing here. Marks
+    the session "completed" if it wasn't already, so it can't keep
+    mutating after being scored."""
+    session = await db.ai_assisted_sessions.find_one(
+        {"attempt_id": attempt_id, "section_key": section["key"], "user_id": user_id}, {"_id": 0},
+    )
+    if not session:
+        # No session was ever created (generation failed/crashed) -- score
+        # as a complete miss rather than 500, same "never leave the
+        # attempt hanging" philosophy as coding's _reference_broken skip.
+        return {"score": 0.0, "passed": False, "reason": "no session found for this section", "problem_id": None}
+
+    outcome = _score_ai_assisted_session(session)
+    if session.get("status") != "completed":
+        await db.ai_assisted_sessions.update_one(
+            {"session_id": session["session_id"]},
+            {"$set": {"status": "completed", "completed_at": iso(now_utc()), "final_outcome": outcome}},
+        )
+    return {
+        "score": outcome["score"],
+        "passed": outcome["passed"],
+        "reason": outcome["reason"],
+        "problem_id": session.get("problem_id"),
+        "self_review_result": session.get("self_review_result"),
+        "components": outcome["components"],
+    }
+
+
+class StartAiAssistedIn(BaseModel):
+    problem_id: Optional[str] = None
+
+
+@api.post("/dev/ai-assisted/start")
+async def dev_ai_assisted_start(body: StartAiAssistedIn, user: Dict[str, Any] = Depends(require_user)):
+    """DEV/TEST-ONLY: starts a new Round 4 (AI-Assisted Coding) session.
+    Draws a REAL problem via ai_assisted_bank.sample_one() (the same
+    verified draw function a future live wiring would use) unless a
+    specific problem_id is passed (for reproducible manual/automated
+    testing)."""
+    if body.problem_id:
+        problem = ai_assisted_bank.get_problem(body.problem_id)
+        if not problem:
+            raise HTTPException(404, "Unknown ai-assisted problem id")
+    else:
+        seen = await ai_assisted_bank.get_seen_ids(user["user_id"])
+        problem = ai_assisted_bank.sample_one(exclude_ids=seen)
+    await ai_assisted_bank.mark_seen(user["user_id"], [problem["id"]])
+
+    session_id = new_id("aas")
+    welcome = f"Let's talk through \"{problem['title']}\". " + _AI_ASSISTED_STAGE_OPENERS["understand"]
+    session = {
+        "session_id": session_id,
+        "user_id": user["user_id"],
+        "problem_id": problem["id"],
+        "problem": _strip_ai_assisted_problem(problem),
+        "current_stage": "understand",
+        "transcript": [{"role": "ai", "stage": "understand", "text": welcome, "at": iso(now_utc())}],
+        "stage_attempts": {"understand": 0, "approach": 0, "complexity": 0, "explain_bug": 0},
+        "consent_given": None,
+        "self_review_result": None,
+        "bug_explanation_text": None,
+        "bug_explanation_score": None,
+        "revealed_code": None,
+        "final_outcome": None,
+        "status": "in_progress",
+        "created_at": iso(now_utc()),
+        "completed_at": None,
+    }
+    await db.ai_assisted_sessions.insert_one(session)
+    session.pop("_id", None)
+    return session
+
+
+@api.get("/dev/ai-assisted/{session_id}")
+async def dev_ai_assisted_get(session_id: str, user: Dict[str, Any] = Depends(require_user)):
+    doc = await db.ai_assisted_sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Not found")
+    return doc
+
+
+class AiAssistedMessageIn(BaseModel):
+    text: str
+
+
+@api.post("/dev/ai-assisted/{session_id}/message")
+async def dev_ai_assisted_message(session_id: str, body: AiAssistedMessageIn, user: Dict[str, Any] = Depends(require_user)):
+    """Free-text stages only (understand/approach/complexity/explain_bug).
+    The consent and self_review gates are button-driven -- see the two
+    routes below, never this one."""
+    session = await db.ai_assisted_sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not session:
+        raise HTTPException(404, "Not found")
+    stage = session["current_stage"]
+    if stage not in _AI_ASSISTED_FREE_TEXT_STAGES:
+        raise HTTPException(409, f"Current stage '{stage}' does not accept free-text messages")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    problem = ai_assisted_bank.get_problem(session["problem_id"])
+    variant = problem["ai_assisted_variant"]
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": stage, "text": body.text, "at": iso(now_utc())})
+    attempts = session["stage_attempts"]
+
+    update: Dict[str, Any] = {}
+
+    if stage == "explain_bug":
+        # GPT-4o mini (call_json_gpt) -- permanent model choice for Round 4's
+        # staged-conversation grading, not a stopgap.
+        grade = await call_json_gpt(
+            "You grade a candidate's bug-explanation for an AI-assisted coding "
+            "assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+            bug_explanation_grading_prompt(
+                problem["title"], variant["bug_category"], variant["bug_explanation_key_points"], body.text,
+            ),
+        ) or {"sufficient": False, "reprompt": "Could you point to the specific line or condition that's wrong, and why?", "score": 0, "one_line_verdict": ""}
+        grade = _attach_grading_flag(grade)
+        sufficient = bool(grade.get("sufficient"))
+        attempts["explain_bug"] = attempts.get("explain_bug", 0) + 1
+
+        if sufficient:
+            session["bug_explanation_text"] = body.text
+            session["bug_explanation_score"] = grade.get("score", 0)
+            session["current_stage"] = "complete"
+            session["status"] = "completed"
+            session["completed_at"] = iso(now_utc())
+            session["revealed_code"] = {
+                "label": "Reference Solution (Fixed)",
+                "language": variant["display_language"],
+                "code": variant["corrected_code"],
+            }
+            final_outcome = _score_ai_assisted_session(session)
+            session["final_outcome"] = final_outcome
+            transcript.append({"role": "ai", "stage": "explain_bug", "text": grade.get("one_line_verdict") or "Correct -- that's the actual bug.", "at": iso(now_utc())})
+            transcript.append({"role": "ai", "stage": "complete", "text": ai_assisted_bank.FINAL_SUMMARY_TEMPLATE["heading"], "at": iso(now_utc())})
+            update.update({
+                "bug_explanation_text": session["bug_explanation_text"],
+                "bug_explanation_score": session["bug_explanation_score"],
+                "current_stage": "complete", "status": "completed", "completed_at": session["completed_at"],
+                "revealed_code": session["revealed_code"], "final_outcome": final_outcome,
+            })
+        else:
+            reprompt = grade.get("reprompt") or "Could you point to the specific line or condition that's wrong, and why?"
+            transcript.append({"role": "ai", "stage": "explain_bug", "text": reprompt, "at": iso(now_utc())})
+    else:
+        stage_cfg = ai_assisted_bank.STAGE_CONFIG[stage]
+        # GPT-4o mini (call_json_gpt) -- same permanent choice as the
+        # explain_bug branch above.
+        grade = await call_json_gpt(
+            "You run a staged technical-discussion gate for an AI-assisted "
+            "coding assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+            stage_sufficiency_prompt(
+                stage, stage_cfg["prompt_intro"], stage_cfg["sufficiency_rubric"],
+                stage_cfg["reprompt_examples"], body.text,
+            ),
+        ) or {"sufficient": False, "reprompt": (stage_cfg["reprompt_examples"] or ["Could you say a bit more?"])[0]}
+        # No numeric score field at these stages (just sufficient/reprompt) --
+        # _attach_grading_flag's heuristic doesn't apply here, unlike explain_bug's grade above.
+        sufficient = bool(grade.get("sufficient"))
+        attempts[stage] = attempts.get(stage, 0) + 1
+
+        if sufficient:
+            next_stage = ai_assisted_bank.STAGE_ORDER[ai_assisted_bank.STAGE_ORDER.index(stage) + 1]
+            session["current_stage"] = next_stage
+            if next_stage == "consent":
+                ai_msg = ai_assisted_bank.CONSENT_GATE["prompt_template"].format(
+                    language=_ai_assisted_lang_display(variant["display_language"])
+                )
+            else:
+                ai_msg = _AI_ASSISTED_STAGE_OPENERS[next_stage]
+            transcript.append({"role": "ai", "stage": next_stage, "text": ai_msg, "at": iso(now_utc())})
+            update["current_stage"] = next_stage
+        else:
+            reprompt = grade.get("reprompt") or (stage_cfg["reprompt_examples"] or ["Could you say a bit more?"])[0]
+            transcript.append({"role": "ai", "stage": stage, "text": reprompt, "at": iso(now_utc())})
+
+    update["transcript"] = transcript
+    update["stage_attempts"] = attempts
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+class AiAssistedButtonIn(BaseModel):
+    value: bool
+
+
+@api.post("/dev/ai-assisted/{session_id}/consent")
+async def dev_ai_assisted_consent(session_id: str, body: AiAssistedButtonIn, user: Dict[str, Any] = Depends(require_user)):
+    """Deterministic, button-driven -- NO LLM call. 'No' holds at the same
+    gate and re-prompts patiently (no penalty, genuine candidate pacing
+    control, per the confirmed evidence). 'Yes' reveals flawed_code into
+    the editor and advances to self_review."""
+    session = await db.ai_assisted_sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not session:
+        raise HTTPException(404, "Not found")
+    if session["current_stage"] != "consent":
+        raise HTTPException(409, f"Current stage is '{session['current_stage']}', not 'consent'")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": "consent", "text": "Yes" if body.value else "No", "at": iso(now_utc())})
+    update: Dict[str, Any] = {}
+
+    if not body.value:
+        transcript.append({"role": "ai", "stage": "consent", "text": ai_assisted_bank.CONSENT_GATE["on_no"]["message"], "at": iso(now_utc())})
+    else:
+        problem = ai_assisted_bank.get_problem(session["problem_id"])
+        variant = problem["ai_assisted_variant"]
+        rng = ai_assisted_bank.bug_marker_line_range(variant["flawed_code"])
+        session["consent_given"] = True
+        session["current_stage"] = "self_review"
+        session["revealed_code"] = {"label": "Generated Code", "language": variant["display_language"], "code": variant["flawed_code"]}
+        review_msg = ai_assisted_bank.SELF_REVIEW["prompt_template"].format(start=rng["start"], end=rng["end"])
+        transcript.append({"role": "ai", "stage": "self_review", "text": review_msg, "at": iso(now_utc())})
+        update.update({"consent_given": True, "current_stage": "self_review", "revealed_code": session["revealed_code"]})
+
+    update["transcript"] = transcript
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+@api.post("/dev/ai-assisted/{session_id}/self_review")
+async def dev_ai_assisted_self_review(session_id: str, body: AiAssistedButtonIn, user: Dict[str, Any] = Depends(require_user)):
+    """Deterministic, button-driven -- NO LLM call. 'No' (correct: caught
+    the flaw) advances to explain_bug. 'Yes' (accepted flawed code as
+    correct) applies the UNCONFIRMED/assumed-default path documented in
+    ai_assisted_bank.SELF_REVIEW["on_yes"] -- ends the round immediately,
+    scores as a miss, still shows corrected_code as the reference summary."""
+    session = await db.ai_assisted_sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not session:
+        raise HTTPException(404, "Not found")
+    if session["current_stage"] != "self_review":
+        raise HTTPException(409, f"Current stage is '{session['current_stage']}', not 'self_review'")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    problem = ai_assisted_bank.get_problem(session["problem_id"])
+    variant = problem["ai_assisted_variant"]
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": "self_review", "text": "Yes" if body.value else "No", "at": iso(now_utc())})
+    update: Dict[str, Any] = {}
+
+    if not body.value:
+        session["self_review_result"] = "no"
+        session["current_stage"] = "explain_bug"
+        transcript.append({"role": "ai", "stage": "explain_bug", "text": ai_assisted_bank.SELF_REVIEW["on_no"]["message"], "at": iso(now_utc())})
+        update.update({"self_review_result": "no", "current_stage": "explain_bug"})
+    else:
+        session["self_review_result"] = "yes"
+        session["current_stage"] = "complete"
+        session["status"] = "completed"
+        session["completed_at"] = iso(now_utc())
+        session["revealed_code"] = {"label": "Reference Solution (Fixed)", "language": variant["display_language"], "code": variant["corrected_code"]}
+        final_outcome = _score_ai_assisted_session(session)
+        session["final_outcome"] = final_outcome
+        transcript.append({"role": "ai", "stage": "complete", "text": ai_assisted_bank.FINAL_SUMMARY_TEMPLATE["heading"], "at": iso(now_utc())})
+        update.update({
+            "self_review_result": "yes", "current_stage": "complete", "status": "completed",
+            "completed_at": session["completed_at"], "revealed_code": session["revealed_code"],
+            "final_outcome": final_outcome,
+        })
+
+    update["transcript"] = transcript
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+# =============================================================================
+#  Capgemini Round 4 (AI-Assisted Coding) -- LIVE, attempt-scoped routes.
+#  Deliberately SEPARATE from the /dev/ai-assisted/* routes above (not
+#  wrappers around them, no shared route-body code) -- same "dev route
+#  stays untouched, real flow is its own code path" separation Round 3
+#  used for /api/dev/debugging/run vs. the real coding/debugging
+#  dispatch. Reuses only the shared, non-route-specific helpers those dev
+#  routes ALSO happen to use (_score_ai_assisted_session, STAGE_CONFIG,
+#  the prompt builders, etc.) -- never the dev routes' own function
+#  bodies, so the dev-preview's behavior is unaffected by this section.
+#
+#  Looked up via {attempt_id, section_key, user_id} (ownership-checked
+#  against the attempt first, then confirms the section is actually type
+#  "ai_assisted") rather than a bare session_id the client would have to
+#  separately track -- the frontend already knows attempt_id (from the
+#  URL) and section_key (from currentSection.key), matching how /oa/run
+#  is already scoped for the "coding" round above.
+# =============================================================================
+
+async def _load_ai_assisted_session_for_attempt(attempt_id: str, section_key: str, user_id: str) -> Dict[str, Any]:
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user_id}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Attempt not found")
+    section = next((s for s in attempt["sections"] if s["key"] == section_key), None)
+    if not section or section["type"] != "ai_assisted":
+        raise HTTPException(404, "Not an AI-Assisted Coding section")
+    session = await db.ai_assisted_sessions.find_one(
+        {"attempt_id": attempt_id, "section_key": section_key, "user_id": user_id}, {"_id": 0},
+    )
+    if not session:
+        raise HTTPException(404, "Session not found -- section may still be generating")
+    return session
+
+
+@api.get("/oa/{attempt_id}/ai-assisted/{section_key}")
+async def oa_ai_assisted_get(attempt_id: str, section_key: str, user: Dict[str, Any] = Depends(require_user)):
+    return await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+
+
+@api.post("/oa/{attempt_id}/ai-assisted/{section_key}/message")
+async def oa_ai_assisted_message(attempt_id: str, section_key: str, body: AiAssistedMessageIn, user: Dict[str, Any] = Depends(require_user)):
+    """Live-flow counterpart of dev_ai_assisted_message -- same logic,
+    attempt+section_key scoped instead of bare session_id. Free-text
+    stages only (understand/approach/complexity/explain_bug); consent and
+    self_review are button-driven, see the two routes below."""
+    session = await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    session_id = session["session_id"]
+    stage = session["current_stage"]
+    if stage not in _AI_ASSISTED_FREE_TEXT_STAGES:
+        raise HTTPException(409, f"Current stage '{stage}' does not accept free-text messages")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    problem = ai_assisted_bank.get_problem(session["problem_id"])
+    variant = problem["ai_assisted_variant"]
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": stage, "text": body.text, "at": iso(now_utc())})
+    attempts = session["stage_attempts"]
+
+    update: Dict[str, Any] = {}
+
+    if stage == "explain_bug":
+        # GPT-4o mini (call_json_gpt) -- permanent model choice for Round 4's
+        # staged-conversation grading, not a stopgap.
+        grade = await call_json_gpt(
+            "You grade a candidate's bug-explanation for an AI-assisted coding "
+            "assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+            bug_explanation_grading_prompt(
+                problem["title"], variant["bug_category"], variant["bug_explanation_key_points"], body.text,
+            ),
+        ) or {"sufficient": False, "reprompt": "Could you point to the specific line or condition that's wrong, and why?", "score": 0, "one_line_verdict": ""}
+        grade = _attach_grading_flag(grade)
+        sufficient = bool(grade.get("sufficient"))
+        attempts["explain_bug"] = attempts.get("explain_bug", 0) + 1
+
+        if sufficient:
+            session["bug_explanation_text"] = body.text
+            session["bug_explanation_score"] = grade.get("score", 0)
+            session["current_stage"] = "complete"
+            session["status"] = "completed"
+            session["completed_at"] = iso(now_utc())
+            session["revealed_code"] = {
+                "label": "Reference Solution (Fixed)",
+                "language": variant["display_language"],
+                "code": variant["corrected_code"],
+            }
+            final_outcome = _score_ai_assisted_session(session)
+            session["final_outcome"] = final_outcome
+            transcript.append({"role": "ai", "stage": "explain_bug", "text": grade.get("one_line_verdict") or "Correct -- that's the actual bug.", "at": iso(now_utc())})
+            transcript.append({"role": "ai", "stage": "complete", "text": ai_assisted_bank.FINAL_SUMMARY_TEMPLATE["heading"], "at": iso(now_utc())})
+            update.update({
+                "bug_explanation_text": session["bug_explanation_text"],
+                "bug_explanation_score": session["bug_explanation_score"],
+                "current_stage": "complete", "status": "completed", "completed_at": session["completed_at"],
+                "revealed_code": session["revealed_code"], "final_outcome": final_outcome,
+            })
+        else:
+            reprompt = grade.get("reprompt") or "Could you point to the specific line or condition that's wrong, and why?"
+            transcript.append({"role": "ai", "stage": "explain_bug", "text": reprompt, "at": iso(now_utc())})
+    else:
+        stage_cfg = ai_assisted_bank.STAGE_CONFIG[stage]
+        # GPT-4o mini (call_json_gpt) -- same permanent choice as the
+        # explain_bug branch above.
+        grade = await call_json_gpt(
+            "You run a staged technical-discussion gate for an AI-assisted "
+            "coding assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+            stage_sufficiency_prompt(
+                stage, stage_cfg["prompt_intro"], stage_cfg["sufficiency_rubric"],
+                stage_cfg["reprompt_examples"], body.text,
+            ),
+        ) or {"sufficient": False, "reprompt": (stage_cfg["reprompt_examples"] or ["Could you say a bit more?"])[0]}
+        # No numeric score field at these stages (just sufficient/reprompt) --
+        # _attach_grading_flag's heuristic doesn't apply here, unlike explain_bug's grade above.
+        sufficient = bool(grade.get("sufficient"))
+        attempts[stage] = attempts.get(stage, 0) + 1
+
+        if sufficient:
+            next_stage = ai_assisted_bank.STAGE_ORDER[ai_assisted_bank.STAGE_ORDER.index(stage) + 1]
+            session["current_stage"] = next_stage
+            if next_stage == "consent":
+                ai_msg = ai_assisted_bank.CONSENT_GATE["prompt_template"].format(
+                    language=_ai_assisted_lang_display(variant["display_language"])
+                )
+            else:
+                ai_msg = _AI_ASSISTED_STAGE_OPENERS[next_stage]
+            transcript.append({"role": "ai", "stage": next_stage, "text": ai_msg, "at": iso(now_utc())})
+            update["current_stage"] = next_stage
+        else:
+            reprompt = grade.get("reprompt") or (stage_cfg["reprompt_examples"] or ["Could you say a bit more?"])[0]
+            transcript.append({"role": "ai", "stage": stage, "text": reprompt, "at": iso(now_utc())})
+
+    update["transcript"] = transcript
+    update["stage_attempts"] = attempts
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+@api.post("/oa/{attempt_id}/ai-assisted/{section_key}/consent")
+async def oa_ai_assisted_consent(attempt_id: str, section_key: str, body: AiAssistedButtonIn, user: Dict[str, Any] = Depends(require_user)):
+    """Live-flow counterpart of dev_ai_assisted_consent -- deterministic,
+    button-driven, NO LLM call. Same logic, attempt+section_key scoped."""
+    session = await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    session_id = session["session_id"]
+    if session["current_stage"] != "consent":
+        raise HTTPException(409, f"Current stage is '{session['current_stage']}', not 'consent'")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": "consent", "text": "Yes" if body.value else "No", "at": iso(now_utc())})
+    update: Dict[str, Any] = {}
+
+    if not body.value:
+        transcript.append({"role": "ai", "stage": "consent", "text": ai_assisted_bank.CONSENT_GATE["on_no"]["message"], "at": iso(now_utc())})
+    else:
+        problem = ai_assisted_bank.get_problem(session["problem_id"])
+        variant = problem["ai_assisted_variant"]
+        rng = ai_assisted_bank.bug_marker_line_range(variant["flawed_code"])
+        session["consent_given"] = True
+        session["current_stage"] = "self_review"
+        session["revealed_code"] = {"label": "Generated Code", "language": variant["display_language"], "code": variant["flawed_code"]}
+        review_msg = ai_assisted_bank.SELF_REVIEW["prompt_template"].format(start=rng["start"], end=rng["end"])
+        transcript.append({"role": "ai", "stage": "self_review", "text": review_msg, "at": iso(now_utc())})
+        update.update({"consent_given": True, "current_stage": "self_review", "revealed_code": session["revealed_code"]})
+
+    update["transcript"] = transcript
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+@api.post("/oa/{attempt_id}/ai-assisted/{section_key}/self_review")
+async def oa_ai_assisted_self_review(attempt_id: str, section_key: str, body: AiAssistedButtonIn, user: Dict[str, Any] = Depends(require_user)):
+    """Live-flow counterpart of dev_ai_assisted_self_review -- deterministic,
+    button-driven, NO LLM call. Same logic, attempt+section_key scoped.
+    'Yes' (accepts flawed code) applies the UNCONFIRMED/assumed-default
+    path documented in ai_assisted_bank.SELF_REVIEW["on_yes"]."""
+    session = await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    session_id = session["session_id"]
+    if session["current_stage"] != "self_review":
+        raise HTTPException(409, f"Current stage is '{session['current_stage']}', not 'self_review'")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    problem = ai_assisted_bank.get_problem(session["problem_id"])
+    variant = problem["ai_assisted_variant"]
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": "self_review", "text": "Yes" if body.value else "No", "at": iso(now_utc())})
+    update: Dict[str, Any] = {}
+
+    if not body.value:
+        session["self_review_result"] = "no"
+        session["current_stage"] = "explain_bug"
+        transcript.append({"role": "ai", "stage": "explain_bug", "text": ai_assisted_bank.SELF_REVIEW["on_no"]["message"], "at": iso(now_utc())})
+        update.update({"self_review_result": "no", "current_stage": "explain_bug"})
+    else:
+        session["self_review_result"] = "yes"
+        session["current_stage"] = "complete"
+        session["status"] = "completed"
+        session["completed_at"] = iso(now_utc())
+        session["revealed_code"] = {"label": "Reference Solution (Fixed)", "language": variant["display_language"], "code": variant["corrected_code"]}
+        final_outcome = _score_ai_assisted_session(session)
+        session["final_outcome"] = final_outcome
+        transcript.append({"role": "ai", "stage": "complete", "text": ai_assisted_bank.FINAL_SUMMARY_TEMPLATE["heading"], "at": iso(now_utc())})
+        update.update({
+            "self_review_result": "yes", "current_stage": "complete", "status": "completed",
+            "completed_at": session["completed_at"], "revealed_code": session["revealed_code"],
+            "final_outcome": final_outcome,
+        })
+
+    update["transcript"] = transcript
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+# =============================================================================
 #  Final cross-phase report
 # =============================================================================
 
@@ -3189,6 +4154,10 @@ async def _startup():
     mcq_pool.init(db)
     mcq_static_bank.init(db)
     gamified_round.init(db)
+    problem_bank.init(db)
+    debugging_bank.init(db)
+    ai_assisted_bank.init(db)
+    capgemini_recruitment_process.init(db)
     try:
         await db.mcq_pool.create_index([("company_name", 1), ("section_key", 1), ("verified", 1)])
         await db.mcq_pool_stats.create_index([("company_name", 1), ("section_key", 1)], unique=True)

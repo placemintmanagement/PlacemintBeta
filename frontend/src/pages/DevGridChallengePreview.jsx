@@ -24,7 +24,7 @@ export default function DevGridChallengePreview() {
       <Header />
       <div className="max-w-3xl mx-auto px-6 py-10">
         <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-1">dev preview · not a real route</div>
-        <h1 className="font-display text-2xl font-bold mb-2">Grid Challenge — live preview</h1>
+        <h1 className="font-display text-2xl font-bold mb-2">Grid Challenge: live preview</h1>
         <p className="text-sm text-pm-text2 mb-6">
           Requires real query params pointing at a live test fixture: <code>?attemptId=...&amp;sectionKey=...&amp;puzzleId=...</code>
         </p>

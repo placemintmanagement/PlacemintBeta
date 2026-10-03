@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160" role="img" aria-label="Bars measured against a cutoff line, with a shield badge">
+  <!-- baseline and cutoff line -->
+  <path d="M16 134 H184" stroke="#073B43" stroke-width="3" stroke-linecap="round"/>
+  <path d="M16 70 H184" stroke="#073B43" stroke-width="3" stroke-linecap="round" stroke-dasharray="6 7"/>
+  <!-- bars -->
+  <rect x="28" y="92" width="36" height="42" rx="8" fill="#0F6F7A" opacity=".4"/>
+  <rect x="76" y="46" width="36" height="88" rx="8" fill="#C6F24E" stroke="#073B43" stroke-width="3"/>
+  <rect x="124" y="84" width="36" height="50" rx="8" fill="#0F6F7A"/>
+  <!-- shield badge -->
+  <g transform="translate(0 -2)">
+    <path d="M160 6 L182 15 V33 C182 46 172 55 160 60 C148 55 138 46 138 33 V15 Z" fill="#0F6F7A" stroke="#073B43" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M150 33 l7 8 l14 -16" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <circle cx="32" cy="38" r="6" fill="#C6F24E" stroke="#073B43" stroke-width="2.5"/>
+</svg>

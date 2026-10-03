@@ -417,15 +417,20 @@ COMPANIES: List[Dict[str, Any]] = [
         # chips/section `name`), nothing in frontend or backend LOGIC keys
         # off them (only `section["key"]` values like "technical"/"essay"
         # matter programmatically, and those are UNCHANGED here).
-        "tagline": "Round 1: Communication Assessment \u2192 Round 2: Tech MCQ+Pseudo \u2192 Essay \u2192 Game \u2192 Behavioral \u00b7 Round 3: Coding",
+        "tagline": "Round 1: Communication Assessment \u2192 Round 2: AI Literacy + Technical Assessment \u2192 Round 3: Debugging \u2192 Round 4: AI-Assisted Coding \u2192 Round 5: Cognitive Assessment",
         "logo": "SiCapgemini",
         "verified": True,
-        "time_minutes": 229,  # 169 (pre-existing, already ~10min off the
-                               # section sum before this change -- not
-                               # reconciled here, out of scope) + 60 for the
-                               # new Round 1 section
+        # Recomputed (2026-10, R5-random-draw pass) as the EXACT sum of
+        # every section's own `minutes` below. One change from the prior
+        # 184 figure: round5_cognitive is 11 min now (was 14), since it now
+        # draws 4 of its 5 games per session instead of all 5 (see that
+        # section's own comment). 60 (round1_communication) + 20
+        # (ai_literacy) + 25 (technical_assessment) + 20 (round3_debugging)
+        # + 45 (round4_ai_assisted) + 11 (round5_cognitive) = 181. Sits
+        # inside the official confirmed 2:00-3:15 session window.
+        "time_minutes": 181,
         "scoring_mode": "sectional",
-        "chips": ["Round 1: Communication Assessment", "Round 2: OA (4 sections)", "Round 3: 2 DSA Coding", "Behavioral (unscored)"],
+        "chips": ["Round 1: Communication Assessment", "Round 2: AI Literacy + Technical Assessment", "Round 3: Debugging Assessment", "Round 4: AI-Assisted Coding", "Round 5: Cognitive Assessment"],
         "sections": [
             # ROUND 1 (NEW, 2026-08): Communication Assessment -- ONE section
             # covering 4 heterogeneous sub-parts (grammar_correction /
@@ -455,39 +460,160 @@ COMPANIES: List[Dict[str, Any]] = [
                 "minutes": 60,
                 "cutoff": 0.5,
             },
-            # ROUND 2: Online Assessment (4 sections, in order) -- formerly "Round 1"
+            # ROUND 2: Technical Module.
+            #
+            # REMOVED (2026-09, legacy-section-removal pass): "technical"
+            # (R2a: pseudocode base + OOPS/DBMS/OS/CN extra_topics, type
+            # "pseudocode") and "essay"/"behavioral" (formerly R2b/R2d) --
+            # none of the five official rounds this company's structure was
+            # restructured around (Round 1 Communication, Round 2 Technical
+            # Module, Round 3 Debugging, Round 4 AI-Assisted Coding, Round 5
+            # Cognitive) call for a separate legacy pseudocode/OOPS-DBMS-OS-
+            # CN section, an essay section, or a behavioral section --
+            # they were leftover from the pre-restructure section list, not
+            # part of the confirmed pattern. Removing these entries only:
+            # the shared "pseudocode"/"essay"/"mcq" section TYPES, their
+            # dispatch/grading/prompt code in server.py, are untouched and
+            # still used by other companies (Infosys, Zoho, LTIMindtree,
+            # Tech Mahindra, Wipro, and others) -- confirmed via a repo-wide
+            # search before removing these three entries.
+            #
+            # AI Literacy and Technical Assessment (2026-09/10, Round 2
+            # wiring pass) were previously banked and drawable
+            # (draw_section7_questions / server.py's "capgemini_round2_
+            # technical" logic) but had no companies.py entry -- this is
+            # that wiring. Order matches the confirmed session composition
+            # (AI Literacy first, per the original pattern slide's stated
+            # order, then Technical Assessment); combined 45min sits inside
+            # the confirmed ~40-50min budget for the two together, with
+            # Technical Assessment given the slightly larger buffer for its
+            # mixed-source draws' extra complexity.
             {
-                "key": "technical",
-                "name": "R2a: Technical MCQs + Pseudocode",
-                "type": "pseudocode",
-                "count": 40,
-                "pseudocode_count": 16,  # untouched pseudocode call's own count -- NOT resized
-                                         # by the section's total `count` above (see
-                                         # server.py's pseudocode dispatch for how these
-                                         # two interact)
-                "minutes": 40,
+                "key": "ai_literacy",
+                "name": "Round 2: AI Literacy",
+                "type": "capgemini_round2_ai_literacy",
+                "count": 20,
+                "minutes": 20,
                 "cutoff": 0.5,
-                "extra_topics": [
-                    {"key": "oops", "name": "OOPS", "count": 6},
-                    {"key": "dbms", "name": "DBMS", "count": 6},
-                    {"key": "os", "name": "Operating Systems", "count": 6},
-                    {"key": "cn", "name": "Computer Networks", "count": 6},
-                ],
             },
-            {"key": "essay", "name": "R2b: Essay Writing", "type": "essay", "count": 1, "minutes": 25, "cutoff": 0.5},
-            # R2c: Game Based Cognitive Test -- registry-driven (see
-            # game_types.py / gamified_round.py), replaces the deleted
-            # capgemini_challenges.py.
-            # Runs all 5 registered game types every session; minutes below
-            # sized (2026-08-18) for the realistic 5-type total (~11:19 raw).
-            {"key": "cognitive", "name": "R2c: Game Based Cognitive Test", "type": "gamified_round", "count": 5, "minutes": 14, "cutoff": 0.5},
-            # NEW (2026-07-19): never built before, based on newly confirmed research.
-            # Unscored, same pattern as Accenture/Core Assessment's Behavioral sections --
-            # weight: 0.0 is what actually excludes it from the composite (cutoff alone
-            # does not; see Accenture's weight fix for why that distinction matters).
-            {"key": "behavioral", "name": "R2d: Behavioral / PowerSkills (unscored)", "type": "mcq", "count": 5, "minutes": 20, "cutoff": 0.0, "weight": 0.0},
-            # ROUND 3: Coding Round -- formerly "Round 2"
-            {"key": "coding", "name": "R3: Coding Round (2 DSA Problems)", "type": "coding", "count": 2, "minutes": 60, "cutoff": 0.5},
+            {
+                "key": "technical_assessment",
+                "name": "Round 2: Technical Assessment",
+                "type": "capgemini_round2_technical",
+                "count": 20,  # informational -- actual per-topic counts (5
+                               # fixed + two randomized 5-question mixes) are
+                               # computed inside server.py's dispatch branch
+                "minutes": 25,
+                "cutoff": 0.5,
+            },
+            # ROUND 3 (NEW, 2026-09): Debugging Assessment -- draws exactly 1
+            # problem via debugging_bank.sample_debug_session() (verified:
+            # 25-problem pool, Python/C/C++/Java bug-injected variants, real
+            # grading through code_runner.run_tests -- see debugging_bank.py
+            # and the /dev/debugging-preview click-through that verified
+            # this before wiring it here). 20 minutes is UNCHANGED.
+            #
+            # CORRECTED (2026-09, R3/R4-config-correction pass): was count
+            # 2 (2 problems from 2 DIFFERENT topics) -- reversed per
+            # explicit instruction confirming the pattern is 1 problem;
+            # the topic-diversity draw rule no longer applies with only 1
+            # problem to pick. sample_debug_session() itself was changed to
+            # match (draws 1 problem, no topic constraint) -- its OTHER
+            # behavior (seen-tracking, drawing from the same 25-problem
+            # pool, graceful fallback on exhausted seen-ids) is UNCHANGED.
+            # The standalone /dev/debugging-preview route/UI is UNTOUCHED --
+            # confirmed it never calls sample_debug_session() at all (its
+            # own hardcoded 2-problem SAMPLE_PROBLEMS array is independent,
+            # a testing harness, not the live draw).
+            # cutoff=0.5 doesn't change meaning: it was always "average of
+            # each drawn problem's own visible+hidden test-pass fraction",
+            # never a "pass N of M problems" count, so 1 problem behaves
+            # identically to before, just without averaging across a
+            # second one (see _grade_debugging_section in server.py).
+            # No pass/fail gate to the section below, same unconditional-
+            # progression convention as every other section here.
+            #
+            # This is now the ONLY section in this list claiming "R3" --
+            # the pre-existing plain-DSA "coding" section that used to sit
+            # here and ALSO claim "R3" has been REMOVED entirely (2026-09,
+            # relabeling pass), rather than relabeled, per explicit user
+            # decision: it didn't semantically match either confirmed future
+            # round (Round 4 is specifically "AI-Assisted Coding", Round 5 is
+            # "Cognitive Assessment" -- this was neither), so bumping its
+            # label to "R4" would only have deferred today's collision to
+            # whenever the real Round 4 is built. Removing it here is a
+            # real structural change, not just a label edit -- confirmed
+            # with the user before doing it, since it goes beyond a pure
+            # display-text fix. The "coding" TYPE/dispatch/grading logic in
+            # server.py is untouched (other companies still use it).
+            {"key": "round3_debugging", "name": "Round 3: Debugging Assessment", "type": "debugging", "count": 1, "minutes": 20, "cutoff": 0.5},
+            # ROUND 4 (NEW, 2026-09): AI-Assisted Coding -- draws exactly 1
+            # problem via ai_assisted_bank.sample_one() (verified: 15-problem
+            # pool, C++ display, real Groq-backed staged-conversation gating
+            # -- see ai_assisted_bank.py and the /dev/ai-assisted-preview
+            # click-through that verified this before wiring it here).
+            # UNLIKE every other section, this one is stateful/multi-turn --
+            # its live conversation state lives in its own
+            # db.ai_assisted_sessions collection (created at generation
+            # time, see server.py's "ai_assisted" _generate_section_
+            # questions branch), not in this section's `questions` array
+            # (which holds only an opaque {session_id, problem_id} pointer).
+            # The frontend talks to attempt-scoped session endpoints
+            # (server.py's /oa/{attempt_id}/ai-assisted/{section_key}/...,
+            # a SEPARATE code path from the dev-only /dev/ai-assisted/*
+            # routes, not a wrapper around them) rather than an answers
+            # payload; submit_section's "ai_assisted" branch re-derives the
+            # score from the stored session server-side and ignores any
+            # client-submitted answers/score/stage claim, same as every
+            # other section's dispatch. No pass/fail gate to any section
+            # below (there are none yet), same unconditional-progression
+            # convention as everywhere else in this file.
+            #
+            # CORRECTED (2026-09, R3/R4-config-correction pass): minutes
+            # was 30, now 45, per explicit instruction confirming the
+            # pattern. Nothing else hardcodes 30 for this section -- the
+            # countdown timer (OARunner.jsx) reads `currentSection.minutes`
+            # dynamically, no test references Capgemini at all -- confirmed
+            # via a repo-wide search before changing this.
+            {"key": "round4_ai_assisted", "name": "Round 4: AI-Assisted Coding", "type": "ai_assisted", "count": 1, "minutes": 45, "cutoff": 0.5},
+            # ROUND 5 (2026-09, R5-reorder pass): Cognitive Assessment --
+            # moved here from the middle of the list (was between
+            # technical_assessment and round3_debugging, key "cognitive",
+            # still labeled "R2c" from before the restructure) and renamed
+            # to match the other four rounds' "roundN_..." key convention.
+            # REORDER + RENAME ONLY -- confirmed safe first: game_session's
+            # own session_id (games/gamified_round.py, every lookup) is
+            # `f"{attempt_id}_{section['key']}"`, always recomputed from
+            # THIS ATTEMPT's own already-snapshotted section key (never
+            # companies.py's current value -- see /oa/start's
+            # placeholder_sections snapshot), so an attempt already running
+            # under the old "cognitive" key keeps working end to end
+            # unaffected; only new attempts see "round5_cognitive". The
+            # gamified_round TYPE dispatch (server.py, OARunner.jsx) keys
+            # off `section["type"] == "gamified_round"` only, never the key
+            # string, so renaming it is safe. gamified_round_config is
+            # looked up by company NAME, not section key -- also untouched.
+            #
+            # UPDATED (2026-10, R5-random-draw pass): each session now draws
+            # 4 of the 5 registered games at random (no repeats within a
+            # session) instead of running all 5 every time -- the random
+            # draw itself lives in server.py's gamified_round branch
+            # (`drawCount`), driven by a NEW field on Capgemini's OWN
+            # gamified_round_config document (not a code change elsewhere),
+            # so Accenture/IBM's use of the same shared engine is completely
+            # unaffected (their config docs have no drawCount field).
+            # minutes retimed proportionally: 14 * 4/5 = 11.2, rounded to 11.
+            # `count` (5->4) is COSMETIC only -- it's merely the fallback
+            # per-type puzzle count used when `perType` doesn't specify
+            # subPuzzlesPerGame/instancesPerGame, and every registered game
+            # type already does, so this fallback is dead code either way;
+            # changed for honesty, not because it does anything.
+            # STILL UNCHANGED, deliberately: the gamified_round engine
+            # itself, the 5 games' own scoring/content, and the official
+            # research's ~68-minute / Motion+Grid+Logical Reasoning+ADEPT-15
+            # mismatch against what's actually registered -- that remains a
+            # SEPARATE decision for a real Round 5 content pass later.
+            {"key": "round5_cognitive", "name": "Round 5: Cognitive Assessment", "type": "gamified_round", "count": 4, "minutes": 11, "cutoff": 0.5},
         ],
     },
     {

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Two circular arrows around a question card">
+  <rect width="640" height="360" fill="#EAF9C4"/>
+  <g fill="none" stroke="#0F6F7A" stroke-width="16" stroke-linecap="round">
+    <path d="M313.6 106.3 A74 74 0 0 1 380.6 222.4"/>
+    <path d="M326.4 253.7 A74 74 0 0 1 259.4 137.6"/>
+  </g>
+  <polygon points="398.6,235.1 364.6,245.4 362.6,209.8" fill="#0F6F7A" stroke="#0F6F7A" stroke-width="4" stroke-linejoin="round"/>
+  <polygon points="241.4,124.9 275.4,114.6 277.4,150.2" fill="#0F6F7A" stroke="#0F6F7A" stroke-width="4" stroke-linejoin="round"/>
+  <rect x="290" y="150" width="60" height="60" rx="16" fill="#FFFFFF"/>
+  <rect x="302" y="168" width="36" height="7" rx="3.5" fill="#0F6F7A"/>
+  <rect x="302" y="183" width="24" height="7" rx="3.5" fill="#0F6F7A" opacity=".35"/>
+</svg>

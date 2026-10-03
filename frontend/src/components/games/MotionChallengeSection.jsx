@@ -369,9 +369,9 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   return (
     <div>
       {loadError && (
-        <div className="mb-3 px-4 py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm flex items-center justify-between gap-3">
+        <div className="mb-3 px-4 py-2.5 rounded-lg bg-[rgba(11,42,48,0.06)] border border-[rgba(11,42,48,0.15)] text-pm-text text-sm flex items-center justify-between gap-3">
           <span>{loadError}</span>
-          <button onClick={() => setLoadError(null)} className="text-red-400 hover:text-red-600 shrink-0">&times;</button>
+          <button onClick={() => setLoadError(null)} className="text-pm-text2 hover:text-pm-text shrink-0">&times;</button>
         </div>
       )}
       <div className="flex items-center justify-between mb-3 px-1">

@@ -18,7 +18,10 @@ export default function FinalReport() {
   if (!doc) return <div><Header /><div className="p-10 text-center">Report not available.</div></div>;
 
   const r = doc.report || {};
-  const verdictClass = r.overall_verdict === "clear" ? "text-pm-primary-dark" : r.overall_verdict === "borderline" ? "text-pm-secondary" : "text-red-600";
+  // Three-tier verdict color, darkest = most serious -- no red/orange in
+  // this palette, so "eliminated" is distinguished by being the boldest
+  // ink rather than a different hue.
+  const verdictClass = r.overall_verdict === "clear" ? "text-pm-primary-dark" : r.overall_verdict === "borderline" ? "text-pm-text2" : "text-pm-text";
 
   return (
     <div>
@@ -27,11 +30,11 @@ export default function FinalReport() {
         <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-2">Final report · {doc.company_name}</div>
         <div className="flex items-start justify-between flex-wrap gap-4">
           <h1 className={`font-display text-4xl lg:text-5xl font-bold ${verdictClass}`}>
-            {r.overall_verdict === "clear" ? "You'd land this offer." : r.overall_verdict === "borderline" ? "Borderline — with focused prep, you get in." : "Not ready — here's what to fix."}
+            {r.overall_verdict === "clear" ? "You'd land this offer." : r.overall_verdict === "borderline" ? "Borderline. With focused prep, you get in." : "Not ready. Here's what to fix."}
           </h1>
           <div className="pm-card px-5 py-3 text-center">
             <div className="text-xs font-mono uppercase text-pm-text2">Overall</div>
-            <div className="font-display text-3xl font-bold font-mono">{r.overall_score ?? "—"}<span className="text-pm-text2 text-base">/100</span></div>
+            <div className="font-display text-3xl font-bold font-mono">{r.overall_score ?? "N/A"}<span className="text-pm-text2 text-base">/100</span></div>
           </div>
         </div>
 
@@ -43,11 +46,11 @@ export default function FinalReport() {
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="pm-card p-6">
             <div className="text-xs font-mono uppercase text-pm-text2">Strongest dimension</div>
-            <div className="font-display text-xl font-bold mt-1">{r.strongest_dimension || "—"}</div>
+            <div className="font-display text-xl font-bold mt-1">{r.strongest_dimension || "N/A"}</div>
           </div>
           <div className="pm-card p-6">
             <div className="text-xs font-mono uppercase text-pm-text2">Weakest dimension</div>
-            <div className="font-display text-xl font-bold mt-1">{r.weakest_dimension || "—"}</div>
+            <div className="font-display text-xl font-bold mt-1">{r.weakest_dimension || "N/A"}</div>
           </div>
         </div>
 

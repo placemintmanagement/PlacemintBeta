@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="A target, one per company">
+  <rect width="640" height="360" fill="#E3EEF0"/>
+  <circle cx="320" cy="180" r="92" fill="none" stroke="#0F6F7A" stroke-width="14" opacity=".35"/>
+  <circle cx="320" cy="180" r="58" fill="none" stroke="#0F6F7A" stroke-width="14"/>
+  <circle cx="320" cy="180" r="24" fill="#073B43"/>
+  <circle cx="320" cy="180" r="10" fill="#C6F24E"/>
+</svg>
