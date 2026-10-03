@@ -30,6 +30,7 @@ import DevMotionChallengePreview from "@/pages/DevMotionChallengePreview";
 import DevAuth0Preview from "@/pages/DevAuth0Preview";
 import DevDebuggingPreview from "@/pages/DevDebuggingPreview";
 import DevAiAssistedPreview from "@/pages/DevAiAssistedPreview";
+import NotFound from "@/pages/NotFound";
 import Auth0ProviderWithNavigate from "@/auth/Auth0ProviderWithNavigate";
 import Auth0TokenSync from "@/auth/Auth0TokenSync";
 
@@ -92,7 +93,7 @@ function AppRouter() {
       <Route path="/dev/debugging-preview" element={<DevDebuggingPreview />} />
       {/* Standing dev tool — AI-Assisted Coding (Round 4) interface preview, not wired into companies.py or the live OA flow yet */}
       <Route path="/dev/ai-assisted-preview" element={<DevAiAssistedPreview />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }
