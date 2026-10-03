@@ -69,6 +69,14 @@
      and Contrarian (cream) and had been plain white. */
   --pm-grey: #F5F6F7;
 
+  /* Semantic states (2026-10 design rollout) -- the only colours beyond
+     the palette above. Error text/bg, warning ink on warning bg, success
+     text on success bg. */
+  --pm-error-text: #B42318;
+  --pm-error-bg: #FEF3F2;
+  --pm-warning-bg: #FFF4D6;
+  --pm-success-bg: #EAF9C4;
+
   --background: 180 25% 96%;
   --foreground: 190 63% 12%;
   --card: 0 0% 100%;
