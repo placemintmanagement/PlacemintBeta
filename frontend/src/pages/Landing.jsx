@@ -222,7 +222,7 @@ export default function Landing() {
               <div className="pm-eyebrow mb-2" style={{ color: "#0F6F7A" }}>5 engineering departments</div>
               <h2 className="font-display font-bold text-3xl lg:text-4xl" style={{ color: "#0B2A30" }}>Pick your <em>branch</em>, then your track.</h2>
             </div>
-            <p className="max-w-md text-sm" style={{ color: "rgba(11,42,48,0.70)" }}>Computer Science is live today with 15 real company OA structures. The other branches are on the way; greyed-out tracks are placeholders, not broken links.</p>
+            <p className="max-w-md text-sm" style={{ color: "rgba(11,42,48,0.70)" }}>Start your prep now.</p>
           </div>
           <div data-testid={TID.departmentGrid} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {departments.map(d => <DepartmentCard key={d.id} department={d} />)}
