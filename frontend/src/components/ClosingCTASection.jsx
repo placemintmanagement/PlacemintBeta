@@ -41,6 +41,10 @@ export default function ClosingCTASection() {
           transition: "opacity 600ms, transform 600ms",
         }}
       >
+        {/* Panel is #E8F3FB on the grey section: different colour, no border needed. */}
+        <div className="mx-auto mb-10 overflow-hidden" style={{ maxWidth: 360, borderRadius: 24, background: "#E8F3FB" }}>
+          <img src="/illustrations/student-stairs.svg" alt="" width={2048} height={1509} className="block w-full h-auto" />
+        </div>
         <div className="text-lg sm:text-xl font-normal" style={{ color: "rgba(11,42,48,0.70)" }}>
           Start practising for
         </div>

@@ -139,7 +139,12 @@ export default function Landing() {
                 </span>
               </h2>
             </div>
-            <p className="max-w-md" style={{ color: "rgba(11,42,48,0.70)" }}>Every phase feeds the next, so you get one story of how you performed, not four separate scores.</p>
+            <p className="max-w-sm" style={{ color: "rgba(11,42,48,0.70)" }}>Every phase feeds the next, so you get one story of how you performed, not four separate scores.</p>
+            {/* Side panel, hidden below 1024px. Same colour as this section,
+                so the 1px control-edge border keeps the panel readable. */}
+            <div className="hidden lg:block shrink-0 overflow-hidden" style={{ width: 240, borderRadius: 24, background: "#E8F3FB", border: "1px solid rgba(7,59,67,0.08)" }}>
+              <img src="/illustrations/student-laptop.svg" alt="" width={2048} height={1509} className="block w-full h-auto" />
+            </div>
           </div>
           <PhaseStrip />
         </div>
