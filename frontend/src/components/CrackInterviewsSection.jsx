@@ -1,12 +1,12 @@
-import React, { useState } from "react";
+import React from "react";
 import useRevealOnView from "../hooks/useRevealOnView";
 
 /**
  * "Crack interviews at" -- a row of company tiles, directly under the hero
  * and above the cream "What makes this different" section (Landing.jsx).
- * Each tile shows the company's official logo from public/logos/ when one
- * exists, and its name as text when it does not (or fails to load). Logo
- * files come only from each company's own site -- see public/logos/SOURCES.md.
+ * Every company is shown as its name in text. Company logos were removed
+ * because their usage terms need written permission before they can appear
+ * on a commercial site.
  *
  * Sitting directly under the hero means this section owns the hero's
  * own straddling <Tray /> seam (HeroV2.jsx) -- its top padding has to
@@ -27,32 +27,10 @@ const COMING_NEXT = [
   "HCLTech", "LTIMindtree", "Tech Mahindra", "Zoho", "Deloitte",
 ];
 
-// 'all' = logos for every company that has a file; 'live' = logos for live companies only.
-const SHOW_LOGOS_FOR = "all";
-
-// slug -> logo path. Only files that came from each company's own site and whose terms
-// allow use (see public/logos/SOURCES.md). Every other company shows its name as text.
-const LOGO_FILES = {
-  accenture: "/logos/accenture.png",
-  capgemini: "/logos/capgemini.png",
-  cognizant: "/logos/cognizant.png",
-  deloitte: "/logos/deloitte.png",
-  hcltech: "/logos/hcltech.svg",
-  ibm: "/logos/ibm.png",
-  ltimindtree: "/logos/ltimindtree.svg",
-  tcs: "/logos/tcs.png",
-  wipro: "/logos/wipro.png",
-};
-
-const slugify = (name) => name.toLowerCase().replace(/\s+/g, "-");
-
 const COMPANIES = [
   ...LIVE_COMPANIES.map((name) => ({ name, live: true })),
   ...COMING_NEXT.map((name) => ({ name, live: false })),
-].map((c) => {
-  const slug = slugify(c.name);
-  return { ...c, slug, logo: LOGO_FILES[slug] ?? null };
-});
+];
 
 function LiveDot({ size = 8 }) {
   return (
@@ -63,18 +41,20 @@ function LiveDot({ size = 8 }) {
 }
 
 function CompanyTile({ company, index, revealed }) {
-  // A logo that fails to load falls back to the name, never a broken-image icon.
-  const [failed, setFailed] = useState(false);
-  const wantLogo = SHOW_LOGOS_FOR === "all" || company.live;
-  const showLogo = wantLogo && Boolean(company.logo) && !failed;
+  // Live tiles get a solid, darker border and a soft shadow. Rolling-out tiles
+  // get a dashed border and no shadow, so the two states read apart at a glance.
+  const tileStyle = company.live
+    ? { border: "1px solid rgba(7,59,67,0.2)", boxShadow: "var(--pm-card-shadow)" }
+    : { border: "1px dashed rgba(7,59,67,0.25)" };
 
   return (
     <li
-      className="relative flex items-center justify-center"
+      className="relative flex items-center justify-center rounded-2xl bg-white"
       style={{
         height: 72,
         minWidth: 140,
         padding: "0 12px",
+        ...tileStyle,
         opacity: revealed ? 1 : 0,
         transform: revealed ? "none" : "translateY(8px)",
         transitionProperty: "opacity, transform",
@@ -89,19 +69,9 @@ function CompanyTile({ company, index, revealed }) {
         </span>
       )}
       <span className="sr-only">{company.live ? "Live now" : "Rolling out next"}</span>
-      {showLogo ? (
-        <img
-          src={company.logo}
-          alt={company.name}
-          loading="lazy"
-          onError={() => setFailed(true)}
-          className="block w-auto max-w-[200px] h-[40px] max-[400px]:h-[32px] object-contain"
-        />
-      ) : (
-        <span className="font-display font-semibold" style={{ fontSize: 20, lineHeight: 1.25, color: "rgba(11,42,48,0.85)" }}>
-          {company.name}
-        </span>
-      )}
+      <span className="font-display font-semibold text-center" style={{ fontSize: 20, lineHeight: 1.25, color: "rgba(11,42,48,0.85)" }}>
+        {company.name}
+      </span>
     </li>
   );
 }
@@ -185,7 +155,7 @@ export default function CrackInterviewsSection() {
 
         <ul className="mt-12 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:justify-center list-none m-0 p-0 max-w-[1100px] mx-auto">
           {COMPANIES.map((company, i) => (
-            <CompanyTile key={company.slug} company={company} index={i} revealed={revealed} />
+            <CompanyTile key={company.name} company={company} index={i} revealed={revealed} />
           ))}
         </ul>
 

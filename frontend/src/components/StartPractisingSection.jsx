@@ -173,15 +173,22 @@ export default function StartPractisingSection() {
         </div>
 
         <div className="mt-14 text-center">
-          <div className="font-display font-semibold text-lg mb-5" style={{ color: "#0B2A30" }}>
-            Practise the real tests of
+          {/* Same heading treatment as the "Crack interviews at" row: light
+              ink lead-in, semibold teal emphasis, and the tests in the
+              display face (Outfit) rather than the body font. */}
+          <div
+            className="font-display font-light text-2xl lg:text-3xl leading-[1.15] mb-6"
+            style={{ color: "#0B2A30", letterSpacing: "-0.02em" }}
+          >
+            Practise the{" "}
+            <span style={{ color: "#0F6F7A", fontWeight: 600 }}>real tests of</span>
           </div>
           <div className="flex flex-wrap justify-center gap-2.5">
             {COMPANIES.map((name) => (
               <span
                 key={name}
-                className="px-4 py-1.5 rounded-full text-sm bg-white"
-                style={{ border: "1px solid #F2EDDF", color: "#0B2A30" }}
+                className="px-4 py-1.5 rounded-full font-display font-semibold text-[15px] bg-white"
+                style={{ border: "1px solid #F2EDDF", color: "#0B2A30", letterSpacing: "-0.01em" }}
               >
                 {name}
               </span>
