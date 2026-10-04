@@ -130,7 +130,7 @@ export default function StartPractisingSection() {
               matching the site-wide h1/h2 style (HeroV2.jsx's h1). Plain
               teal-deep emphasis text, no highlighter band (same rule as
               every other main heading on this page). */}
-          <h2 className="font-display font-light text-3xl lg:text-4xl leading-[1.15]" style={{ color: "#0B2A30", letterSpacing: "-0.02em" }}>
+          <h2 className="font-display font-light text-4xl lg:text-6xl leading-[1.15]" style={{ color: "#0B2A30", letterSpacing: "-0.02em" }}>
             Pick your{" "}
             <span style={{ color: "#0F6F7A", fontWeight: 600 }}>starting point.</span>
           </h2>
@@ -141,8 +141,8 @@ export default function StartPractisingSection() {
 
         <div
           ref={rootRef}
-          className="rounded-[28px] p-3 flex flex-col sm:flex-row gap-3"
-          style={{ background: "#FFFFFF", boxShadow: "0 16px 48px rgba(11,42,48,0.10)" }}
+          className="pm-awe-tray rounded-[28px] p-3 flex flex-col sm:flex-row gap-3"
+          style={{ background: "#FFFFFF", boxShadow: "var(--pm-card-shadow)" }}
         >
           {CARDS.map((card, i) => (
             <div
@@ -159,6 +159,17 @@ export default function StartPractisingSection() {
               <ActionCard card={card} />
             </div>
           ))}
+          {/* Decorative only: rests on the tray's top edge above the third
+              (Adaptive Interview) card. Hidden below 1100px via .pm-awe-figure. */}
+          <img
+            src="/illustrations/student-awe.svg"
+            alt=""
+            aria-hidden="true"
+            width={1190}
+            height={849}
+            loading="lazy"
+            className="pm-awe-figure"
+          />
         </div>
 
         <div className="mt-14 text-center">

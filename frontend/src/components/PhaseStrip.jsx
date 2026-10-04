@@ -1,16 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { ShieldCheck, MessageSquareText, FileCheck2, Code2 } from "lucide-react";
 import useRevealOnView from "../hooks/useRevealOnView";
 
 /**
- * PhaseStrip -- the white four-column "Resume / Online Assessment /
- * Interview / Cross-Phase Review" card. Extracted from HeroV2 (2026-10,
- * where it used to overlap the hero's bottom edge) into a shared
- * component so the "4 phases. One story." section on Landing.jsx can
- * reuse the exact same white-card/icon-tile/title/description language,
- * not a redesign -- the base visuals (28-32px radius, soft icon tiles,
- * bold title, two-line description, lime highlighted card) are unchanged.
- * The hero no longer renders this at all.
+ * PhaseStrip -- the four phases as a vertical step list in one white card,
+ * used by the "4 phases. One story." section on Landing.jsx.
+ *
+ * The lime highlight starts on Cross-Phase Review and can be moved to any
+ * phase: hover, keyboard focus or a click selects that row, and it stays
+ * there until another row is picked. Every row keeps the same padding and
+ * margin whether highlighted or not, so the connector line stays aligned.
  */
 export const PHASES = [
   { key: "resume", icon: FileCheck2, title: "Resume", desc: "AI check against the exact company and role you picked.", color: "#0F6F7A" },
@@ -19,112 +18,70 @@ export const PHASES = [
   { key: "review", icon: ShieldCheck, title: "Cross-Phase Review", desc: "One narrative tying resume, OA and interview together.", color: "#0F6F7A" },
 ];
 
-const DEFAULT_ACTIVE = "oa";
-const STEP_DELAY_MS = 150;
-
-// Column centers for an even 4-col grid (12.5%, 37.5%, 62.5%, 87.5%), and
-// the 3 gap midpoints between them (25%, 50%, 75%) for the arrow tips.
-const ARROW_POSITIONS = [25, 50, 75];
+const DEFAULT_KEY = "review";
+const STEP_DELAY_MS = 120;
 
 export default function PhaseStrip() {
-  const [activeKey, setActiveKey] = useState(DEFAULT_ACTIVE);
-  const [stepKey, setStepKey] = useState(null); // drives the 1->2->3->4 intro sweep
-  // threshold:0.3 + a 500ms fallback -- see useRevealOnView's own comment
-  // for why a reveal animation must never depend on a single trigger path.
+  // Scroll-driven in both directions -- see useRevealOnView.
   const [rootRef, entered] = useRevealOnView({ threshold: 0.3, fallbackMs: 500 });
-
-  useEffect(() => {
-    if (!entered) return;
-    // Step the lime highlight through each phase in turn, then settle on
-    // the default (Online Assessment).
-    let i = 0;
-    let timer = null;
-    const step = () => {
-      if (i >= PHASES.length) {
-        setStepKey(null);
-        setActiveKey(DEFAULT_ACTIVE);
-        return;
-      }
-      setStepKey(PHASES[i].key);
-      i += 1;
-      timer = setTimeout(step, STEP_DELAY_MS);
-    };
-    timer = setTimeout(step, STEP_DELAY_MS);
-    return () => { if (timer) clearTimeout(timer); };
-  }, [entered]);
-
-  const highlightKey = stepKey ?? activeKey;
+  const [activeKey, setActiveKey] = useState(DEFAULT_KEY);
 
   return (
     <div
       ref={rootRef}
-      className="bg-white px-4 sm:px-8 py-8"
+      className="pm-flow-card mt-7 lg:mt-[52px] bg-white p-4 lg:p-6"
       style={{
-        borderRadius: 28,
-        border: "1px solid rgba(15,111,122,0.14)",
-        boxShadow: "0 16px 40px rgba(15,111,122,0.12)",
+        borderRadius: 24,
+        border: "1px solid rgba(7,59,67,0.08)",
+        boxShadow: "var(--pm-card-shadow)",
       }}
     >
-      <div className="relative">
-        {/* Connecting line + arrow tips, desktop only (4-across layout) */}
-        <div className="hidden lg:block absolute left-0 right-0 top-[18px] h-px pointer-events-none" style={{ background: "rgba(15,111,122,0.35)" }} aria-hidden="true">
-          {ARROW_POSITIONS.map((pct) => (
-            <span
-              key={pct}
-              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 text-[10px] leading-none"
-              style={{ left: `${pct}%`, color: "rgba(15,111,122,0.35)" }}
-            >
-              ▶
-            </span>
-          ))}
-        </div>
-
-        <div className="relative grid grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6">
-          {PHASES.map((p, i) => {
-            const isActive = highlightKey === p.key;
-            return (
+      <ol className="pm-flow-list list-none m-0 p-0">
+        {PHASES.map((p, i) => {
+          const active = activeKey === p.key;
+          return (
+            <li key={p.key} data-testid={`phase-strip-${p.key}`}>
               <button
-                key={p.key}
                 type="button"
+                aria-pressed={active}
                 onMouseEnter={() => setActiveKey(p.key)}
                 onFocus={() => setActiveKey(p.key)}
-                onMouseLeave={() => setActiveKey(DEFAULT_ACTIVE)}
-                onBlur={() => setActiveKey(DEFAULT_ACTIVE)}
-                data-testid={`phase-strip-${p.key}`}
-                className="text-left rounded-2xl p-4 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pm-primary focus-visible:ring-offset-2"
+                onClick={() => setActiveKey(p.key)}
+                className="relative w-full flex items-start gap-4 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pm-teal-night)] focus-visible:ring-offset-2"
                 style={{
-                  background: isActive ? "var(--pm-lime)" : "transparent",
+                  padding: "14px 16px",
+                  margin: "0 -8px",
+                  width: "calc(100% + 16px)",
+                  borderRadius: 18,
+                  background: active ? "#C6F24E" : "transparent",
                   opacity: entered ? 1 : 0,
-                  transform: entered ? "translateY(0)" : "translateY(12px)",
+                  transform: entered ? "translateY(0)" : "translateY(10px)",
                   transitionProperty: "opacity, transform, background-color",
                   transitionDuration: "400ms, 400ms, 200ms",
-                  transitionDelay: entered ? `${i * STEP_DELAY_MS}ms` : "0ms",
+                  transitionDelay: entered ? `${i * STEP_DELAY_MS}ms, ${i * STEP_DELAY_MS}ms, 0ms` : "0ms, 0ms, 0ms",
                 }}
               >
                 <div
-                  className="relative w-9 h-9 rounded-lg grid place-items-center mb-3"
-                  style={{ background: p.color + "14" }}
+                  className="relative flex-none grid place-items-center w-10 h-10 lg:w-11 lg:h-11"
+                  style={{ borderRadius: 14, background: active ? "rgba(11,42,48,0.10)" : p.color + "14" }}
                 >
-                  <p.icon size={18} style={{ color: p.color }} />
+                  <p.icon size={20} style={{ color: active ? "#0B2A30" : p.color }} aria-hidden="true" />
                   <span
-                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full grid place-items-center text-[9px] font-mono font-bold"
-                    style={{
-                      background: isActive ? "var(--pm-lime)" : "var(--pm-teal-deep)",
-                      color: isActive ? "#0B2A30" : "#FFFFFF",
-                    }}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full grid place-items-center font-display font-semibold"
+                    style={{ fontSize: 11, background: active ? "#0B2A30" : "var(--pm-teal-deep)", color: "#FFFFFF" }}
                   >
                     {i + 1}
                   </span>
                 </div>
-                <div className="font-display font-bold text-sm sm:text-base">{p.title}</div>
-                <div className={`mt-1 text-xs sm:text-sm leading-snug ${isActive ? "text-[#0B2A30]/75" : "text-pm-text2"}`}>
-                  {p.desc}
+                <div className="min-w-0 pt-0.5">
+                  <div className="font-display font-semibold" style={{ fontSize: 18, lineHeight: 1.3, color: "#0B2A30" }}>{p.title}</div>
+                  <div className="mt-1" style={{ fontSize: 15, lineHeight: 1.5, color: active ? "#0B2A30" : "rgba(11,42,48,0.75)" }}>{p.desc}</div>
                 </div>
               </button>
-            );
-          })}
-        </div>
-      </div>
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }

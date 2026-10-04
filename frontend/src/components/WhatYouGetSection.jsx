@@ -56,7 +56,7 @@ const ITEMS = [
 function Card({ item }) {
   return (
     <div
-      className="pm-card-lift h-full flex flex-col rounded-[24px] overflow-hidden bg-white border border-[rgba(11,42,48,0.08)] shadow-[0_8px_24px_rgba(11,42,48,0.06)] hover:shadow-[0_16px_36px_rgba(11,42,48,0.12)]"
+      className="pm-card-lift h-full flex flex-col rounded-[24px] overflow-hidden bg-white border border-[rgba(11,42,48,0.08)] pm-card-depth"
     >
       <img
         src={item.illustration}

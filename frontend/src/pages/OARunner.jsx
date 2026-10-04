@@ -204,7 +204,7 @@ export default function OARunner() {
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
       if (data.status === "completed") {
-        navigate(`/attempt/${attemptId}/review`);
+        navigate(`/attempt/${attemptId}/review`, { state: data.capgemini_tier ? { capgemini_tier: data.capgemini_tier } : null });
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Submit failed");
@@ -229,7 +229,7 @@ export default function OARunner() {
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
       if (data.status === "completed") {
-        navigate(`/attempt/${attemptId}/review`);
+        navigate(`/attempt/${attemptId}/review`, { state: data.capgemini_tier ? { capgemini_tier: data.capgemini_tier } : null });
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Submit failed");

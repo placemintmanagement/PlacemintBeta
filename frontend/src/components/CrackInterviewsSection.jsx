@@ -1,13 +1,12 @@
-import React from "react";
+import React, { useState } from "react";
 import useRevealOnView from "../hooks/useRevealOnView";
 
 /**
- * "Crack interviews at" -- a text-only wall of company names, directly
- * under the hero and above the cream "What makes this different"
- * section (Landing.jsx). No logos, no brand colours/fonts, no results
- * claims (2026-10 spec) -- see the CHECKS section of the task this was
- * built from: a grep for forbidden wording and for any logo <img> is
- * part of verifying this file, not just writing it.
+ * "Crack interviews at" -- a row of company tiles, directly under the hero
+ * and above the cream "What makes this different" section (Landing.jsx).
+ * Each tile shows the company's official logo from public/logos/ when one
+ * exists, and its name as text when it does not (or fails to load). Logo
+ * files come only from each company's own site -- see public/logos/SOURCES.md.
  *
  * Sitting directly under the hero means this section owns the hero's
  * own straddling <Tray /> seam (HeroV2.jsx) -- its top padding has to
@@ -28,6 +27,33 @@ const COMING_NEXT = [
   "HCLTech", "LTIMindtree", "Tech Mahindra", "Zoho", "Deloitte",
 ];
 
+// 'all' = logos for every company that has a file; 'live' = logos for live companies only.
+const SHOW_LOGOS_FOR = "all";
+
+// slug -> logo path. Only files that came from each company's own site and whose terms
+// allow use (see public/logos/SOURCES.md). Every other company shows its name as text.
+const LOGO_FILES = {
+  accenture: "/logos/accenture.png",
+  capgemini: "/logos/capgemini.png",
+  cognizant: "/logos/cognizant.png",
+  deloitte: "/logos/deloitte.png",
+  hcltech: "/logos/hcltech.svg",
+  ibm: "/logos/ibm.png",
+  ltimindtree: "/logos/ltimindtree.svg",
+  tcs: "/logos/tcs.png",
+  wipro: "/logos/wipro.png",
+};
+
+const slugify = (name) => name.toLowerCase().replace(/\s+/g, "-");
+
+const COMPANIES = [
+  ...LIVE_COMPANIES.map((name) => ({ name, live: true })),
+  ...COMING_NEXT.map((name) => ({ name, live: false })),
+].map((c) => {
+  const slug = slugify(c.name);
+  return { ...c, slug, logo: LOGO_FILES[slug] ?? null };
+});
+
 function LiveDot({ size = 8 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 8 8" aria-hidden="true" className="shrink-0">
@@ -36,12 +62,52 @@ function LiveDot({ size = 8 }) {
   );
 }
 
+function CompanyTile({ company, index, revealed }) {
+  // A logo that fails to load falls back to the name, never a broken-image icon.
+  const [failed, setFailed] = useState(false);
+  const wantLogo = SHOW_LOGOS_FOR === "all" || company.live;
+  const showLogo = wantLogo && Boolean(company.logo) && !failed;
+
+  return (
+    <li
+      className="relative flex items-center justify-center"
+      style={{
+        height: 72,
+        minWidth: 140,
+        padding: "0 12px",
+        opacity: revealed ? 1 : 0,
+        transform: revealed ? "none" : "translateY(8px)",
+        transitionProperty: "opacity, transform",
+        transitionDuration: "400ms",
+        // Tiles appear after the heading's own 500ms fade, then stagger 40ms apart.
+        transitionDelay: revealed ? `${400 + index * 40}ms` : "0ms",
+      }}
+    >
+      {company.live && (
+        <span className="absolute left-2 top-2">
+          <LiveDot />
+        </span>
+      )}
+      <span className="sr-only">{company.live ? "Live now" : "Rolling out next"}</span>
+      {showLogo ? (
+        <img
+          src={company.logo}
+          alt={company.name}
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="block w-auto max-w-[200px] h-[40px] max-[400px]:h-[32px] object-contain"
+        />
+      ) : (
+        <span className="font-display font-semibold" style={{ fontSize: 20, lineHeight: 1.25, color: "rgba(11,42,48,0.85)" }}>
+          {company.name}
+        </span>
+      )}
+    </li>
+  );
+}
+
 export default function CrackInterviewsSection() {
   const [rootRef, revealed] = useRevealOnView({ threshold: 0.2, fallbackMs: 500 });
-  const allNames = [
-    ...LIVE_COMPANIES.map((name) => ({ name, live: true })),
-    ...COMING_NEXT.map((name) => ({ name, live: false })),
-  ];
 
   return (
     <section
@@ -117,41 +183,11 @@ export default function CrackInterviewsSection() {
           <span style={{ fontWeight: 600, color: "#0F6F7A" }}>interviews at</span>
         </h2>
 
-        <div
-          className="mt-12 flex flex-wrap justify-center max-w-[1100px] mx-auto"
-          style={{ rowGap: 20, columnGap: 44 }}
-        >
-          {allNames.map((c, i) => (
-            <span
-              key={c.name}
-              className={`inline-flex items-center gap-2 font-display font-bold transition-colors duration-200 ${
-                c.live ? "" : "cursor-default hover:text-[rgba(11,42,48,0.70)] focus-visible:text-[rgba(11,42,48,0.70)]"
-              }`}
-              style={{
-                fontSize: "clamp(1.15rem, 2vw, 1.7rem)",
-                letterSpacing: "-0.01em",
-                // Live: full-strength ink. Coming next: spec asked for
-                // ink at 40%, measured at 2.39:1 on white -- fails AA
-                // even against the relaxed 3:1 "large text" threshold
-                // (and this text is borderline large-text size to begin
-                // with: clamp()'s floor, 18.4px, sits just under the
-                // 18.66px/14pt-bold cutoff). .65 clears normal-text AA
-                // outright: 4.88:1.
-                color: c.live ? "#0B2A30" : "rgba(11,42,48,0.65)",
-                opacity: revealed ? 1 : 0,
-                transform: revealed ? "none" : "translateY(8px)",
-                transitionProperty: "opacity, transform",
-                transitionDuration: "400ms",
-                // Names start after the heading's own 500ms fade (spec:
-                // heading first, THEN names), then stagger 40ms apart.
-                transitionDelay: revealed ? `${400 + i * 40}ms` : "0ms",
-              }}
-            >
-              {c.live && <LiveDot />}
-              {c.name}
-            </span>
+        <ul className="mt-12 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:justify-center list-none m-0 p-0 max-w-[1100px] mx-auto">
+          {COMPANIES.map((company, i) => (
+            <CompanyTile key={company.slug} company={company} index={i} revealed={revealed} />
           ))}
-        </div>
+        </ul>
 
         {/* .60 (spec) measured 4.18:1 on white -- fails AA for 13px/12px
             text, same issue hit and fixed the same way earlier this
@@ -169,7 +205,7 @@ export default function CrackInterviewsSection() {
           </span>
         </div>
 
-        <p className="mt-4" style={{ fontSize: 12, color: "rgba(11,42,48,0.70)" }}>
+        <p className="mt-4" style={{ fontSize: 13, color: "rgba(11,42,48,0.70)" }}>
           Company names are trademarks of their respective owners. Placemint is not
           affiliated with or endorsed by them.
         </p>

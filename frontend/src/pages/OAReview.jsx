@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../api";
 import Header from "../components/Header";
@@ -10,8 +10,37 @@ import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } fro
 const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
 const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
 
+const TIER_NAMES = { spark: "Spark", dave: "Dave", commit: "Commit" };
+
+// Shown once, right after the final section of a Capgemini attempt. The tier
+// is computed by the server (services/capgemini_tiers.py) and passed here in
+// the navigation state; nothing on this page can change it.
+function TierUnlockCard({ tier, onDismiss }) {
+  return (
+    <Card padding="24px 28px" className="mt-6" style={{ borderRadius: 24 }}>
+      {tier.tier ? (
+        <>
+          <SectionLabel>capgemini tier</SectionLabel>
+          <CardTitle style={{ fontSize: 24 }}>Congratulations, you unlocked the {TIER_NAMES[tier.tier]} tier!</CardTitle>
+          <div className="mt-2" style={{ fontSize: 16, color: "rgba(11,42,48,0.75)" }}>{tier.lpa.toFixed(2)} LPA</div>
+        </>
+      ) : (
+        <>
+          <SectionLabel>attempt complete</SectionLabel>
+          <CardTitle style={{ fontSize: 22 }}>Your attempt is complete.</CardTitle>
+          <div className="mt-2" style={{ fontSize: 15, color: "rgba(11,42,48,0.75)" }}>Your full review is below.</div>
+        </>
+      )}
+      <Button variant="primary" className="mt-4" onClick={onDismiss}>View my review</Button>
+    </Card>
+  );
+}
+
 export default function OAReview() {
   const { attemptId } = useParams();
+  const location = useLocation();
+  const tierUnlock = location.state?.capgemini_tier || null;
+  const [unlockDismissed, setUnlockDismissed] = useState(false);
   const [review, setReview] = useState(null);
   const [starting, setStarting] = useState(false);
   const [openKeys, setOpenKeys] = useState({});
@@ -104,6 +133,7 @@ export default function OAReview() {
       <Header light />
       <PageShell>
         <div className="max-w-5xl mx-auto pm-in">
+          {tierUnlock && !unlockDismissed && <TierUnlockCard tier={tierUnlock} onDismiss={() => setUnlockDismissed(true)} />}
           <SectionLabel>OA review · {review.company_name}</SectionLabel>
           <PageTitle style={{ color: verdictColor }}>{verdictText}</PageTitle>
           <div className="mt-6 flex flex-wrap items-stretch gap-4">

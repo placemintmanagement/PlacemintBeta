@@ -9,8 +9,7 @@ import useRevealOnView from "../hooks/useRevealOnView";
  * the section's one lime highlight. Frosted glass is kept only for the
  * small floating stat cards in the hero (HeroV2's GlassCard), never
  * reused here. Fade + slide up in sequence on first scroll into view,
- * reduced-motion safe -- see useRevealOnView for why the trigger has a
- * fast fallback rather than depending solely on IntersectionObserver.
+ * reduced-motion safe. Scroll-driven in both directions (see useRevealOnView).
  *
  * Icon tiles replaced with illustrations (2026-10) -- each SVG already
  * bakes in its own 480x180 background colour, matching the card it sits
@@ -30,17 +29,17 @@ const STAGGER_MS = 120;
 // stylesheet rule regardless of :hover, so a hover className alone would
 // have had no visible effect.
 const WHITE_CARD_CLASS =
-  "bg-white border border-[#F2EDDF] shadow-[0_10px_30px_rgba(11,42,48,0.08)] hover:shadow-[0_16px_40px_rgba(11,42,48,0.14)]";
+  "bg-white border border-[#F2EDDF] pm-card-depth";
 
 export default function DifferentiatorCards() {
-  const [rootRef, revealed] = useRevealOnView({ threshold: 0.3, fallbackMs: 500 });
+  const [rootRef, revealed] = useRevealOnView({ threshold: 0.3 });
 
   return (
     <div ref={rootRef} className="grid grid-cols-1 sm:grid-cols-3 gap-5 mt-10 items-stretch">
       {ITEMS.map((item, i) => (
         <div
           key={item.key}
-          className={`pm-card-lift rounded-[26px] p-8 flex flex-col h-full ${item.highlight ? "" : WHITE_CARD_CLASS}`}
+          className={`pm-card-lift pm-card-depth rounded-[26px] p-8 flex flex-col h-full ${item.highlight ? "" : WHITE_CARD_CLASS}`}
           style={{
             background: item.highlight ? "var(--pm-lime)" : undefined,
             opacity: revealed ? 1 : 0,

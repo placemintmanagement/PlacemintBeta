@@ -139,7 +139,7 @@ function ReportCard({ rootRef, revealed }) {
       className="rounded-[28px] bg-white overflow-hidden"
       style={{
         border: "1px solid rgba(15,111,122,0.14)",
-        boxShadow: "0 20px 50px rgba(15,111,122,0.14)",
+        boxShadow: "var(--pm-card-shadow)",
       }}
     >
       {/* Top bar */}

@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ShieldCheck, User, Menu, X, ArrowRight,
+  ShieldCheck, Menu, X, ArrowRight,
 } from "lucide-react";
 import { TID } from "../testIds";
 import { SHOW_PRICING } from "../featureFlags";
+import { useAuth } from "../auth";
+import Button from "./shared/Button";
 
 /**
  * HeroV2 -- the default "/" hero (2026-10). Renders full-bleed: it has NO
@@ -55,7 +57,7 @@ const TRAY_CARDS = [
     pillBg: "#FFFFFF",
     title: "Real cutoffs",
     pill: "Per company",
-    illustration: "/illustrations/card-real-cutoffs.svg",
+    illustration: "/illustrations/tray-cutoffs.svg",
   },
   {
     id: "inside-your-report",
@@ -65,7 +67,7 @@ const TRAY_CARDS = [
     pillBg: "rgba(255,255,255,0.88)",
     title: "Adaptive interview",
     pill: "Live",
-    illustration: "/illustrations/card-adaptive-interview.svg",
+    illustration: "/illustrations/tray-interview.svg",
   },
   {
     id: "pipeline",
@@ -75,7 +77,7 @@ const TRAY_CARDS = [
     pillBg: "#FFFFFF",
     title: "Full pipeline",
     pill: "Resume to verdict",
-    illustration: "/illustrations/card-full-pipeline.svg",
+    illustration: "/illustrations/tray-pipeline.svg",
   },
 ];
 
@@ -118,23 +120,25 @@ function TrayCard({ card, index, revealed }) {
       }}
     >
       <div
-        className="relative flex items-center justify-center h-[170px] lg:h-[210px] shrink-0"
+        className="relative h-[170px] lg:h-[210px] shrink-0 overflow-hidden"
         style={{ background: card.top }}
       >
-        <span
-          className="absolute left-3 top-3 whitespace-nowrap text-xs font-semibold px-3 py-1.5 rounded-full"
-          style={{ color: "#0B2A30", background: card.pillBg }}
-        >
-          {card.pill}
-        </span>
         <img
           src={card.illustration}
           alt=""
           aria-hidden="true"
-          width={220}
-          height={176}
-          className="w-[180px] h-auto lg:w-[220px] object-contain transition-transform duration-200 group-hover:scale-[1.04]"
+          width={1344}
+          height={768}
+          loading="eager"
+          className="absolute inset-0 block w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.04]"
+          style={{ objectPosition: "center bottom" }}
         />
+        <span
+          className="absolute left-3 top-3 z-10 whitespace-nowrap text-xs font-semibold px-3 py-1.5 rounded-full"
+          style={{ color: "#0B2A30", background: card.pillBg }}
+        >
+          {card.pill}
+        </span>
       </div>
       {/* .60/.65-opacity text has failed AA on this page's lighter
           backgrounds before (see Landing.jsx DifferentiatorCards and the
@@ -247,6 +251,8 @@ function Tray() {
 }
 
 function NavBar({ mobileOpen, setMobileOpen }) {
+  const { user } = useAuth();
+  const signedIn = Boolean(user);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -280,44 +286,49 @@ function NavBar({ mobileOpen, setMobileOpen }) {
         ))}
       </div>
 
-      <Link
-        to="/login"
-        data-testid={TID.navLogin}
-        className="hidden lg:inline-flex items-center gap-2 pl-4 pr-1.5 py-1.5 rounded-full bg-[#0A0A0A]/45 border border-white/15 text-white text-sm font-medium backdrop-blur-sm transition-colors hover:bg-[#0A0A0A]/60"
-      >
-        Log In
-        <span className="w-7 h-7 rounded-full grid place-items-center" style={{ background: "var(--pm-lime)" }}>
-          <User size={14} className="text-[#0A0A0A]" />
-        </span>
-      </Link>
+      {/* Desktop: Log In, then Sign up (signed out only). Signed in, Log In
+          stays as the account control and no Sign up is shown. */}
+      <div className="hidden lg:flex items-center gap-3">
+        <Button as={Link} to="/login" variant="outline-dark" data-testid={TID.navLogin} style={{ height: 44, padding: "0 20px", fontSize: 15 }}>
+          Log In
+        </Button>
+        {!signedIn && (
+          <Button as={Link} to="/signup" variant="lime-dark" data-testid={TID.navSignup} style={{ height: 44, padding: "0 22px", fontSize: 15 }}>
+            Sign up
+          </Button>
+        )}
+      </div>
 
-      <button
-        type="button"
-        aria-label={mobileOpen ? "Close menu" : "Open menu"}
-        aria-expanded={mobileOpen}
-        onClick={() => setMobileOpen((v) => !v)}
-        className="lg:hidden text-white p-2 -mr-2"
-      >
-        {mobileOpen ? <X size={22} /> : <Menu size={22} />}
-      </button>
+      {/* Below lg: compact Sign up beside the menu button (signed out only);
+          Log In moves inside the menu. */}
+      <div className="lg:hidden flex items-center gap-2">
+        {!signedIn && (
+          <Button as={Link} to="/signup" variant="lime-dark" data-testid="nav-signup-mobile" style={{ height: 40, padding: "0 16px", fontSize: 15 }}>
+            Sign up
+          </Button>
+        )}
+        <button
+          type="button"
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen((v) => !v)}
+          className="text-white p-2 -mr-2"
+          style={{ minWidth: 44, minHeight: 44 }}
+        >
+          {mobileOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+      </div>
 
       {mobileOpen && (
         <div className="absolute top-full left-6 right-6 sm:left-10 sm:right-10 mt-3 lg:hidden rounded-2xl border border-white/15 bg-[#0A3A40]/95 backdrop-blur-md p-4 flex flex-col gap-3 shadow-xl">
+          <Button as={Link} to="/login" variant="outline-dark" data-testid="nav-login-mobile" className="w-full" style={{ minHeight: 44, fontSize: 15 }}>
+            Log In
+          </Button>
           {NAV_LINKS.map((l) => (
-            <a key={l.label} href={l.href} className={`text-sm py-1.5 ${l.active ? "text-white font-semibold" : "text-white/80"}`}>
+            <a key={l.label} href={l.href} className={`flex items-center text-sm ${l.active ? "text-white font-semibold" : "text-white/80"}`} style={{ minHeight: 44 }}>
               {l.label}
             </a>
           ))}
-          <Link
-            to="/login"
-            data-testid="nav-login-mobile"
-            className="inline-flex items-center justify-center gap-2 mt-1 px-4 py-2 rounded-full bg-[#0A0A0A]/60 border border-white/15 text-white text-sm font-medium"
-          >
-            Log In
-            <span className="w-6 h-6 rounded-full grid place-items-center" style={{ background: "var(--pm-lime)" }}>
-              <User size={12} className="text-[#0A0A0A]" />
-            </span>
-          </Link>
         </div>
       )}
     </nav>
@@ -397,9 +408,12 @@ export default function HeroV2({ imageSrc = "/hero-student.png" } = {}) {
           <div className="relative">
             <NavBar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
 
-            <div className="flex flex-col lg:block items-center text-center lg:text-left pt-8 pb-14 lg:pt-10 lg:pb-16">
-              <div className="w-full lg:max-w-[58%]">
-                <div className="text-sm font-mono uppercase tracking-widest text-white/80 mb-4">
+            <div className="flex flex-col lg:grid lg:grid-cols-[58fr_42fr] lg:items-center items-center text-center lg:text-left pt-8 pb-14 lg:pt-10 lg:pb-16">
+              <div className="w-full">
+                <div
+                  className="uppercase text-white/80 mb-4"
+                  style={{ fontFamily: "var(--pm-font-label)", fontWeight: 600, fontSize: 13, letterSpacing: "0.06em" }}
+                >
                   Company-specific placement prep
                 </div>
                 {/* Weight 300 (font-light) + letter-spacing -0.02em +
@@ -409,7 +423,7 @@ export default function HeroV2({ imageSrc = "/hero-student.png" } = {}) {
                     matches it exactly rather than approximating it. */}
                 <h1
                   className="font-display font-light text-white"
-                  style={{ fontSize: "clamp(2.25rem, 5vw, 5rem)", lineHeight: 1.08, letterSpacing: "-0.02em" }}
+                  style={{ fontSize: "clamp(40px, 5.2vw, 72px)", lineHeight: 1.08, letterSpacing: "-0.02em", textWrap: "balance" }}
                 >
                   <span className="block">Don&apos;t practice for a test.</span>
                   <span className="block">
@@ -433,6 +447,21 @@ export default function HeroV2({ imageSrc = "/hero-student.png" } = {}) {
                 </div>
               </div>
 
+              {/* Desktop: illustration in the right column, vertically centred
+                  against the copy. Decorative, so alt is empty. Hidden below
+                  1024px (the hero stays single column). The float animation
+                  is in index.css (.pm-hero-float). */}
+              <img
+                src="/illustrations/hero-illustration.svg"
+                alt=""
+                aria-hidden="true"
+                width={1636}
+                height={1191}
+                loading="eager"
+                fetchPriority="high"
+                className="hidden lg:block w-full max-w-[640px] h-auto justify-self-end pm-hero-float"
+              />
+
               {/* Mobile/tablet: image inline below text, centred (only if available) */}
               {showImage && (
                 <div className="lg:hidden mt-8 w-full flex justify-center">
@@ -449,25 +478,6 @@ export default function HeroV2({ imageSrc = "/hero-student.png" } = {}) {
             </div>
           </div>
 
-          {/* Desktop only: an image "slot" in the hero's right column,
-              bottom-aligned and flush with the hero's own bottom edge (the
-              phase strip used to live here and bleed past it -- now that
-              the strip has moved to its own section, the hero ends
-              cleanly within its own bounds instead of overlapping
-              anything below it). No cards around it any more (2026-10) --
-              see <Tray /> below. When the image itself is missing, the
-              slot is simply empty (no placeholder frame/border). */}
-          <div className="hidden lg:block absolute z-20 right-0 xl:right-4 bottom-0 w-[260px] xl:w-[300px] aspect-[4/5]">
-            {showImage && (
-              <img
-                src={imageSrc}
-                alt=""
-                onError={() => setImgError(true)}
-                className="w-full h-full object-contain"
-                style={{ filter: "drop-shadow(0 20px 36px rgba(0,0,0,0.4)) drop-shadow(0 0 40px rgba(198,242,78,0.15))" }}
-              />
-            )}
-          </div>
         </div>
       </div>
 

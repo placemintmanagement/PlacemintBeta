@@ -49,6 +49,7 @@ from pydantic import BaseModel, EmailStr, Field
 import pdfplumber
 
 from companies import COMPANIES, DEPARTMENTS, get_company, get_department
+from services import capgemini_tiers
 from services.code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
 from banks.problem_bank import sample_problems as _sample_problems
 from banks import problem_bank
@@ -2854,17 +2855,26 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
     status = "in_progress"
     if current_idx >= total_sections:
         status = "completed"
-    await db.oa_attempts.update_one(
-        {"attempt_id": attempt_id},
-        {"$set": {
-            "section_results": section_results,
-            "answers": answers,
-            "current_section_index": current_idx,
-            "status": status,
-            "completed_at": iso(now_utc()) if status == "completed" else None,
-        }},
-    )
-    return {"section_result": result, "next_index": current_idx, "status": status}
+    # Capgemini tier: computed here, server-side, only once the attempt is
+    # completed. Reads stored section_results alone, so nothing the client sends
+    # in this request can change the outcome.
+    tier_eval = None
+    if status == "completed" and attempt.get("company_id") == "capgemini":
+        tier_eval = capgemini_tiers.evaluate(section_results)
+    update = {
+        "section_results": section_results,
+        "answers": answers,
+        "current_section_index": current_idx,
+        "status": status,
+        "completed_at": iso(now_utc()) if status == "completed" else None,
+    }
+    if tier_eval is not None:
+        update["capgemini_tier"] = {**tier_eval, "computed_at": iso(now_utc())}
+    await db.oa_attempts.update_one({"attempt_id": attempt_id}, {"$set": update})
+    response = {"section_result": result, "next_index": current_idx, "status": status}
+    if tier_eval is not None:
+        response["capgemini_tier"] = {"tier": tier_eval["tier"], "lpa": tier_eval["lpa"]}
+    return response
 
 
 @api.get("/oa/{attempt_id}/review")

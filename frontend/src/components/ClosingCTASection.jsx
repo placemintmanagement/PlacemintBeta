@@ -29,7 +29,7 @@ export default function ClosingCTASection() {
         borderBottomLeftRadius: 56,
         borderBottomRightRadius: 56,
         marginTop: -56,
-        zIndex: 18,
+        zIndex: 24,
       }}
     >
       <div

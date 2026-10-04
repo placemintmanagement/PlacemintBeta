@@ -83,6 +83,12 @@
      Cards and dividers keep rgba(7,59,67,.08). */
   --pm-border-control: rgba(7,59,67,0.55);
 
+  /* Landing card depth (2026-10). Three stacked layers: a tight contact
+     shadow, a mid shadow, and a long soft drop. Hover deepens all three. */
+  --pm-card-shadow: 0 1px 2px rgba(7,59,67,0.06), 0 6px 14px -4px rgba(7,59,67,0.12), 0 22px 40px -18px rgba(7,59,67,0.32);
+  --pm-card-shadow-hover: 0 2px 4px rgba(7,59,67,0.07), 0 12px 24px -6px rgba(7,59,67,0.16), 0 32px 60px -22px rgba(7,59,67,0.40);
+
+
   --background: 180 25% 96%;
   --foreground: 190 63% 12%;
   --card: 0 0% 100%;
@@ -124,7 +130,6 @@ html {
   width: 100%;
   margin: 0;
   overflow-x: clip;
-  overflow-x: hidden; /* fallback for browsers without overflow:clip */
 }
 
 html, body, #root {
@@ -140,7 +145,6 @@ body {
   min-height: 100vh;
   position: relative;
   overflow-x: clip;
-  overflow-x: hidden;
 }
 
 /* Faint grid texture over the whole page, anchored to the viewport so it
@@ -356,3 +360,99 @@ kbd {
    row (HeroV2.jsx, StraddleStats) without disabling scroll itself. */
 .scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* "4 phases" step list (PhaseStrip.jsx, 2026-10). A 2px connector runs
+   from the centre of each icon tile down to the centre of the next one.
+   Rows have 14px top padding and 8px side padding. Tiles are 40px below
+   1024px and 44px above, so the tile centre is 34px (40px tile) or 36px
+   (44px tile) below the row top; each row's connector extends the same
+   distance past its own bottom edge to reach the next tile.
+   Not drawn after the last row, and each row paints above the line. */
+.pm-flow-list > li { position: relative; }
+.pm-flow-list > li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 27px;
+  top: 34px;
+  bottom: -34px;
+  width: 2px;
+  background: rgba(15, 111, 122, 0.25);
+}
+@media (min-width: 1024px) {
+  .pm-flow-list > li:not(:last-child)::before { left: 29px; top: 36px; bottom: -36px; }
+}
+
+/* Landing card depth (2026-10). Applies the --pm-card-shadow tokens in :root.
+   A plain class rather than Tailwind shadow-[var(...)], which Tailwind reads as a colour. */
+.pm-card-depth { box-shadow: var(--pm-card-shadow); transition: box-shadow 200ms ease; }
+.pm-card-depth:hover { box-shadow: var(--pm-card-shadow-hover); }
+@media (prefers-reduced-motion: reduce) { .pm-card-depth { transition: none; } }
+
+/* Featured (live) department card, DepartmentCard.jsx (2026-10). Resting
+   shadow, raised on hover/keyboard focus with a 4px lift. The Explore pill
+   shows the focus ring via Tailwind group-focus-visible. */
+.pm-dept-featured { box-shadow: 0 24px 40px -24px rgba(7,59,67,0.40), 0 2px 6px -2px rgba(7,59,67,0.12); transition: transform 200ms ease, box-shadow 200ms ease; }
+.pm-dept-featured:hover, .pm-dept-featured:focus-visible { transform: translateY(-4px); box-shadow: 0 32px 48px -24px rgba(7,59,67,0.46), 0 4px 10px -3px rgba(7,59,67,0.14); }
+@media (prefers-reduced-motion: reduce) { .pm-dept-featured, .pm-dept-featured:hover, .pm-dept-featured:focus-visible { transition: none; transform: none; } }
+
+/* "Pick your starting point" tray: the decorative figure rests on the tray's
+   top edge above the Adaptive Interview card. Desktop only (>=1100px). The tray
+   gets extra top margin so the figure clears the subtitle. The header margin
+   collapses into it, so the margin is the figure height (about 0.713 x its
+   width) minus the 10px overlap, plus a 16px gap. */
+.pm-awe-tray { position: relative; }
+.pm-awe-figure { display: none; }
+@media (min-width: 1100px) {
+  .pm-awe-tray { margin-top: calc(clamp(120px, 10.5vw, 160px) * 0.7134 + 6px); }
+  .pm-awe-figure {
+    display: block;
+    position: absolute;
+    left: 83.33%;
+    bottom: 100%;
+    margin-bottom: -10px;
+    transform: translateX(-50%);
+    width: clamp(120px, 10.5vw, 160px);
+    height: auto;
+    z-index: 1;
+    pointer-events: none;
+    user-select: none;
+  }
+}
+
+/* Hero illustration: a very slow float, off under reduced motion. */
+@keyframes pm-hero-float {
+  from { transform: translateY(0); }
+  to { transform: translateY(-8px); }
+}
+.pm-hero-float { animation: pm-hero-float 6s ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) { .pm-hero-float { animation: none; } }
+
+/* FAQ accordion (components/FaqSection.jsx). */
+.pm-faq-item {
+  border: 1px solid rgba(7,59,67,0.08);
+  box-shadow: 0 10px 22px -18px rgba(7,59,67,0.28);
+  transition: border-color 150ms ease, box-shadow 200ms ease;
+}
+.pm-faq-item:hover:not([data-open="true"]) { border-color: rgba(7,59,67,0.18); }
+.pm-faq-item[data-open="true"] {
+  border-color: rgba(15,111,122,0.35);
+  box-shadow: 0 18px 32px -20px rgba(7,59,67,0.35);
+}
+.pm-faq-q:focus-visible { outline: 3px solid var(--pm-teal-night); outline-offset: 2px; }
+.pm-faq-q-text { font-size: 19px; line-height: 1.3; }
+@media (max-width: 400px) { .pm-faq-q-text { font-size: 18px; } }
+.pm-faq-tile { background: #E8F3FB; color: var(--pm-teal-deep); transition: background-color 200ms ease, color 200ms ease; }
+.pm-faq-icon { transition: transform 200ms ease; }
+.pm-faq-item[data-open="true"] .pm-faq-tile { background: var(--pm-teal-deep); color: #FFFFFF; }
+.pm-faq-item[data-open="true"] .pm-faq-icon { transform: rotate(45deg); }
+.pm-faq-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease;
+}
+.pm-faq-panel[data-open="true"] { grid-template-rows: 1fr; }
+.pm-faq-panel > div { min-height: 0; overflow: hidden; visibility: hidden; transition: visibility 200ms; }
+.pm-faq-panel[data-open="true"] > div { visibility: visible; }
+@media (prefers-reduced-motion: reduce) {
+  .pm-faq-item, .pm-faq-tile, .pm-faq-icon, .pm-faq-panel, .pm-faq-panel > div { transition: none !important; }
+}

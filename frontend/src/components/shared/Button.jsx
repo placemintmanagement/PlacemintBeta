@@ -28,6 +28,16 @@ const VARIANTS = {
     cls: "hover:brightness-95 focus-visible:outline-[var(--pm-lime)]",
     style: { background: "var(--pm-lime)", color: "var(--pm-ink)" },
   },
+  // Dark-surface pair (hero nav). Backgrounds live in the class, not inline,
+  // so the hover colour can change them (an inline background would win).
+  "lime-dark": {
+    cls: "bg-[#C6F24E] text-[#0B2A30] hover:bg-[#A5CC2E] focus-visible:outline-[#C6F24E]",
+    style: {},
+  },
+  "outline-dark": {
+    cls: "bg-transparent text-white border border-white/40 hover:bg-white/10 focus-visible:outline-[#C6F24E]",
+    style: {},
+  },
 };
 
 // `as` renders the same styling on a router Link or an anchor; type and
