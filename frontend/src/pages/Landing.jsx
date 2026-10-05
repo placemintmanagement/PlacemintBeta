@@ -223,13 +223,13 @@ export default function Landing() {
             <div className="pm-card-lift relative flex flex-col gap-4 h-full rounded-[24px] p-7" style={{ background: "#FFFFFF", border: "1px solid rgba(7,59,67,0.08)", boxShadow: "0 14px 28px -18px rgba(7,59,67,0.28)" }}>
               <div className="w-11 h-11 rounded-[14px] grid place-items-center shrink-0" style={{ background: "var(--pm-lime)", color: "var(--pm-ink)" }}><MessageSquareText size={22} aria-hidden="true" /></div>
               <h4 className="font-display font-semibold" style={{ fontSize: 22, lineHeight: 1.2, color: "#0B2A30" }}>Adaptive interview</h4>
-              <p style={{ fontSize: 15, lineHeight: 1.6, color: "rgba(11,42,48,0.75)" }}>2 DSA + 2 project questions from your actual resume + 3 CS fundamentals. Follows up on vague answers like a real interviewer.</p>
+              <p style={{ fontSize: 15, lineHeight: 1.6, color: "rgba(11,42,48,0.75)" }}>One question at a time, planned for the company you chose and drawing on your resume when one is attached. A short verdict follows each answer.</p>
             </div>
 
             <div className="pm-card-lift relative flex flex-col gap-4 h-full rounded-[24px] p-7" style={{ background: "#FFFFFF", border: "1px solid rgba(7,59,67,0.08)", boxShadow: "0 14px 28px -18px rgba(7,59,67,0.28)" }}>
               <div className="w-11 h-11 rounded-[14px] grid place-items-center shrink-0" style={{ background: "var(--pm-teal-deep)", color: "#FFFFFF" }}><ShieldCheck size={22} aria-hidden="true" /></div>
               <h4 className="font-display font-semibold" style={{ fontSize: 22, lineHeight: 1.2, color: "#0B2A30" }}>Sectional cutoffs, honest verdicts</h4>
-              <p style={{ fontSize: 15, lineHeight: 1.6, color: "rgba(11,42,48,0.75)" }}>If Infosys wants 65% in pseudocode, you&apos;ll get eliminated at 64%. If it&apos;s blended, we tell you which section dragged you down.</p>
+              <p style={{ fontSize: 15, lineHeight: 1.6, color: "rgba(11,42,48,0.75)" }}>Where a company sets a cutoff for each section, missing one means not ready. Where it uses a blended score, we show your weakest section.</p>
             </div>
 
             <div className="pm-card-lift relative flex flex-col gap-4 h-full rounded-[24px] p-7" style={{ background: "#FFFFFF", border: "1px solid rgba(7,59,67,0.08)", boxShadow: "0 14px 28px -18px rgba(7,59,67,0.28)" }}>

@@ -180,7 +180,7 @@ export default function StartPractisingSection() {
             className="font-display font-light text-2xl lg:text-3xl leading-[1.15] mb-6"
             style={{ color: "#0B2A30", letterSpacing: "-0.02em" }}
           >
-            Practise the{" "}
+            <span className="mr-[0.3em]">Practise the</span>
             <span style={{ color: "#0F6F7A", fontWeight: 600 }}>real tests of</span>
           </div>
           <div className="flex flex-wrap justify-center gap-2.5">
