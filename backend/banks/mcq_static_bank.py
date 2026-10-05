@@ -86,9 +86,14 @@ async def get_seen_ids(user_id: str, topic: str) -> set:
 async def mark_seen(user_id: str, topic: str, question_ids: List[str]) -> None:
     if _db is None or not question_ids:
         return
+    now = _now_iso()
+    # seen_at records when each question was last served. Only used to pick the
+    # least-recently-seen questions when a topic's unseen set runs out (see
+    # sample_static_with_reuse). Dotted ids can't be stored as field names.
+    seen_at = {f"seen_at.{qid}": now for qid in question_ids if "." not in qid and "$" not in qid}
     await _db.mcq_static_bank_seen.update_one(
         {"user_id": user_id, "topic": topic},
-        {"$addToSet": {"question_ids": {"$each": question_ids}}, "$set": {"updated_at": _now_iso()}},
+        {"$addToSet": {"question_ids": {"$each": question_ids}}, "$set": {"updated_at": now, **seen_at}},
         upsert=True,
     )
 
@@ -118,6 +123,46 @@ async def sample_static(user_id: str, topic: str, count: int) -> List[dict]:
     } for d in docs]
     await mark_seen(user_id, topic, [it["id"] for it in items])
     return items
+
+
+def _item_from_doc(d: dict) -> dict:
+    return {
+        "id": d["question_id"],
+        "prompt": d["prompt"],
+        "options": d["options"],
+        "correct_index": d["correct_index"],
+        "explanation": d.get("explanation", ""),
+        "difficulty": d.get("difficulty", "Medium"),
+        "chart": d.get("chart"),
+        "svg_diagram": d.get("svg_diagram"),
+    }
+
+
+async def sample_static_with_reuse(user_id: str, topic: str, count: int) -> Tuple[List[dict], int, int]:
+    """Static-only draw with no LLM call. Serves up to `count` unseen questions
+    for `topic` (sample_static), then fills any shortfall with this user's
+    least-recently-seen static questions. Returns (items, reused, unfilled):
+    `reused` counts questions repeated from earlier draws, `unfilled` counts
+    slots the bank could not fill at all (the bank is smaller than `count`)."""
+    if _db is None or count <= 0:
+        return [], 0, max(count, 0)
+    items = await sample_static(user_id, topic, count)
+    short = count - len(items)
+    if short <= 0:
+        return items, 0, 0
+    served = {it["id"] for it in items}
+    doc = await _db.mcq_static_bank_seen.find_one({"user_id": user_id, "topic": topic}) or {}
+    seen_at = doc.get("seen_at") or {}
+    candidates = await _db.mcq_static_bank.find(
+        {"topic": topic, "question_id": {"$nin": list(served)}}
+    ).to_list(length=None)
+    # Oldest last-served first. A question with no recorded time was served
+    # before seen_at existed, so it sorts as oldest.
+    candidates.sort(key=lambda d: seen_at.get(d["question_id"], ""))
+    reused_docs = candidates[:short]
+    reused = [_item_from_doc(d) for d in reused_docs]
+    await mark_seen(user_id, topic, [it["id"] for it in reused])
+    return items + reused, len(reused), short - len(reused)
 
 
 def split_counts(count: int) -> Tuple[int, int]:

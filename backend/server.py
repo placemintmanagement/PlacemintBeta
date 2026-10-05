@@ -890,7 +890,7 @@ def _get_hidden_answer_key(attempt: dict, section_key: str, question_id: str) ->
     return (attempt.get("_hidden_answer_keys") or {}).get(section_key, {}).get(str(question_id))
 
 
-async def _generate_extra_topics(company_name: str, extra_topics: List[dict], diff: Optional[str], user_id: str) -> List[dict]:
+async def _generate_extra_topics(company_name: str, extra_topics: List[dict], diff: Optional[str], user_id: str, static_only: bool = False) -> List[dict]:
     """Shared per-topic pool-or-live-verify loop — pulled out of the
     pseudocode branch's extra_topics handling (Capgemini's OOPS/DBMS/OS/CN
     fix) so a plain topic-only MCQ section (e.g. LTIMindtree's Computer
@@ -901,13 +901,32 @@ async def _generate_extra_topics(company_name: str, extra_topics: List[dict], di
     changed 2026-07-21 from the original 50/50): each topic pulls ceil(tcount*0.9)
     from the static bank (excluding this candidate's already-seen questions) and
     backfills the rest — including any static shortfall — from the existing
-    pool-or-live-verify path, shuffled together before being tagged and returned."""
+    pool-or-live-verify path, shuffled together before being tagged and returned.
+
+    static_only=True (Capgemini Round 2 technical): no LLM call at all. Each
+    topic is served from the static bank; any shortfall is filled with the
+    candidate's least-recently-seen static questions, with a warning logged."""
     data: List[dict] = []
     for t in extra_topics:
         tkey = t.get("key")
         tname = t.get("name", tkey)
         tcount = t.get("count", 5)
         if not tkey:
+            continue
+        if static_only:
+            if tkey not in mcq_static_bank.CANONICAL_TOPICS:
+                logger.warning("static-only draw: topic %r has no static bank; %d questions unfilled", tkey, tcount)
+                continue
+            got, reused, unfilled = await mcq_static_bank.sample_static_with_reuse(user_id, tkey, tcount)
+            if reused or unfilled:
+                logger.warning(
+                    "static bank shortfall for topic %r: requested %d, reused %d, unfilled %d (company %s)",
+                    tkey, tcount, reused, unfilled, company_name,
+                )
+            random.shuffle(got)
+            for q in got:
+                q["topic"] = tname
+            data = data + got
             continue
         static_items: List[dict] = []
         live_n = tcount
@@ -1441,7 +1460,7 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             {"key": k, "name": _TOPIC_DISPLAY_NAMES[k], "count": c}
             for k, c in modern_mix_counts.items() if c > 0
         ]
-        data = await _generate_extra_topics(company_name, extra_topics, diff, user_id)
+        data = await _generate_extra_topics(company_name, extra_topics, diff, user_id, static_only=True)
     else:  # mcq / topic_mcq
         skey = section.get("key")
         stype = section.get("type")
@@ -4192,6 +4211,17 @@ async def admin_mcq_stats(user: Dict[str, Any] = Depends(require_user)):
 app.include_router(api)
 
 
+_MCQ_POOL_WORKER_OFF_VALUES = {"0", "false", "no", "off"}
+
+
+def mcq_pool_worker_enabled(env_value: Optional[str] = None) -> bool:
+    """MCQ_POOL_WORKER_ENABLED: unset or any value other than 0/false/no/off keeps the worker on."""
+    raw = os.environ.get("MCQ_POOL_WORKER_ENABLED") if env_value is None else env_value
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _MCQ_POOL_WORKER_OFF_VALUES
+
+
 @app.on_event("startup")
 async def _startup():
     # Wire mcq_pool with our db handle and kick off the singleton background
@@ -4217,7 +4247,12 @@ async def _startup():
         await db.game_session.create_index([("user_id", 1), ("gameType", 1)])
     except Exception as e:  # pragma: no cover
         logger.warning("mcq_pool index create failed: %s", e)
-    mcq_pool.start_worker(COMPANIES)
+    # The pool worker pre-generates MCQs with the LLM. It is on by default
+    # (existing behaviour). Set MCQ_POOL_WORKER_ENABLED=0 (or false/no/off) to disable it.
+    if mcq_pool_worker_enabled():
+        mcq_pool.start_worker(COMPANIES)
+    else:
+        logger.info("mcq_pool background worker disabled (MCQ_POOL_WORKER_ENABLED is off)")
 
 
 @app.on_event("shutdown")
