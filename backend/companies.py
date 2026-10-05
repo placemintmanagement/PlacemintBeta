@@ -613,7 +613,7 @@ COMPANIES: List[Dict[str, Any]] = [
             # research's ~68-minute / Motion+Grid+Logical Reasoning+ADEPT-15
             # mismatch against what's actually registered -- that remains a
             # SEPARATE decision for a real Round 5 content pass later.
-            {"key": "round5_cognitive", "name": "Round 5: Cognitive Assessment", "type": "gamified_round", "count": 4, "minutes": 11, "cutoff": 0.5},
+            {"key": "round5_cognitive", "name": "Round 5: Cognitive Assessment", "type": "gamified_round", "count": 4, "minutes": 11, "cutoff": 0.6},
         ],
     },
     {

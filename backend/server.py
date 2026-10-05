@@ -2000,6 +2000,17 @@ def _strip_answer_fields_for_response(sections: List[dict]) -> List[dict]:
     return out
 
 
+def _client_section_results(section_results: Dict[str, Any]) -> Dict[str, Any]:
+    """Section results as the candidate may see them. Round 4's per-component
+    breakdown (self_review_correct, bug_explanation_quality, stage_efficiency)
+    is stored server-side and read only by the grading and tier code, so it is
+    removed here. Each section keeps its score and passed fields."""
+    return {
+        key: ({k: v for k, v in result.items() if k != "components"} if isinstance(result, dict) else result)
+        for key, result in section_results.items()
+    }
+
+
 @api.get("/oa/{attempt_id}")
 async def get_oa(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
     # _hidden_answer_keys never goes to the client — it's where puzzle types
@@ -2012,6 +2023,12 @@ async def get_oa(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
     if not doc:
         raise HTTPException(404, "Not found")
     doc["sections"] = _strip_answer_fields_for_response(doc.get("sections", []))
+    if doc.get("section_results"):
+        doc["section_results"] = _client_section_results(doc["section_results"])
+    # The stored capgemini_tier carries the per-criterion breakdown for admin use.
+    # The candidate gets only the whitelisted {tier, lpa} view.
+    if doc.get("capgemini_tier"):
+        doc["capgemini_tier"] = capgemini_tiers.client_view(doc["capgemini_tier"])
     return doc
 
 
@@ -3003,7 +3020,7 @@ async def oa_review(attempt_id: str, user: Dict[str, Any] = Depends(require_user
         "attempt_id": attempt_id,
         "company_name": attempt["company_name"],
         "scoring_mode": scoring_mode,
-        "section_results": section_results,
+        "section_results": _client_section_results(section_results),
         "composite_score": round(composite, 3),
         "weakest_section": weakest,
         "verdict": verdict,
@@ -3706,9 +3723,20 @@ async def _load_ai_assisted_session_for_attempt(attempt_id: str, section_key: st
     return session
 
 
+def _client_ai_assisted_session(session: Dict[str, Any]) -> Dict[str, Any]:
+    """The session as the candidate may see it. final_outcome keeps score, passed
+    and reason, which the completion screen reads. Its per-component breakdown is
+    left out. The stored session is not modified."""
+    outcome = session.get("final_outcome")
+    if not isinstance(outcome, dict) or "components" not in outcome:
+        return session
+    return {**session, "final_outcome": {k: v for k, v in outcome.items() if k != "components"}}
+
+
 @api.get("/oa/{attempt_id}/ai-assisted/{section_key}")
 async def oa_ai_assisted_get(attempt_id: str, section_key: str, user: Dict[str, Any] = Depends(require_user)):
-    return await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    session = await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    return _client_ai_assisted_session(session)
 
 
 @api.post("/oa/{attempt_id}/ai-assisted/{section_key}/message")
