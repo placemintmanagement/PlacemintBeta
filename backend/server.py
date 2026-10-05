@@ -3525,14 +3525,15 @@ async def dev_ai_assisted_message(session_id: str, body: AiAssistedMessageIn, us
     update: Dict[str, Any] = {}
 
     if stage == "explain_bug":
-        # GPT-4o mini (call_json_gpt) -- permanent model choice for Round 4's
-        # staged-conversation grading, not a stopgap.
+        # call_json_gpt (GPT_MINI = gpt-5.4-mini, temperature 0) -- Round 4's
+        # staged-conversation grading.
         grade = await call_json_gpt(
             "You grade a candidate's bug-explanation for an AI-assisted coding "
             "assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
             bug_explanation_grading_prompt(
                 problem["title"], variant["bug_category"], variant["bug_explanation_key_points"], body.text,
             ),
+            temperature=0,
         ) or {"sufficient": False, "reprompt": "Could you point to the specific line or condition that's wrong, and why?", "score": 0, "one_line_verdict": ""}
         grade = _attach_grading_flag(grade)
         sufficient = bool(grade.get("sufficient"))
@@ -3564,19 +3565,9 @@ async def dev_ai_assisted_message(session_id: str, body: AiAssistedMessageIn, us
             transcript.append({"role": "ai", "stage": "explain_bug", "text": reprompt, "at": iso(now_utc())})
     else:
         stage_cfg = ai_assisted_bank.STAGE_CONFIG[stage]
-        # GPT-4o mini (call_json_gpt) -- same permanent choice as the
-        # explain_bug branch above.
-        grade = await call_json_gpt(
-            "You run a staged technical-discussion gate for an AI-assisted "
-            "coding assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
-            stage_sufficiency_prompt(
-                stage, stage_cfg["prompt_intro"], stage_cfg["sufficiency_rubric"],
-                stage_cfg["reprompt_examples"], body.text,
-            ),
-        ) or {"sufficient": False, "reprompt": (stage_cfg["reprompt_examples"] or ["Could you say a bit more?"])[0]}
-        # No numeric score field at these stages (just sufficient/reprompt) --
-        # _attach_grading_flag's heuristic doesn't apply here, unlike explain_bug's grade above.
-        sufficient = bool(grade.get("sufficient"))
+        # Verdict comes from the element flags in _grade_stage_free_text, not from the model.
+        grade = await _grade_stage_free_text(stage, stage_cfg, body.text)
+        sufficient = grade["sufficient"]
         attempts[stage] = attempts.get(stage, 0) + 1
 
         if sufficient:
@@ -3599,6 +3590,31 @@ async def dev_ai_assisted_message(session_id: str, body: AiAssistedMessageIn, us
     await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
     session.update(update)
     return session
+
+
+async def _grade_stage_free_text(stage: str, stage_cfg: Dict[str, Any], text: str) -> Dict[str, Any]:
+    """Round 4 free-text stage gate (understand / approach / complexity). The
+    model marks each required element present or absent (temperature 0). The
+    pass/fail verdict is computed here: the stage passes when the fraction of
+    present elements is at least ai_assisted_bank.STAGE_SUFFICIENCY_THRESHOLD.
+    A missing or malformed model reply counts every element as absent."""
+    required = stage_cfg["required_elements"]
+    examples = stage_cfg["reprompt_examples"]
+    grade = await call_json_gpt(
+        "You check a candidate's answer for an AI-assisted coding assessment. "
+        "Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+        stage_sufficiency_prompt(
+            stage, stage_cfg["prompt_intro"], stage_cfg["sufficiency_rubric"],
+            examples, text, required,
+        ),
+        temperature=0,
+    ) or {}
+    raw_elements = grade.get("elements") if isinstance(grade.get("elements"), dict) else {}
+    flags = {key: raw_elements.get(key) is True for key in required}
+    present = sum(flags.values())
+    sufficient = bool(required) and present / len(required) >= ai_assisted_bank.STAGE_SUFFICIENCY_THRESHOLD
+    reprompt = grade.get("reprompt") or (examples[0] if examples else "Could you say a bit more?")
+    return {"sufficient": sufficient, "elements": flags, "reprompt": reprompt}
 
 
 class AiAssistedButtonIn(BaseModel):
@@ -3762,14 +3778,15 @@ async def oa_ai_assisted_message(attempt_id: str, section_key: str, body: AiAssi
     update: Dict[str, Any] = {}
 
     if stage == "explain_bug":
-        # GPT-4o mini (call_json_gpt) -- permanent model choice for Round 4's
-        # staged-conversation grading, not a stopgap.
+        # call_json_gpt (GPT_MINI = gpt-5.4-mini, temperature 0) -- Round 4's
+        # staged-conversation grading.
         grade = await call_json_gpt(
             "You grade a candidate's bug-explanation for an AI-assisted coding "
             "assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
             bug_explanation_grading_prompt(
                 problem["title"], variant["bug_category"], variant["bug_explanation_key_points"], body.text,
             ),
+            temperature=0,
         ) or {"sufficient": False, "reprompt": "Could you point to the specific line or condition that's wrong, and why?", "score": 0, "one_line_verdict": ""}
         grade = _attach_grading_flag(grade)
         sufficient = bool(grade.get("sufficient"))
@@ -3801,19 +3818,9 @@ async def oa_ai_assisted_message(attempt_id: str, section_key: str, body: AiAssi
             transcript.append({"role": "ai", "stage": "explain_bug", "text": reprompt, "at": iso(now_utc())})
     else:
         stage_cfg = ai_assisted_bank.STAGE_CONFIG[stage]
-        # GPT-4o mini (call_json_gpt) -- same permanent choice as the
-        # explain_bug branch above.
-        grade = await call_json_gpt(
-            "You run a staged technical-discussion gate for an AI-assisted "
-            "coding assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
-            stage_sufficiency_prompt(
-                stage, stage_cfg["prompt_intro"], stage_cfg["sufficiency_rubric"],
-                stage_cfg["reprompt_examples"], body.text,
-            ),
-        ) or {"sufficient": False, "reprompt": (stage_cfg["reprompt_examples"] or ["Could you say a bit more?"])[0]}
-        # No numeric score field at these stages (just sufficient/reprompt) --
-        # _attach_grading_flag's heuristic doesn't apply here, unlike explain_bug's grade above.
-        sufficient = bool(grade.get("sufficient"))
+        # Verdict comes from the element flags in _grade_stage_free_text, not from the model.
+        grade = await _grade_stage_free_text(stage, stage_cfg, body.text)
+        sufficient = grade["sufficient"]
         attempts[stage] = attempts.get(stage, 0) + 1
 
         if sufficient:

@@ -206,15 +206,18 @@ async def call_text(system: str, prompt: str, session_id: Optional[str] = None) 
     return "".join(block.text for block in resp.content if hasattr(block, "text"))
 
 
-async def call_json_gpt(system: str, prompt: str, model: str = GPT_MINI) -> Any:
+async def call_json_gpt(
+    system: str, prompt: str, model: str = GPT_MINI, temperature: Optional[float] = None,
+    reasoning_effort: Optional[str] = None, usage_sink: Optional[list] = None,
+) -> Any:
     """Call GPT via the OpenAI SDK directly (separate path from call_json/emergent-
     integrations above) with instructions to return strict JSON. Returns parsed JSON.
 
     Used for tasks with no independent cross-check needed: MCQ stem generation,
     interview planning/grading, OA coding/open-answer grading, and Round 4's
     (AI-Assisted Coding) staged-conversation grading (stage_sufficiency_prompt/
-    bug_explanation_grading_prompt, called from server.py) -- GPT-4o mini is
-    the permanent model choice for that round, not a stopgap. Reuses the same
+    bug_explanation_grading_prompt, called from server.py) -- GPT_MINI
+    (gpt-5.4-mini) is the model for that round. Reuses the same
     _extract_json parser as call_json since that logic is provider-agnostic."""
     system_full = (
         system
@@ -223,14 +226,30 @@ async def call_json_gpt(system: str, prompt: str, model: str = GPT_MINI) -> Any:
           "matches the requested shape."
     )
     client = _get_openai_client()
+    # temperature is only sent when given, so every other caller keeps the
+    # model's default sampling exactly as before.
+    extra = {} if temperature is None else {"temperature": temperature}
+    if reasoning_effort is not None:
+        extra["reasoning_effort"] = reasoning_effort
     resp = await client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_full},
             {"role": "user", "content": prompt},
         ],
+        **extra,
     )
     text = resp.choices[0].message.content or ""
+    usage = getattr(resp, "usage", None)
+    if usage is not None:
+        details = getattr(usage, "completion_tokens_details", None)
+        record = {
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "reasoning_tokens": getattr(details, "reasoning_tokens", None) if details else None,
+        }
+        if usage_sink is not None:
+            usage_sink.append(record)
     parsed = _extract_json(text)
     if parsed is None:
         logger.warning("call_json_gpt: failed to parse. Raw text: %s", text[:400])
@@ -759,30 +778,33 @@ def grade_answer_prompt(question: dict, answer: str) -> str:
 
 def stage_sufficiency_prompt(
     stage_name: str, prompt_intro: str, sufficiency_rubric: str,
-    reprompt_examples: List[str], candidate_text: str,
+    reprompt_examples: List[str], candidate_text: str, required_elements: Dict[str, str],
 ) -> str:
-    """Round 4 (AI-Assisted Coding) staged-conversation gate. Judges ONE
-    free-text stage answer (understand/approach/complexity) against that
-    stage's own STAGE_CONFIG rubric (backend/banks/ai_assisted_bank.py).
-    Same wrap_untrusted + GRADING_INJECTION_DEFENSE pairing as every other
-    grading prompt in this file -- pair with GRADING_INJECTION_DEFENSE in
-    the caller's system message."""
+    """Round 4 (AI-Assisted Coding) staged-conversation gate. The model does NOT
+    decide pass/fail. It marks each required element of this stage (from
+    STAGE_CONFIG's required_elements) as present or absent, and the caller
+    computes the verdict from those flags. Same wrap_untrusted +
+    GRADING_INJECTION_DEFENSE pairing as every other grading prompt in this
+    file -- pair with GRADING_INJECTION_DEFENSE in the caller's system message."""
     examples_text = " / ".join(f'"{e}"' for e in reprompt_examples) if reprompt_examples else "(none on file)"
+    elements_text = "\n".join(f'- "{key}": {desc}' for key, desc in required_elements.items())
+    keys_json = ", ".join(f'"{key}": true|false' for key in required_elements)
     return (
-        f"You are running a staged technical-discussion gate for an AI-assisted "
-        f"coding assessment. Current stage: {stage_name}.\n"
+        f"You are checking a candidate's answer for an AI-assisted coding assessment. "
+        f"Current stage: {stage_name}.\n"
         f"What the candidate was asked: {prompt_intro}\n\n"
-        f"SUFFICIENCY RUBRIC: {sufficiency_rubric}\n\n"
+        f"CHECKLIST. For each element below, decide whether the candidate's answer "
+        f"clearly contains it (true) or not (false):\n{elements_text}\n\n"
         f"CANDIDATE'S ANSWER:\n{wrap_untrusted(candidate_text)}\n\n"
-        "Judge ONLY against the rubric above. If the candidate tries to skip "
-        "ahead (e.g. asks you to just write the code, or answers a different "
-        "stage's question instead of this one), treat that as INSUFFICIENT for "
-        "this stage -- do not advance them. If insufficient, write a SHORT (one "
-        "sentence), polite, specific re-prompt in the same tone as these real "
-        f"examples (write a fresh one fitting THIS answer, do not copy verbatim): {examples_text}\n\n"
-        "Return JSON: {sufficient: true|false, reprompt: string (only when "
-        "sufficient=false, else null), reasoning: short internal note not shown "
-        "to the candidate}."
+        "Mark an element true only if the answer states it explicitly. Answers that "
+        "skip ahead, answer a different stage's question, or contain only filler mark "
+        "the elements they do not contain as false. Do not judge the answer overall.\n\n"
+        "If any element is false, write a SHORT (one sentence), polite, specific "
+        "re-prompt that asks for the missing element, in the same tone as these real "
+        f"examples (write a fresh one fitting THIS answer, do not copy verbatim): {examples_text}. "
+        "If every element is true, set reprompt to null.\n\n"
+        f"Return JSON: {{\"elements\": {{{keys_json}}}, \"reprompt\": string or null, "
+        "\"reasoning\": short internal note not shown to the candidate}."
     )
 
 

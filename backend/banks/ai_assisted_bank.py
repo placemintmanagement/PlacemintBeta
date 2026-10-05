@@ -1196,6 +1196,11 @@ STAGE_CONFIG = {
             "it tries to jump straight to a solution/code instead of "
             "demonstrating understanding of WHAT is being asked."
         ),
+        "required_elements": {
+            "goal_restated": "the answer restates the actual goal of the problem (what it asks the candidate to produce)",
+            "problem_terms": "the answer uses problem-specific technical terms, such as the actual data structure or operation involved",
+            "no_solution_jump": "the answer shows understanding of what is asked rather than jumping straight to a solution or code",
+        },
         "reprompt_examples": [
             "Could you elaborate a bit more using relevant technical terms or details?",
             "Please ensure your answer directly addresses the algorithmic concepts or structural conditions required.",
@@ -1213,6 +1218,10 @@ STAGE_CONFIG = {
             "vague, restates the problem instead of a strategy, or names a "
             "technique with no indication of how/why it applies."
         ),
+        "required_elements": {
+            "technique_named": "the answer names a real technique or data structure appropriate to this problem",
+            "application_explained": "the answer explains roughly how that technique applies to this specific problem",
+        },
         "reprompt_examples": [
             "Could you elaborate a bit more using relevant technical terms or details?",
         ],
@@ -1230,6 +1239,10 @@ STAGE_CONFIG = {
             "are explicitly stated (Big-O or equivalent informal phrasing is "
             "fine). INSUFFICIENT if only one is given, or neither."
         ),
+        "required_elements": {
+            "time_bound": "the answer explicitly states a time complexity (Big-O or equivalent informal phrasing)",
+            "space_bound": "the answer explicitly states a space complexity (Big-O or equivalent informal phrasing)",
+        },
         "reprompt_examples": [
             "Please ensure your answer directly addresses the algorithmic concepts or structural conditions required.",
         ],
@@ -1256,6 +1269,12 @@ STAGE_CONFIG = {
         ],
     },
 }
+
+# Free-text stage gate (understand / approach / complexity). The model marks each
+# required element present or absent; the caller passes the flags here and the
+# stage passes when the fraction present is at least this value. Code decides the
+# verdict; the model never returns an overall pass/fail.
+STAGE_SUFFICIENCY_THRESHOLD = 1.0
 
 # Button-driven stages -- fixed prompt text, Yes/No only, never free text.
 CONSENT_GATE = {
