@@ -200,12 +200,16 @@ export default function OARunner() {
         answers: sectionAnswers,
       });
       toast.success(`Section done. Score ${(data.section_result.score * 100).toFixed(0)}%`);
+      if (data.status === "completed") {
+        // Navigate with the tier before refreshing the attempt. The refreshed
+        // attempt is completed, so the render-time redirect below would
+        // otherwise replace this entry and drop the tier from its state.
+        navigate(`/attempt/${attemptId}/review`, { state: data.capgemini_tier ? { capgemini_tier: data.capgemini_tier } : null });
+        return;
+      }
       // Refresh attempt to move forward
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
-      if (data.status === "completed") {
-        navigate(`/attempt/${attemptId}/review`, { state: data.capgemini_tier ? { capgemini_tier: data.capgemini_tier } : null });
-      }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Submit failed");
     } finally { setSubmitting(false); }
@@ -226,11 +230,13 @@ export default function OARunner() {
         answers: answersMap,
       });
       toast.success(`Section done. Score ${(data.section_result.score * 100).toFixed(0)}%`);
+      if (data.status === "completed") {
+        // Same ordering as submitSection: navigate before the attempt refresh.
+        navigate(`/attempt/${attemptId}/review`, { state: data.capgemini_tier ? { capgemini_tier: data.capgemini_tier } : null });
+        return;
+      }
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
-      if (data.status === "completed") {
-        navigate(`/attempt/${attemptId}/review`, { state: data.capgemini_tier ? { capgemini_tier: data.capgemini_tier } : null });
-      }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Submit failed");
     } finally { setSubmitting(false); }
