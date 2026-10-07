@@ -758,7 +758,7 @@ def interview_plan_prompt(company: str, resume_projects: List[dict], difficulty_
         "prompt (a single plain string — no nested objects, no markdown headings, "
         "just the question the interviewer would say out loud), "
         "expected_signals: [2-3 short strings]}]}. "
-        f"Candidate projects: {proj_text}. "
+        f"Candidate projects: {wrap_untrusted(proj_text)}. "
         f"{dsa_line}"
         "2 project questions (reference the projects by name), and 3 fundamentals questions. "
         "CRITICAL: `prompt` MUST be a string, never an object."
