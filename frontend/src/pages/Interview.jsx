@@ -6,6 +6,7 @@ import Header from "../components/Header";
 import { TID } from "../testIds";
 import { SendHorizontal } from "lucide-react";
 import { PageShell, SectionLabel, PageTitle, Card, Button } from "../components/shared";
+import SparkInterview from "./SparkInterview";
 
 // Defensive: never trust a prompt/text field is a string. Legacy interview
 // documents in the DB may have object prompts from earlier LLM outputs.
@@ -93,6 +94,10 @@ export default function Interview() {
       toast.error(err.response?.data?.detail || "Failed to submit");
     } finally { setSubmitting(false); }
   };
+
+  // Capgemini Spark has its own screen (server-driven countdown and stages).
+  // Every other interview keeps the generic chat below.
+  if (interview?.mode === "spark") return <SparkInterview interviewId={interviewId} initial={interview} />;
 
   if (!interview) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Loading…</div></PageShell></div>;
 

@@ -84,6 +84,9 @@ from services.ai_service import (
     INTERVIEW_SYSTEM,
     GRADING_INJECTION_DEFENSE,
     flag_suspicious_grading,
+    spark_followup_prompt,
+    spark_project_flags_prompt,
+    spark_dsa_flags_prompt,
 )
 from banks import mcq_pool
 from banks import mcq_static_bank
@@ -96,6 +99,7 @@ from core import auth0_middleware
 # questions(...) etc.) were updated to capgemini_recruitment_process.<name>
 # accordingly; the function names themselves are unchanged.
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini import (
+    capgemini_interview,
     capgemini_recruitment_process,
 )
 from collections import Counter
@@ -3210,6 +3214,11 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
         if resume:
             resume_projects = resume.get("analysis", {}).get("extracted_projects", []) or []
 
+    # Capgemini Spark (text, 35 min): the server-side tier on the attempt picks
+    # the flow. dave, commit, null and every other company keep the plan below.
+    if capgemini_interview.is_spark((attempt.get("capgemini_tier") or {}).get("tier")):
+        return await _start_spark_interview(attempt, body.attempt_id, resume_projects, user)
+
     # If the source company defines an interview_difficulty (e.g. "Core
     # Assessment (Default)" wants medium-skew DSA), pass that hint through
     # so the interviewer LLM raises the DSA bar for this company.
@@ -3276,6 +3285,8 @@ async def get_interview(interview_id: str, user: Dict[str, Any] = Depends(requir
     doc = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Not found")
+    if doc.get("mode") == "spark":
+        return await _spark_refresh(doc)
     return doc
 
 
@@ -3289,6 +3300,8 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
     interview = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
     if not interview:
         raise HTTPException(404, "Not found")
+    if interview.get("mode") == "spark":
+        return await _spark_answer(interview, body)
     question = next((q for q in interview["questions"] if str(q.get("id")) == str(body.question_id)), None)
     if not question:
         raise HTTPException(404, "Question not found")
@@ -3313,6 +3326,256 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
                   "completed_at": iso(now_utc()) if status == "completed" else None}},
     )
     return {"grade": grade, "next_index": current_index, "status": status}
+
+
+# ---- Capgemini Spark interview (text, 35 minutes) --------------------------
+# Routes stay thin. Stage moves, the deadline, scoring and what the browser may
+# see live in capgemini_interview.py; prompts live in ai_service.py. Flags and
+# scores are stored on the interview document and never returned to the client.
+_SPARK_SYSTEM_WRITER = "You write interview follow-up questions. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE
+_SPARK_SYSTEM_GRADER = "You grade interview answers as an experienced engineer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE
+_SPARK_MODEL_ANSWER_CAP = 4000   # INTERPOLATED: characters of one answer sent to the model
+_SPARK_STORED_ANSWER_CAP = 8000  # INTERPOLATED: characters of one answer kept
+
+
+async def _spark_call(prompt: str, system: str, temperature: float, usage: list, purpose: str) -> Any:
+    sink: list = []
+    try:
+        out = await call_json_gpt(system, prompt, model=capgemini_interview.INTERVIEW_MODEL,
+                                  temperature=temperature, usage_sink=sink)
+    except Exception:
+        logger.exception("spark %s: model call failed", purpose)
+        out = None
+    usage.extend({**rec, "purpose": purpose} for rec in sink)
+    return out
+
+
+def _spark_verdict(raw: Any, fallback: str) -> str:
+    text = raw.get("verdict") if isinstance(raw, dict) else None
+    return " ".join(text.split())[:300] if isinstance(text, str) and text.strip() else fallback
+
+
+async def _spark_next_followup(interview: dict, state: dict, last_answer: str, now: float, usage: list,
+                               turns: list) -> dict:
+    wrap = capgemini_interview.wrap_up_now(state, now)
+    asked = [t["question"] for t in turns if t.get("stage") == "followups"]
+    raw = await _spark_call(spark_followup_prompt(interview["project_text"], last_answer, wrap, asked),
+                            _SPARK_SYSTEM_WRITER, capgemini_interview.WRITER_TEMPERATURE, usage, "write_followup")
+    text = raw.get("question") if isinstance(raw, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        text = capgemini_interview.FALLBACK_FOLLOWUP
+    return {"id": f"spark-f{state['followups_asked'] + 1}", "stage": "followups",
+            "prompt": " ".join(text.split())[:300]}
+
+
+async def _spark_grade_answer(prompt: str, usage: list, purpose: str, fallback: str):
+    raw = await _spark_call(prompt, _SPARK_SYSTEM_GRADER, capgemini_interview.GRADING_TEMPERATURE, usage, purpose)
+    return raw, _spark_verdict(raw, fallback)
+
+
+def _spark_score_doc(turns: list, dsa_flags: Optional[dict]) -> dict:
+    pf_flags = [t["flags"] for t in turns if t.get("stage") in ("project", "followups") and t.get("flags")]
+    return capgemini_interview.interview_score(
+        capgemini_interview.project_followups_score(pf_flags),
+        capgemini_interview.dsa_score(dsa_flags),
+    )
+
+
+def _spark_log_rejections(interview_id: str, question_id: str, rejections: list, answer: str) -> list:
+    """A flag whose quote failed the evidence check is false. The log line never
+    carries the candidate's answer: only the flag name, the rejection reason and
+    the first 80 characters of the quote. Returns one full record per rejection
+    (flag, reason, the answer, a timestamp) for the caller to store on the
+    interview document under a server-only field -- never logged, never returned
+    to the client, never sent to the report."""
+    records = []
+    now_iso = iso(now_utc())
+    for r in rejections:
+        logger.warning("spark interview %s question %s: flag %r rejected (%s); quote[:80]=%r",
+                       interview_id, question_id, r["flag"], r["reason"], str(r.get("quote") or "")[:80])
+        records.append({"question_id": question_id, "flag": r["flag"], "reason": r["reason"],
+                        "answer": answer, "timestamp": now_iso})
+    return records
+
+
+def _spark_report_answers(turns: list) -> list:
+    # Only graded turns go to the report (the ungraded intro is context, not a
+    # score). The 0-100 score is the element-flag score of that turn (INTERPOLATED).
+    return [{"question_id": t["question_id"], "answer": t["answer"],
+             "grade": {"one_line_verdict": t.get("verdict") or "",
+                       "score": round(100 * capgemini_interview.flags_score(t["flags"]))}}
+            for t in turns if t.get("flags")]
+
+
+async def _spark_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
+    # Optimistic guard: a double-submitted answer cannot advance the stage twice.
+    res = await db.interviews.update_one(
+        {"interview_id": interview["interview_id"], "turn_count": expected_turn_count},
+        {"$set": changes},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
+
+
+async def _spark_finish(interview: dict, now: float, timed_out: bool) -> None:
+    state = dict(interview["state"])
+    if timed_out:
+        capgemini_interview.finish_timed_out(state)
+    turns = interview.get("turns", [])
+    count = interview.get("turn_count", 0)
+    changes = {
+        "state": state, "status": state["status"], "current_question": None,
+        "spark_score": _spark_score_doc(turns, interview.get("dsa_flags")),
+        "answers": _spark_report_answers(turns), "completed_at": iso(now_utc()),
+        "turn_count": count + 1,
+    }
+    await _spark_persist(interview, count, changes)
+    interview.update(changes)
+
+
+async def _spark_finalize_if_expired(interview: dict) -> dict:
+    """Idempotent: a Spark interview past its deadline is closed as timed out
+    the first time anything reads it (the interview page, the report, or a
+    listing). Already-finished interviews are returned unchanged. If a
+    concurrent answer or finaliser wins the race, the stored state is re-read."""
+    now = now_utc().timestamp()
+    if interview["state"]["status"] != "in_progress" or not capgemini_interview.is_expired(interview["state"], now):
+        return interview
+    try:
+        await _spark_finish(interview, now, timed_out=True)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        fresh = await db.interviews.find_one({"interview_id": interview["interview_id"]}, {"_id": 0})
+        return fresh or interview
+    return interview
+
+
+async def _spark_refresh(interview: dict) -> dict:
+    interview = await _spark_finalize_if_expired(interview)
+    return capgemini_interview.client_view(interview, now_utc().timestamp())
+
+
+async def _start_spark_interview(attempt: dict, attempt_id: str, resume_projects: List[dict],
+                                 user: Dict[str, Any]) -> dict:
+    now = now_utc().timestamp()
+    chosen = capgemini_interview.pick_project(resume_projects)
+    interview = {
+        "interview_id": new_id("intv"),
+        "user_id": attempt["user_id"],
+        "attempt_id": attempt_id,
+        "company_name": attempt["company_name"],
+        "resume_id": attempt.get("resume_id"),
+        # Account name, validated (no email, no placeholder), used only for the
+        # closing message. Never sent to a model.
+        "candidate_name": capgemini_interview.usable_account_name(user.get("name"), user.get("email")),
+        "mode": "spark",
+        "state": capgemini_interview.new_state(now, capgemini_interview.spark_duration_seconds()),
+        "status": "in_progress",
+        "turn_count": 0,
+        "current_question": {"id": "spark-intro", "stage": "intro", "prompt": capgemini_interview.INTRO_QUESTION},
+        "project": chosen,
+        "project_text": capgemini_interview.project_text(chosen),
+        "dsa_problem_id": None,
+        "dsa_flags": None,
+        "turns": [],
+        "answers": [],
+        "usage": [],
+        "flag_review": [],
+        "spark_score": None,
+        "created_at": iso(now_utc()),
+    }
+    await db.interviews.insert_one(interview)
+    interview.pop("_id", None)
+    return capgemini_interview.client_view(interview, now)
+
+
+async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
+    now = now_utc().timestamp()
+    state = interview["state"]
+    if state["status"] != "in_progress":
+        raise HTTPException(409, {"code": "interview_closed", "message": "This interview is already finished."})
+    if capgemini_interview.is_expired(state, now):
+        await _spark_finish(interview, now, timed_out=True)
+        raise HTTPException(409, {"code": "time_up", "message": "Time is up. Your answers so far are saved."})
+    current = interview.get("current_question") or {}
+    if str(body.question_id) != str(current.get("id")):
+        raise HTTPException(409, {"code": "stale_question", "message": "That question is no longer open. Refresh to continue."})
+    answer = (body.answer or "").strip()
+    if not answer:
+        raise HTTPException(400, "Answer is empty")
+
+    stored = answer[:_SPARK_STORED_ANSWER_CAP]
+    model_answer = answer[:_SPARK_MODEL_ANSWER_CAP]
+    usage = list(interview.get("usage", []))
+    turns = list(interview.get("turns", []))
+    flag_review = list(interview.get("flag_review", []))
+    count = interview.get("turn_count", 0)
+    dsa_flags = interview.get("dsa_flags")
+    dsa_problem_id = interview.get("dsa_problem_id")
+    stage = state["stage"]
+    turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
+            "answer": stored, "verdict": None, "flags": None}
+    turns.append(turn)  # appended first so the follow-up writer sees the question just answered
+    nxt = None
+
+    if stage == "intro":
+        capgemini_interview.advance_after_intro(state, now)
+        nxt = {"id": "spark-project", "stage": "project",
+               "prompt": capgemini_interview.project_question(interview.get("project"))}
+    elif stage == "project":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project_text"])
+        raw, verdict = await _spark_grade_answer(prompt, usage, "grade_project", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.advance_after_project(state)
+        nxt = await _spark_next_followup(interview, state, model_answer, now, usage, turns)
+    elif stage == "followups":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project_text"])
+        raw, verdict = await _spark_grade_answer(prompt, usage, "grade_followup", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.advance_after_followup(state, now)
+        if state["stage"] == "followups":
+            nxt = await _spark_next_followup(interview, state, model_answer, now, usage, turns)
+        else:
+            problem = capgemini_interview.pick_dsa_problem()
+            dsa_problem_id = problem["id"]
+            nxt = {"id": "spark-dsa", "stage": "dsa", "prompt": capgemini_interview.dsa_question(problem)}
+    elif stage == "dsa":
+        problem = capgemini_interview.get_dsa_problem(dsa_problem_id)
+        complexity_only = state["dsa_turns"] >= 1
+        rub = problem["rubric"]
+        prompt = spark_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"],
+                                        model_answer, complexity_only)
+        raw, verdict = await _spark_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dsa_flags(raw, len(rub["required_approach"]), model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        if dsa_flags is None:
+            dsa_flags = flags
+        else:
+            dsa_flags = {**dsa_flags, "complexity_stated": dsa_flags["complexity_stated"] or flags["complexity_stated"]}
+        capgemini_interview.advance_after_dsa_turn(state, dsa_flags["complexity_stated"])
+        if state["stage"] != "done":
+            nxt = {"id": "spark-dsa-complexity", "stage": "dsa", "prompt": capgemini_interview.COMPLEXITY_QUESTION}
+
+    changes = {
+        "state": state, "status": state["status"], "current_question": nxt, "turns": turns,
+        "usage": usage, "dsa_problem_id": dsa_problem_id, "dsa_flags": dsa_flags,
+        "flag_review": flag_review, "turn_count": count + 1,
+    }
+    if state["status"] == "completed":
+        changes.update(
+            spark_score=_spark_score_doc(turns, dsa_flags),
+            answers=_spark_report_answers(turns),
+            completed_at=iso(now_utc()),
+        )
+    await _spark_persist(interview, count, changes)
+    interview.update(changes)
+    return capgemini_interview.client_view(interview, now)
 
 
 # =============================================================================
