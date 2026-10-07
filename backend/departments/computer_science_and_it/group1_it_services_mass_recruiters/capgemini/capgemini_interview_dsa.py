@@ -297,8 +297,8 @@ SPARK_DSA_PROBLEMS = [{'id': 'contains-duplicate',
   'rubric': {'required_approach': ['Describes a correct way to find the shortest root-to-leaf path: BFS '
                                    'stopping at the first leaf, or a DFS/recursive approach that correctly '
                                    'treats a node with only one child as NOT a leaf.',
-                                   'Handles a node with exactly one child correctly (a leaf has no children; '
-                                   'does not take min() against a missing child).'],
+                                   'Defines a leaf as a node with no children (both left and right missing), '
+                                   'so a node with one child is not treated as a leaf.'],
              'complexity': {'time': 'O(N)', 'space': 'O(W)'},
              'edge_cases': ['root only', 'root with exactly one child', 'a deep chain on one side'],
              'common_mistakes': ['Taking min(left, right) when one child is missing (gives 1 at the root)',
