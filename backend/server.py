@@ -3415,6 +3415,10 @@ async def _spark_persist(interview: dict, expected_turn_count: int, changes: dic
     )
     if res.matched_count == 0:
         raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
+    if changes.get("status") in ("completed", "timed_out"):
+        # The interview has ended: any report cached for this attempt was built
+        # without it, so drop it. The next report call regenerates with the interview.
+        await db.reports.delete_many({"attempt_id": interview["attempt_id"], "user_id": interview["user_id"]})
 
 
 async def _spark_finish(interview: dict, now: float, timed_out: bool) -> None:
@@ -4231,6 +4235,9 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
     }
 
     interview_doc = await db.interviews.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if interview_doc and interview_doc.get("mode") == "spark":
+        # An abandoned Spark interview is closed as timed out before the report reads it.
+        interview_doc = await _spark_finalize_if_expired(interview_doc)
     interview_summary = {"skipped": True}
     if interview_doc:
         answered = interview_doc.get("answers", [])
@@ -4242,7 +4249,12 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
             "completed": interview_doc.get("status") == "completed",
         }
 
-    cached = await db.reports.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    # A Spark attempt's report is neither read from nor written to the cache while
+    # its interview is still open: the report must not freeze without the interview.
+    spark_open = bool(interview_doc and interview_doc.get("mode") == "spark"
+                      and interview_doc["state"]["status"] == "in_progress")
+    cached = None if spark_open else await db.reports.find_one(
+        {"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
     if cached:
         return cached
 
@@ -4272,8 +4284,9 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
         "report": report,
         "created_at": iso(now_utc()),
     }
-    await db.reports.insert_one(doc)
-    doc.pop("_id", None)
+    if not spark_open:
+        await db.reports.insert_one(doc)
+        doc.pop("_id", None)
     return doc
 
 
