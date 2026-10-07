@@ -401,7 +401,8 @@ print(a)
     {
         "id": "merge-sorted", "title": "Merge Two Sorted Arrays", "difficulty": "Easy", "topic": "two_pointer_sliding_window",
         "statement": "Merge two sorted integer arrays and print the merged sorted array (space-separated).",
-        "input_format": "L1: n. L2: n ints. L3: m. L4: m ints.",
+        "input_format": "L1: n. L2: n ints. L3: m. L4: m ints. If n is 0, line 2 is omitted; if m is 0, "
+                        "the last line is omitted.",
         "output_format": "n+m sorted ints, space-separated.",
         "constraints": "0 \u2264 n,m \u2264 10^4",
         "reference_solution":
@@ -416,7 +417,7 @@ while i < n and j < m:
 out += a[i:]; out += b[j:]
 print(' '.join(map(str, out)))
 """,
-        "test_inputs": ["3\n1 3 5\n3\n2 4 6", "0\n0\n3\n1 2 3", "3\n1 2 3\n0\n0", "5\n1 1 1 1 1\n5\n2 2 2 2 2", "2\n-3 -1\n3\n-2 0 2"],
+        "test_inputs": ["3\n1 3 5\n3\n2 4 6", "0\n3\n1 2 3", "3\n1 2 3\n0", "5\n1 1 1 1 1\n5\n2 2 2 2 2", "2\n-3 -1\n3\n-2 0 2"],
     },
     # ------------------------------------------------------------------ MORE MEDIUM
     {
