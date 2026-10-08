@@ -77,10 +77,15 @@ class _Clock:
 
 
 def _candidate_text(prompt):
-    """The candidate's answer as the model sees it (inside the fence)."""
+    """The candidate's ANSWER as the model sees it (inside the fence). Some
+    prompts (e.g. spark_project_flags_prompt) fence more than one piece of
+    text -- project details for context, then the answer -- so this takes
+    the LAST fenced block, matching the convention that the actual answer
+    being graded is always fenced last."""
     open_tag = "<candidate_submission>\n"
-    start = prompt.index(open_tag) + len(open_tag)
-    return prompt[start:prompt.index("\n</candidate_submission>", start)]
+    close_tag = "\n</candidate_submission>"
+    start = prompt.rindex(open_tag) + len(open_tag)
+    return prompt[start:prompt.index(close_tag, start)]
 
 
 def _quote(prompt, present, mode="real"):

@@ -95,9 +95,13 @@ export default function Interview() {
     } finally { setSubmitting(false); }
   };
 
-  // Capgemini Spark has its own screen (server-driven countdown and stages).
-  // Every other interview keeps the generic chat below.
-  if (interview?.mode === "spark") return <SparkInterview interviewId={interviewId} initial={interview} />;
+  // Capgemini Spark and Dave share this screen (server-driven countdown and
+  // stages; SparkInterview.jsx has no Spark-specific literals, so Dave's
+  // different stage list/labels render the same way). Every other interview
+  // keeps the generic chat below.
+  if (interview?.mode === "spark" || interview?.mode === "dave") {
+    return <SparkInterview interviewId={interviewId} initial={interview} />;
+  }
 
   if (!interview) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Loading…</div></PageShell></div>;
 
