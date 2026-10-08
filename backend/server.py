@@ -87,6 +87,12 @@ from services.ai_service import (
     spark_followup_prompt,
     spark_project_flags_prompt,
     spark_dsa_flags_prompt,
+    dave_project2_prompt,
+    dave_project2_flags_prompt,
+    dave_dsa_flags_prompt,
+    dave_complexity_prompt,
+    dave_cs_flags_prompt,
+    dave_hr_flags_prompt,
 )
 from banks import mcq_pool
 from banks import mcq_static_bank
@@ -3214,10 +3220,13 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
         if resume:
             resume_projects = resume.get("analysis", {}).get("extracted_projects", []) or []
 
-    # Capgemini Spark (text, 35 min): the server-side tier on the attempt picks
-    # the flow. dave, commit, null and every other company keep the plan below.
+    # Capgemini Spark (text, 35 min) / Dave (text, 45 min): the server-side
+    # tier on the attempt picks the flow. commit, null and every other
+    # company keep the plan below.
     if capgemini_interview.is_spark((attempt.get("capgemini_tier") or {}).get("tier")):
         return await _start_spark_interview(attempt, body.attempt_id, resume_projects, user)
+    if capgemini_interview.is_dave((attempt.get("capgemini_tier") or {}).get("tier")):
+        return await _start_dave_interview(attempt, body.attempt_id, resume_projects, user)
 
     # If the source company defines an interview_difficulty (e.g. "Core
     # Assessment (Default)" wants medium-skew DSA), pass that hint through
@@ -3287,6 +3296,8 @@ async def get_interview(interview_id: str, user: Dict[str, Any] = Depends(requir
         raise HTTPException(404, "Not found")
     if doc.get("mode") == "spark":
         return await _spark_refresh(doc)
+    if doc.get("mode") == "dave":
+        return await _dave_refresh(doc)
     return doc
 
 
@@ -3302,6 +3313,8 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
         raise HTTPException(404, "Not found")
     if interview.get("mode") == "spark":
         return await _spark_answer(interview, body)
+    if interview.get("mode") == "dave":
+        return await _dave_answer(interview, body)
     question = next((q for q in interview["questions"] if str(q.get("id")) == str(body.question_id)), None)
     if not question:
         raise HTTPException(404, "Question not found")
@@ -3580,6 +3593,446 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
     await _spark_persist(interview, count, changes)
     interview.update(changes)
     return capgemini_interview.client_view(interview, now)
+
+
+# ---- Capgemini Dave interview (text, 45 minutes) ---------------------------
+# Same thin-routes discipline as Spark above. Dave's own state machine lives
+# in capgemini_interview.py as a parallel set of dave_* functions -- nothing
+# here calls or changes any Spark-only function, and nothing in
+# capgemini_interview.py's Spark functions was touched to build this.
+_DAVE_SYSTEM_WRITER = _SPARK_SYSTEM_WRITER
+_DAVE_SYSTEM_GRADER = _SPARK_SYSTEM_GRADER
+
+
+async def _dave_call(prompt: str, system: str, temperature: float, usage: list, purpose: str) -> Any:
+    sink: list = []
+    try:
+        out = await call_json_gpt(system, prompt, model=capgemini_interview.INTERVIEW_MODEL,
+                                  temperature=temperature, usage_sink=sink)
+    except Exception:
+        logger.exception("dave %s: model call failed", purpose)
+        out = None
+    usage.extend({**rec, "purpose": purpose} for rec in sink)
+    return out
+
+
+def _dave_verdict(raw: Any, fallback: str) -> str:
+    return _spark_verdict(raw, fallback)
+
+
+async def _dave_next_followup(interview: dict, state: dict, last_answer: str, now: float, usage: list,
+                              turns: list) -> dict:
+    wrap = capgemini_interview.dave_wrap_up_now(state, now)
+    asked = [t["question"] for t in turns if t.get("stage") == "followups"]
+    raw = await _dave_call(spark_followup_prompt(interview["project1_text"], last_answer, wrap, asked),
+                           _DAVE_SYSTEM_WRITER, capgemini_interview.WRITER_TEMPERATURE, usage, "write_followup")
+    text = raw.get("question") if isinstance(raw, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        text = capgemini_interview.FALLBACK_FOLLOWUP
+    return {"id": f"dave-f{state['followups_asked'] + 1}", "stage": "followups",
+            "prompt": " ".join(text.split())[:300]}
+
+
+async def _dave_project2_write(interview: dict, focus: str, last_answer: str, usage: list, turns: list) -> str:
+    asked1 = [t["question"] for t in turns if t.get("stage") in ("project1", "followups")]
+    asked2 = [t["question"] for t in turns if t.get("stage") == "project2"]
+    raw = await _dave_call(
+        dave_project2_prompt(interview["project2_text"], focus, last_answer, asked1, asked2),
+        _DAVE_SYSTEM_WRITER, capgemini_interview.WRITER_TEMPERATURE, usage, "write_project2",
+    )
+    text = raw.get("question") if isinstance(raw, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        text = capgemini_interview.FALLBACK_FOLLOWUP
+    return " ".join(text.split())[:300]
+
+
+async def _dave_grade_answer(prompt: str, usage: list, purpose: str, fallback: str):
+    raw = await _dave_call(prompt, _DAVE_SYSTEM_GRADER, capgemini_interview.GRADING_TEMPERATURE, usage, purpose)
+    return raw, _dave_verdict(raw, fallback)
+
+
+def _dave_score_doc(turns: list, dsa_flags: Optional[dict], time_flags: Optional[dict],
+                    space_flags: Optional[dict]) -> dict:
+    p1f_flags = [t["flags"] for t in turns if t.get("stage") in ("project1", "followups") and t.get("flags")]
+    p2_flags = [t["flags"] for t in turns if t.get("stage") == "project2" and t.get("flags")]
+    cs_flags = [t["flags"] for t in turns if t.get("stage") == "cs_fundamentals" and t.get("flags")]
+    hr_flags = [t["flags"] for t in turns if t.get("stage") == "hr" and t.get("flags")]
+    return capgemini_interview.dave_interview_score(
+        capgemini_interview.project_followups_score(p1f_flags),
+        capgemini_interview.project_followups_score(p2_flags),
+        capgemini_interview.dave_dsa_complexity_score(dsa_flags, time_flags, space_flags),
+        capgemini_interview.project_followups_score(cs_flags),
+        capgemini_interview.project_followups_score(hr_flags),
+    )
+
+
+def _dave_cs_advance_and_pick(state: dict, now: float, idx: int, cs_questions: list) -> Tuple[Optional[dict], Optional[list]]:
+    """After CS-fundamentals question `idx` (0-based) has been graded:
+    advance the stage machine and decide the next question. Returns
+    (next_question_or_None, hr_questions_or_None) -- hr_questions is set
+    only on the transition into the hr stage. `cs_questions` is mutated in
+    place to append a newly-picked Q3/Q4."""
+    if idx == 0:
+        capgemini_interview.dave_advance_after_cs(state, now, True)
+        return {"id": "dave-cs-1", "stage": "cs_fundamentals", "prompt": cs_questions[1]["text"]}, None
+    if idx == 1:
+        capgemini_interview.dave_advance_after_cs(state, now, True)
+        asked_ids = {q["id"] for q in cs_questions}
+        q3 = capgemini_interview.dave_cs_pick_weighted(asked_ids)
+        cs_questions.append(q3)
+        return {"id": "dave-cs-2", "stage": "cs_fundamentals", "prompt": q3["text"]}, None
+    if idx == 2:
+        ask_q4 = not capgemini_interview.dave_budget_exceeded(state, now, "cs_fundamentals")
+        capgemini_interview.dave_advance_after_cs(state, now, ask_q4)
+        if ask_q4:
+            asked_ids = {q["id"] for q in cs_questions}
+            q4 = capgemini_interview.dave_cs_pick_weighted(asked_ids)
+            cs_questions.append(q4)
+            return {"id": "dave-cs-3", "stage": "cs_fundamentals", "prompt": q4["text"]}, None
+        hr_pair, hr_second_category = capgemini_interview.dave_pick_hr_first_two()
+        state["hr_second_category"] = hr_second_category
+        return {"id": "dave-hr-0", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_pair[0])}, hr_pair
+    # idx == 3 (the optional fourth question, if it was asked)
+    capgemini_interview.dave_advance_after_cs(state, now, False)
+    hr_pair, hr_second_category = capgemini_interview.dave_pick_hr_first_two()
+    state["hr_second_category"] = hr_second_category
+    return {"id": "dave-hr-0", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_pair[0])}, hr_pair
+
+
+def _dave_hr_advance_and_pick(state: dict, now: float, idx: int, hr_questions: list) -> Optional[dict]:
+    """After HR question `idx` (0-based) has been graded: advance the stage
+    machine and decide the next question (or None when HR -- Dave's last
+    stage -- is over). `hr_questions` is mutated in place to append the
+    optional third question when it's drawn."""
+    if idx == 0:
+        capgemini_interview.dave_advance_after_hr(state, True)
+        return {"id": "dave-hr-1", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_questions[1])}
+    if idx == 1:
+        ask_third = not capgemini_interview.dave_budget_exceeded(state, now, "hr")
+        capgemini_interview.dave_advance_after_hr(state, ask_third)
+        if ask_third:
+            third = capgemini_interview.dave_pick_hr_third(state["hr_second_category"], hr_questions)
+            hr_questions.append(third)
+            return {"id": "dave-hr-2", "stage": "hr", "prompt": capgemini_interview.hr_question_text(third)}
+        return None
+    # idx == 2 (the optional third question, if it was asked)
+    capgemini_interview.dave_advance_after_hr(state, False)
+    return None
+
+
+def _dave_log_rejections(interview_id: str, question_id: str, rejections: list, answer: str) -> list:
+    """Same discipline as _spark_log_rejections: never logs the full answer."""
+    records = []
+    now_iso = iso(now_utc())
+    for r in rejections:
+        logger.warning("dave interview %s question %s: flag %r rejected (%s); quote[:80]=%r",
+                       interview_id, question_id, r["flag"], r["reason"], str(r.get("quote") or "")[:80])
+        records.append({"question_id": question_id, "flag": r["flag"], "reason": r["reason"],
+                        "answer": answer, "timestamp": now_iso})
+    return records
+
+
+def _dave_report_answers(turns: list) -> list:
+    return [{"question_id": t["question_id"], "answer": t["answer"],
+             "grade": {"one_line_verdict": t.get("verdict") or "",
+                       "score": round(100 * capgemini_interview.flags_score(t["flags"]))}}
+            for t in turns if t.get("flags")]
+
+
+async def _dave_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
+    res = await db.interviews.update_one(
+        {"interview_id": interview["interview_id"], "turn_count": expected_turn_count},
+        {"$set": changes},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
+    if changes.get("status") in ("completed", "timed_out"):
+        await db.reports.delete_many({"attempt_id": interview["attempt_id"], "user_id": interview["user_id"]})
+
+
+async def _dave_finish(interview: dict, now: float, timed_out: bool) -> None:
+    state = dict(interview["state"])
+    if timed_out:
+        capgemini_interview.finish_timed_out(state)
+    turns = interview.get("turns", [])
+    count = interview.get("turn_count", 0)
+    changes = {
+        "state": state, "status": state["status"], "current_question": None,
+        "dave_score": _dave_score_doc(turns, interview.get("dave_dsa_flags"), interview.get("dave_time_flags"),
+                                      interview.get("dave_space_flags")),
+        "answers": _dave_report_answers(turns), "completed_at": iso(now_utc()),
+        "turn_count": count + 1,
+    }
+    await _dave_persist(interview, count, changes)
+    interview.update(changes)
+
+
+async def _dave_finalize_if_expired(interview: dict) -> dict:
+    now = now_utc().timestamp()
+    if interview["state"]["status"] != "in_progress" or not capgemini_interview.is_expired(interview["state"], now):
+        return interview
+    try:
+        await _dave_finish(interview, now, timed_out=True)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        fresh = await db.interviews.find_one({"interview_id": interview["interview_id"]}, {"_id": 0})
+        return fresh or interview
+    return interview
+
+
+async def _dave_refresh(interview: dict) -> dict:
+    interview = await _dave_finalize_if_expired(interview)
+    return capgemini_interview.dave_client_view(interview, now_utc().timestamp())
+
+
+async def _start_dave_interview(attempt: dict, attempt_id: str, resume_projects: List[dict],
+                                user: Dict[str, Any]) -> dict:
+    now = now_utc().timestamp()
+    project1, project2 = capgemini_interview.dave_pick_two_projects(resume_projects)
+    interview = {
+        "interview_id": new_id("intv"),
+        "user_id": attempt["user_id"],
+        "attempt_id": attempt_id,
+        "company_name": attempt["company_name"],
+        "resume_id": attempt.get("resume_id"),
+        "candidate_name": capgemini_interview.usable_account_name(user.get("name"), user.get("email")),
+        "mode": "dave",
+        "state": capgemini_interview.dave_new_state(now, capgemini_interview.dave_duration_seconds()),
+        "status": "in_progress",
+        "turn_count": 0,
+        "current_question": {"id": "dave-intro", "stage": "intro", "prompt": capgemini_interview.INTRO_QUESTION},
+        "project1": project1,
+        "project1_text": capgemini_interview.project_text(project1),
+        "project2": project2,
+        "project2_text": capgemini_interview.project_text(project2),
+        "dave_dsa_problem_id": None,
+        "dave_dsa_flags": None,
+        "dave_dsa_answer": None,
+        "dave_time_flags": None,
+        "dave_space_flags": None,
+        "cs_questions": None,
+        "hr_questions": None,
+        "turns": [],
+        "answers": [],
+        "usage": [],
+        "flag_review": [],
+        "dave_score": None,
+        "created_at": iso(now_utc()),
+    }
+    await db.interviews.insert_one(interview)
+    interview.pop("_id", None)
+    return capgemini_interview.dave_client_view(interview, now)
+
+
+async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
+    now = now_utc().timestamp()
+    state = interview["state"]
+    if state["status"] != "in_progress":
+        raise HTTPException(409, {"code": "interview_closed", "message": "This interview is already finished."})
+    if capgemini_interview.is_expired(state, now):
+        await _dave_finish(interview, now, timed_out=True)
+        raise HTTPException(409, {"code": "time_up", "message": "Time is up. Your answers so far are saved."})
+    current = interview.get("current_question") or {}
+    if str(body.question_id) != str(current.get("id")):
+        raise HTTPException(409, {"code": "stale_question", "message": "That question is no longer open. Refresh to continue."})
+    answer = (body.answer or "").strip()
+    if not answer:
+        raise HTTPException(400, "Answer is empty")
+
+    stored = answer[:_SPARK_STORED_ANSWER_CAP]
+    model_answer = answer[:_SPARK_MODEL_ANSWER_CAP]
+    usage = list(interview.get("usage", []))
+    turns = list(interview.get("turns", []))
+    flag_review = list(interview.get("flag_review", []))
+    count = interview.get("turn_count", 0)
+    dsa_flags = interview.get("dave_dsa_flags")
+    dsa_answer = interview.get("dave_dsa_answer")
+    dsa_problem_id = interview.get("dave_dsa_problem_id")
+    time_flags = interview.get("dave_time_flags")
+    space_flags = interview.get("dave_space_flags")
+    cs_questions = interview.get("cs_questions")
+    hr_questions = interview.get("hr_questions")
+    stage = state["stage"]
+    is_nudge_reply = str(current.get("id") or "").endswith("-nudge")
+    turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
+            "answer": stored, "verdict": None, "flags": None}
+    turns.append(turn)
+    nxt = None
+
+    if stage == "intro":
+        capgemini_interview.dave_advance_after_intro(state, now)
+        nxt = {"id": "dave-project1", "stage": "project1",
+               "prompt": capgemini_interview.project_question(interview.get("project1"))}
+    elif stage == "project1":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project1", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.dave_advance_after_project1(state)
+        nxt = await _dave_next_followup(interview, state, model_answer, now, usage, turns)
+    elif stage == "followups":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_followup", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.dave_advance_after_followup(state, now)
+        if state["stage"] == "followups":
+            nxt = await _dave_next_followup(interview, state, model_answer, now, usage, turns)
+        else:
+            q_text = capgemini_interview.dave_project2_question(interview.get("project2"))
+            nxt = {"id": "dave-project2-overview", "stage": "project2", "prompt": q_text}
+    elif stage == "project2" and current["id"] == "dave-project2-overview":
+        capgemini_interview.dave_advance_after_project2_overview(state)
+        q_text = await _dave_project2_write(interview, capgemini_interview.DAVE_PROJECT2_ROLE_FOCUS,
+                                            model_answer, usage, turns)
+        nxt = {"id": "dave-project2-role", "stage": "project2", "prompt": q_text}
+    elif stage == "project2" and current["id"] == "dave-project2-role":
+        prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_role", "Your answer is recorded.")
+        role_flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
+        turn.update(flags=role_flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.dave_advance_after_project2_role(state)
+        q_text = await _dave_project2_write(interview, capgemini_interview.DAVE_PROJECT2_CHALLENGE_FOCUS,
+                                            model_answer, usage, turns)
+        nxt = {"id": "dave-project2-challenge", "stage": "project2", "prompt": q_text}
+    elif stage == "project2" and current["id"] == "dave-project2-challenge":
+        prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_challenge", "Your answer is recorded.")
+        challenge_flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
+        turn.update(flags=challenge_flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        role_flags = next((t["flags"] for t in turns if t.get("question_id") == "dave-project2-role"), None)
+        role_thin = role_flags is not None and not role_flags.get("own_contribution", False)
+        challenge_thin = not challenge_flags.get("challenge_described", False)
+        budget_ok = not capgemini_interview.dave_budget_exceeded(state, now, "project2")
+        ask_optional = (role_thin or challenge_thin) and budget_ok
+        capgemini_interview.dave_advance_after_project2_challenge(state, now, ask_optional)
+        if state["stage"] == "project2":
+            # INTERPOLATED tie-break: if both were thin, the optional question targets the role first.
+            focus = capgemini_interview.DAVE_PROJECT2_THIN_ROLE_FOCUS if role_thin else capgemini_interview.DAVE_PROJECT2_THIN_CHALLENGE_FOCUS
+            q_text = await _dave_project2_write(interview, focus, model_answer, usage, turns)
+            nxt = {"id": "dave-project2-optional", "stage": "project2", "prompt": q_text}
+        else:
+            problem = capgemini_interview.pick_dave_dsa_problem()
+            dsa_problem_id = problem["id"]
+            nxt = {"id": "dave-dsa", "stage": "dsa", "prompt": capgemini_interview.dsa_question(problem)}
+    elif stage == "project2" and current["id"] == "dave-project2-optional":
+        prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_optional", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.dave_advance_after_project2_optional(state, now)
+        problem = capgemini_interview.pick_dave_dsa_problem()
+        dsa_problem_id = problem["id"]
+        nxt = {"id": "dave-dsa", "stage": "dsa", "prompt": capgemini_interview.dsa_question(problem)}
+    elif stage == "dsa":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        rub = problem["rubric"]
+        prompt = dave_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"], model_answer)
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        dsa_flags = flags
+        dsa_answer = model_answer
+        capgemini_interview.dave_advance_after_dsa(state, now)
+        nxt = {"id": "dave-time-complexity", "stage": "time_complexity", "prompt": capgemini_interview.DAVE_TIME_COMPLEXITY_QUESTION}
+    elif stage == "time_complexity":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "time", model_answer)
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        time_flags = flags
+        capgemini_interview.dave_advance_after_time_complexity(state)
+        nxt = {"id": "dave-space-complexity", "stage": "space_complexity", "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
+    elif stage == "space_complexity":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "space", model_answer)
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        space_flags = flags
+        capgemini_interview.dave_advance_after_space_complexity(state, now)
+        cs_questions = [dict(q) for q in capgemini_interview.dave_cs_pick_first_two()]
+        nxt = {"id": "dave-cs-0", "stage": "cs_fundamentals", "prompt": cs_questions[0]["text"]}
+    elif stage == "cs_fundamentals" and not is_nudge_reply:
+        idx = state["cs_index"]
+        word_count = len(answer.split())
+        remaining = state["deadline_at"] - now
+        if capgemini_interview.dave_cs_needs_nudge(state, word_count, remaining):
+            capgemini_interview.dave_mark_cs_nudged(state)
+            nxt = {"id": f"dave-cs-{idx}-nudge", "stage": "cs_fundamentals", "prompt": capgemini_interview.CS_NUDGE_TEXT}
+        else:
+            q = cs_questions[idx]
+            prompt = dave_cs_flags_prompt(current["prompt"], q["key_points"], model_answer)
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
+            flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+            turn.update(flags=flags, verdict=verdict, rejections=rejections)
+            flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
+            if maybe_hr_questions is not None:
+                hr_questions = maybe_hr_questions
+    elif stage == "cs_fundamentals" and is_nudge_reply:
+        idx = state["cs_index"]
+        q = cs_questions[idx]
+        asked_prompt = turns[-2]["question"] if len(turns) >= 2 else current["prompt"]
+        prompt = dave_cs_flags_prompt(asked_prompt, q["key_points"], model_answer)
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
+        if maybe_hr_questions is not None:
+            hr_questions = maybe_hr_questions
+    elif stage == "hr" and not is_nudge_reply:
+        idx = state["hr_index"]
+        word_count = len(answer.split())
+        remaining = state["deadline_at"] - now
+        if capgemini_interview.dave_hr_needs_nudge(state, word_count, remaining):
+            capgemini_interview.dave_mark_hr_nudged(state)
+            nxt = {"id": f"dave-hr-{idx}-nudge", "stage": "hr", "prompt": capgemini_interview.HR_NUDGE_TEXT}
+        else:
+            prompt = dave_hr_flags_prompt(current["prompt"], model_answer)
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+            flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
+            turn.update(flags=flags, verdict=verdict, rejections=rejections)
+            flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            nxt = _dave_hr_advance_and_pick(state, now, idx, hr_questions)
+    elif stage == "hr" and is_nudge_reply:
+        idx = state["hr_index"]
+        prompt = dave_hr_flags_prompt(turns[-2]["question"] if len(turns) >= 2 else current["prompt"], model_answer)
+        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        nxt = _dave_hr_advance_and_pick(state, now, idx, hr_questions)
+
+    changes = {
+        "state": state, "status": state["status"], "current_question": nxt, "turns": turns,
+        "usage": usage, "dave_dsa_problem_id": dsa_problem_id, "dave_dsa_flags": dsa_flags,
+        "dave_dsa_answer": dsa_answer, "dave_time_flags": time_flags, "dave_space_flags": space_flags,
+        "cs_questions": cs_questions, "hr_questions": hr_questions, "flag_review": flag_review,
+        "turn_count": count + 1,
+    }
+    if state["status"] == "completed":
+        changes.update(
+            dave_score=_dave_score_doc(turns, dsa_flags, time_flags, space_flags),
+            answers=_dave_report_answers(turns),
+            completed_at=iso(now_utc()),
+        )
+    await _dave_persist(interview, count, changes)
+    interview.update(changes)
+    return capgemini_interview.dave_client_view(interview, now)
 
 
 # =============================================================================
@@ -4238,6 +4691,9 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
     if interview_doc and interview_doc.get("mode") == "spark":
         # An abandoned Spark interview is closed as timed out before the report reads it.
         interview_doc = await _spark_finalize_if_expired(interview_doc)
+    elif interview_doc and interview_doc.get("mode") == "dave":
+        # Same idempotent timeout-finalization, for an abandoned Dave interview.
+        interview_doc = await _dave_finalize_if_expired(interview_doc)
     interview_summary = {"skipped": True}
     if interview_doc:
         answered = interview_doc.get("answers", [])
@@ -4249,11 +4705,12 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
             "completed": interview_doc.get("status") == "completed",
         }
 
-    # A Spark attempt's report is neither read from nor written to the cache while
-    # its interview is still open: the report must not freeze without the interview.
-    spark_open = bool(interview_doc and interview_doc.get("mode") == "spark"
+    # A Spark or Dave attempt's report is neither read from nor written to the
+    # cache while its interview is still open: the report must not freeze
+    # without the interview.
+    capgemini_interview_open = bool(interview_doc and interview_doc.get("mode") in ("spark", "dave")
                       and interview_doc["state"]["status"] == "in_progress")
-    cached = None if spark_open else await db.reports.find_one(
+    cached = None if capgemini_interview_open else await db.reports.find_one(
         {"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
     if cached:
         return cached
@@ -4284,7 +4741,7 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
         "report": report,
         "created_at": iso(now_utc()),
     }
-    if not spark_open:
+    if not capgemini_interview_open:
         await db.reports.insert_one(doc)
         doc.pop("_id", None)
     return doc
