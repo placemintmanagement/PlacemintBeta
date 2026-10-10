@@ -19,10 +19,10 @@ import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
 from services.ai_service import GPT_MINI
-from .capgemini_interview_dsa import SPARK_DSA_PROBLEMS
-from .capgemini_interview_dsa_dave import DAVE_DSA_PROBLEMS
-from .capgemini_interview_hr import select_hr_first_two, select_hr_third, question_text as hr_question_text
-from .capgemini_interview_cs import (
+from .spark.dsa import SPARK_DSA_PROBLEMS
+from .dave.dsa import DAVE_DSA_PROBLEMS
+from .dave.hr import select_hr_first_two, select_hr_third, question_text as hr_question_text
+from .dave.cs import (
     OOPS_QUESTIONS as CS_OOPS_QUESTIONS,
     SQL_QUESTIONS as CS_SQL_QUESTIONS,
     OS_QUESTIONS as CS_OS_QUESTIONS,

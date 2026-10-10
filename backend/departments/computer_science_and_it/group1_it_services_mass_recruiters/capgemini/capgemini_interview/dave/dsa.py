@@ -2,8 +2,8 @@
 """Dave interview Medium DSA problems and rubrics (Capgemini Dave tier only).
 
 14 Medium-difficulty problems, none used by Round 3 (debugging_bank), Round 4
-(ai_assisted_bank) or the Spark DSA bank (capgemini_interview_dsa.py) -- see
-the audit in the build report. Copied from banks/problem_bank.py's _RAW,
+(ai_assisted_bank) or the Spark DSA bank (capgemini_interview/spark/dsa.py) --
+see the audit in the build report. Copied from banks/problem_bank.py's _RAW,
 unmodified, except: two input_format strings that document an existing
 omit-the-line-when-the-count-is-0 convention for a count that can legitimately
 be 0 under that problem's own constraints (dp-longest-increasing-subsequence's

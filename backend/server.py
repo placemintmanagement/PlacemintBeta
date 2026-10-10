@@ -3343,8 +3343,8 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
 
 # ---- Capgemini Spark interview (text, 35 minutes) --------------------------
 # Routes stay thin. Stage moves, the deadline, scoring and what the browser may
-# see live in capgemini_interview.py; prompts live in ai_service.py. Flags and
-# scores are stored on the interview document and never returned to the client.
+# see live in capgemini_interview/core.py; prompts live in ai_service.py. Flags
+# and scores are stored on the interview document and never returned to the client.
 _SPARK_SYSTEM_WRITER = "You write interview follow-up questions. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE
 _SPARK_SYSTEM_GRADER = "You grade interview answers as an experienced engineer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE
 _SPARK_MODEL_ANSWER_CAP = 4000   # INTERPOLATED: characters of one answer sent to the model
@@ -3597,9 +3597,9 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
 
 # ---- Capgemini Dave interview (text, 45 minutes) ---------------------------
 # Same thin-routes discipline as Spark above. Dave's own state machine lives
-# in capgemini_interview.py as a parallel set of dave_* functions -- nothing
-# here calls or changes any Spark-only function, and nothing in
-# capgemini_interview.py's Spark functions was touched to build this.
+# in capgemini_interview/core.py as a parallel set of dave_* functions --
+# nothing here calls or changes any Spark-only function, and nothing in
+# capgemini_interview/core.py's Spark functions was touched to build this.
 _DAVE_SYSTEM_WRITER = _SPARK_SYSTEM_WRITER
 _DAVE_SYSTEM_GRADER = _SPARK_SYSTEM_GRADER
 
