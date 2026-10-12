@@ -26,6 +26,12 @@ const { test, expect } = require("@playwright/test");
 // gated by a REAL GPT-4o mini judgment call happening live during this test.
 
 test("AI-Assisted Coding preview: real click-through of the full good path, real GPT-4o mini calls throughout", async ({ page }) => {
+  // Dev/test OpenAI-spend-cutting pass (2026-10): this test makes real,
+  // live, billed GPT-4o mini calls on every stage by design (see the file
+  // header) -- opt-in only, so a plain `npm run test:e2e` run (no CI
+  // workflow currently runs it automatically either) never burns money by
+  // accident.
+  test.skip(process.env.RUN_LIVE_E2E !== "1", "needs RUN_LIVE_E2E=1 -- makes real, billed GPT-4o mini calls");
   test.setTimeout(180_000);
 
   // Fixed problem_id (not a random draw) -- same problem + same tailored

@@ -22,6 +22,10 @@ const TEST_TOKEN = process.env.TEST_AUTH_TOKEN;
 const BACKEND_URL = `http://localhost:${process.env.TEST_BACKEND_PORT || 8899}/api`;
 
 test("Capgemini Round 4 (AI-Assisted Coding), wired into the real OA flow: full good path via the real rendered UI", async ({ page, request }) => {
+  // Dev/test OpenAI-spend-cutting pass (2026-10): real, live, billed GPT-4o
+  // mini calls by design (see file header) -- opt-in only, so a plain
+  // `npm run test:e2e` run never burns money by accident.
+  test.skip(process.env.RUN_LIVE_E2E !== "1", "needs RUN_LIVE_E2E=1 -- makes real, billed GPT-4o mini calls");
   test.setTimeout(180_000);
 
   // ---- 1. Start a real Capgemini attempt, wait for full generation ----
