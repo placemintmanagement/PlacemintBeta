@@ -15,6 +15,56 @@ import services.ai_service as ai_service
 from commit_support import commit_world  # noqa: F401
 
 
+# ---- Part A: gpt-5.4-mini pricing defaults ---------------------------------
+# Defaults are read from the environment once, at module import time, so
+# testing them honestly means a fresh process per case (importlib.reload
+# would leave stale singletons/double atexit registrations behind for every
+# later test in this session) -- subprocess gives a clean process boundary,
+# the same way an env-var override actually gets applied in real use.
+
+def _pricing_in_subprocess(env_overrides: dict) -> dict:
+    import json
+    import os
+    import subprocess
+    import sys
+    code = (
+        "import json, services.ai_service as a; "
+        "print(json.dumps({'input': a._GPT_MINI_INPUT_USD_PER_1M, "
+        "'output': a._GPT_MINI_OUTPUT_USD_PER_1M, 'inr': a._USD_TO_INR}))"
+    )
+    env = dict(os.environ)
+    for k in ("GPT_MINI_INPUT_USD_PER_1M", "GPT_MINI_OUTPUT_USD_PER_1M", "USD_TO_INR"):
+        env.pop(k, None)
+    env.update(env_overrides)
+    result = subprocess.run([sys.executable, "-c", code], cwd=os.path.dirname(__file__) + "/..",
+                             env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_pricing_defaults_match_gpt_5_4_mini_rate_card():
+    values = _pricing_in_subprocess({})
+    assert values == {"input": 0.75, "output": 4.50, "inr": 88.0}
+
+
+def test_pricing_defaults_are_env_overridable():
+    values = _pricing_in_subprocess(
+        {"GPT_MINI_INPUT_USD_PER_1M": "1.23", "GPT_MINI_OUTPUT_USD_PER_1M": "9.87", "USD_TO_INR": "90"}
+    )
+    assert values == {"input": 1.23, "output": 9.87, "inr": 90.0}
+
+
+def test_record_model_call_computes_cost_at_the_gpt_5_4_mini_rate(monkeypatch):
+    monkeypatch.setattr(ai_service, "_GPT_MINI_INPUT_USD_PER_1M", 0.75)
+    monkeypatch.setattr(ai_service, "_GPT_MINI_OUTPUT_USD_PER_1M", 4.50)
+    monkeypatch.setattr(ai_service, "_USD_TO_INR", 88.0)
+    ai_service.reset_model_call_stats()
+    ai_service._record_model_call("gpt-5.4-mini", prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    stats = ai_service.get_model_call_stats()
+    assert stats["est_cost_usd"] == pytest.approx(0.75 + 4.50)  # 1M in + 1M out, at the rate card
+    assert stats["est_cost_usd"] * ai_service._USD_TO_INR == pytest.approx((0.75 + 4.50) * 88)
+
+
 # ---- Part 4: dev cache is OFF by default -----------------------------------
 
 def test_dev_model_cache_off_by_default(monkeypatch):

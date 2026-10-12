@@ -77,15 +77,11 @@ def _get_openai_client() -> AsyncOpenAI:
 # DEV_MAX_MODEL_CALLS cap below, which defaults to 0 = unlimited, so
 # production (which never sets it) is unchanged.
 #
-# Pricing note: gpt-5.4-mini has no public rate card (it is this codebase's
-# forward-looking model id, not a model that exists today). The defaults
-# below approximate real-world gpt-4o-mini list pricing as the closest real
-# analog (per frontend/e2e/ai-assisted-preview.spec.js's own comment calling
-# this call path "GPT-4o mini"). Override via env if actual billed rates
-# differ -- this is a dev-visibility estimate only, never shown to a
-# candidate and never used to alter grading.
-_GPT_MINI_INPUT_USD_PER_1M = float(os.environ.get("GPT_MINI_INPUT_USD_PER_1M", "0.15"))
-_GPT_MINI_OUTPUT_USD_PER_1M = float(os.environ.get("GPT_MINI_OUTPUT_USD_PER_1M", "0.60"))
+# Pricing note: gpt-5.4-mini rate card, per 1M tokens. Env-overridable if
+# actual billed rates differ -- this is a dev-visibility estimate only,
+# never shown to a candidate and never used to alter grading.
+_GPT_MINI_INPUT_USD_PER_1M = float(os.environ.get("GPT_MINI_INPUT_USD_PER_1M", "0.75"))
+_GPT_MINI_OUTPUT_USD_PER_1M = float(os.environ.get("GPT_MINI_OUTPUT_USD_PER_1M", "4.50"))
 _USD_TO_INR = float(os.environ.get("USD_TO_INR", "88"))
 
 _model_call_stats: Dict[str, Any] = {
