@@ -3364,12 +3364,24 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
     interview = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
     if not interview:
         raise HTTPException(404, "Not found")
-    if interview.get("mode") == "spark":
-        return _capgemini_tag_view(await _spark_answer(interview, body))
-    if interview.get("mode") == "dave":
-        return _capgemini_tag_view(await _dave_answer(interview, body))
-    if interview.get("mode") == "commit":
-        return _capgemini_tag_view(await _commit_answer(interview, body))
+    if interview.get("mode") in ("spark", "dave", "commit"):
+        # Atomic claim BEFORE dispatching into the tier's own answer function
+        # at all -- see _claim_turn_or_409's docstring. A genuine concurrent
+        # double-submit on the same still-open question is rejected here with
+        # zero model calls, rather than reaching _spark_answer/_dave_answer/
+        # _commit_answer's own grading/writer calls first and only losing
+        # later at persist time.
+        claim = await _claim_turn_or_409(interview, now_utc().timestamp())
+        try:
+            if interview["mode"] == "spark":
+                result = await _spark_answer(interview, body)
+            elif interview["mode"] == "dave":
+                result = await _dave_answer(interview, body)
+            else:
+                result = await _commit_answer(interview, body)
+        finally:
+            await _release_turn_claim(interview, claim)
+        return _capgemini_tag_view(result)
     question = next((q for q in interview["questions"] if str(q.get("id")) == str(body.question_id)), None)
     if not question:
         raise HTTPException(404, "Question not found")
@@ -3473,6 +3485,90 @@ def _spark_report_answers(turns: list) -> list:
              "grade": {"one_line_verdict": t.get("verdict") or "",
                        "score": round(100 * capgemini_interview.flags_score(t["flags"]))}}
             for t in turns if t.get("flags")]
+
+
+# ---- Shared turn-claim guard (Spark/Dave/Commit) ---------------------------
+# A concurrent double-submit on the same still-open question used to reach
+# the real grading/writer model call(s) on BOTH requests -- only the later
+# turn_count-guarded persist (_spark_persist/_dave_persist/_commit_persist
+# below, UNCHANGED) was exclusive, so the losing request still paid for a
+# real call it was always going to lose. _claim_turn_or_409 closes that gap
+# at the top of submit_interview_answer (below), before dispatching into
+# _spark_answer/_dave_answer/_commit_answer at all -- so it is in place
+# before any of their own checks, let alone a grading/writer call. It does
+# not replace the turn_count persist guard -- it is an earlier, cheaper
+# rejection in front of it, and every dispatch is wrapped so the claim is
+# released in a `finally` regardless of how that dispatch call ends.
+_TURN_CLAIM_STALE_SECONDS = 60
+
+
+def _turn_claim_is_stale(claim: Optional[dict], now: float) -> bool:
+    """A crashed process (or any path that raises before the route's own
+    `finally` runs) could leave `in_flight` set forever otherwise -- after
+    this many seconds a claim is treated as abandoned and may be
+    overridden, so a single bad request can never wedge an interview."""
+    if not claim:
+        return False
+    claimed_at = claim.get("claimed_at")
+    if not isinstance(claimed_at, (int, float)):
+        return True  # malformed marker -- treat as stale rather than wedge the interview
+    return (now - claimed_at) > _TURN_CLAIM_STALE_SECONDS
+
+
+async def _claim_turn_or_409(interview: dict, now: float) -> Optional[dict]:
+    """Atomic compare-and-swap on `in_flight`, keyed by {interview_id,
+    turn_count, current_question} -- turn_count is the SAME atomicity key
+    the persist guard already uses; current_question is matched by whole-
+    object equality (not a dot-path lookup) so this also only ever claims
+    the question the caller actually fetched, without needing a Mongo
+    dot-notation query. `prior` is whatever this request's own (already-
+    fetched) copy of the interview showed for `in_flight` -- the CAS
+    re-checks that against the LIVE document atomically, so a second
+    concurrent request that raced in after `prior` was captured still
+    correctly loses here, with zero model calls made. Raises 409
+    immediately (no DB round-trip) when the fast, in-memory check alone
+    already shows a live, non-stale claim held by someone else.
+
+    Returns None for a company/mode this guard does not apply to (no
+    current_question at all -- the generic, non-Capgemini interview path),
+    so the caller can skip claiming/releasing entirely; otherwise returns
+    the new claim dict to pass to _release_turn_claim in a `finally`."""
+    current_question = interview.get("current_question")
+    if current_question is None:
+        return None
+    prior = interview.get("in_flight")
+    if prior and not _turn_claim_is_stale(prior, now):
+        raise HTTPException(409, {"code": "turn_in_progress",
+                                   "message": "That question is already being answered. Please wait a moment and refresh."})
+    claim = {"question_id": str(current_question.get("id")), "claimed_at": now}
+    result = await db.interviews.update_one(
+        {"interview_id": interview["interview_id"], "turn_count": interview.get("turn_count", 0),
+         "current_question": current_question, "in_flight": prior},
+        {"$set": {"in_flight": claim}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(409, {"code": "turn_in_progress",
+                                   "message": "That question is already being answered. Please wait a moment and refresh."})
+    interview["in_flight"] = claim
+    return claim
+
+
+async def _release_turn_claim(interview: dict, claim: Optional[dict]) -> None:
+    """Best-effort clear, called in a `finally` block around every
+    dispatch call _claim_turn_or_409 guards. A no-op if `claim` is None
+    (nothing was ever claimed) or if the live document's `in_flight` no
+    longer equals exactly this claim (someone/something else already
+    cleared or overrode it, e.g. a stale-claim override) -- this only
+    does real work on the ordinary path, where nothing else clears it."""
+    if claim is None:
+        return
+    try:
+        await db.interviews.update_one(
+            {"interview_id": interview["interview_id"], "in_flight": claim},
+            {"$set": {"in_flight": None}},
+        )
+    except Exception:
+        logger.exception("failed to release turn claim for interview %s", interview.get("interview_id"))
 
 
 async def _spark_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
