@@ -22,11 +22,11 @@ from spark_support import (
 def test_only_designed_spark_tier_gets_the_new_flow():
     assert ci.is_spark("spark") is True
     assert ci.is_spark("dave") is False  # dave is now designed, but as its own flow, not Spark's
-    assert ci.is_spark("commit") is False
+    assert ci.is_spark("commit") is False  # commit is now designed too, but as its own flow, not Spark's
     assert ci.is_spark(None) is False
     assert ci.is_spark("unknown") is False
-    assert ci.tier_entry("commit")["status"] == "not_designed"
-    assert ci.tier_entry("commit")["stages"] == []
+    assert ci.tier_entry("commit")["status"] == "designed"
+    assert ci.tier_entry("commit")["stages"] != []
 
 
 def test_only_designed_dave_tier_gets_the_dave_flow():
@@ -403,10 +403,10 @@ def test_usage_is_recorded_per_call(world):
     assert all(u["prompt_tokens"] == 100 for u in usage)
 
 
-def test_commit_and_null_tiers_keep_the_generic_plan(world, monkeypatch):
-    # dave used to be in this loop too, back when it was not_designed; now
-    # that it has its own flow (test_dave_interview.py), only commit (still
-    # not_designed) and no tier at all keep the generic plan.
+def test_null_tier_keeps_the_generic_plan(world, monkeypatch):
+    # dave and commit used to be in this loop too, back when each was still
+    # not_designed; now that both have their own flow (test_dave_interview.py,
+    # test_commit_interview.py), only no tier at all keeps the generic plan.
     plan_calls = []
 
     async def plan(system, prompt, **kwargs):
@@ -414,14 +414,11 @@ def test_commit_and_null_tiers_keep_the_generic_plan(world, monkeypatch):
         return {"questions": [{"id": "q1", "kind": "dsa", "prompt": "Generic question?", "expected_signals": []}]}
 
     monkeypatch.setattr(server, "call_json", plan)
-    for tier in ("commit", None):
-        world.db.oa_attempts.docs[0]["capgemini_tier"] = {"tier": tier} if tier else None
-        if tier is None:
-            world.db.oa_attempts.docs[0].pop("capgemini_tier", None)
-        doc = _start(world)
-        assert "mode" not in doc
-        assert doc["questions"][0]["prompt"] == "Generic question?"
-    assert len(plan_calls) == 2
+    world.db.oa_attempts.docs[0].pop("capgemini_tier", None)
+    doc = _start(world)
+    assert "mode" not in doc
+    assert doc["questions"][0]["prompt"] == "Generic question?"
+    assert len(plan_calls) == 1
     assert world.model.calls == []  # the Spark model never runs for other tiers
 
 

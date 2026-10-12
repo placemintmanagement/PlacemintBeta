@@ -96,10 +96,10 @@ export default function Interview() {
   };
 
   // Capgemini Spark and Dave share this screen (server-driven countdown and
-  // stages; SparkInterview.jsx has no Spark-specific literals, so Dave's
-  // different stage list/labels render the same way). Every other interview
-  // keeps the generic chat below.
-  if (interview?.mode === "spark" || interview?.mode === "dave") {
+  // stages; SparkInterview.jsx has no Spark-specific literals, so Dave's and
+  // Commit's different stage lists/labels render the same way). Every other
+  // interview keeps the generic chat below.
+  if (interview?.mode === "spark" || interview?.mode === "dave" || interview?.mode === "commit") {
     return <SparkInterview interviewId={interviewId} initial={interview} />;
   }
 

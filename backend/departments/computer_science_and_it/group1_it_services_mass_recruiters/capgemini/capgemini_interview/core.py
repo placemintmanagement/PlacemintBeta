@@ -6,9 +6,12 @@ Tags on every constant:
   INTERPOLATED -- my choice to fill a gap in the spec; pending the owner's review.
   CONFIRMED    -- verified by the owner (none yet for the Spark flow).
 
-Only the Spark tier has a designed flow. Dave and Commit are "not_designed":
-their entries are empty and they keep the generic interview. Any tier that is
-not "designed", and every non-Capgemini company, keeps the generic interview.
+Spark, Dave and Commit all have a designed flow. Any tier that is not
+"designed", and every non-Capgemini company, keeps the generic interview.
+Commit's own stage machine (budgets, weights, selection) lives in
+commit/flow.py, not here -- this file's only Commit-specific content is the
+TIER_TABLE entry below, so the owner's "do not change Dave code or banks,
+other tiers, or problem_bank.py" instruction holds with one line changed.
 
 This module is pure: no imports from server.py, no database, no clock, no LLM.
 server.py calls these functions and ai_service.py builds the prompts.
@@ -135,7 +138,24 @@ TIER_TABLE: Dict[str, Dict[str, Any]] = {
         "weights": dict(DAVE_WEIGHTS),
         "comment": "Designed: text interview, 55 minutes, server-enforced deadline.",
     },
-    "commit": dict(_EMPTY_TIER),
+    "commit": {
+        "status": "designed",
+        "duration_seconds": 75 * 60,
+        "stages": ["intro", "project1", "project1_followups", "project2", "project2_followups", "dsa",
+                   "time_complexity", "space_complexity", "cs_grilling", "hr", "done"],
+        "budgets_seconds": {"intro": 180, "project1_followups": 840, "project2_followups": 720, "dsa": 900,
+                           "complexity": 240, "cs_grilling": 900, "hr": 360, "buffer": 360},
+        "followups": {"project1_min": 6, "project1_max": 7, "project2_min": 5, "project2_max": 6},
+        "signals": {"project1": list(PROJECT_SIGNALS), "project2": list(PROJECT_SIGNALS),
+                    "dsa": ["approach elements from the rubric", "edge cases named",
+                            "efficiency (with one more-efficient-approach nudge)"],
+                    "complexity": list(DAVE_COMPLEXITY_SIGNALS),
+                    "cs_grilling": ["key points from the Java/OOPs/SQL bank, main question + follow-ups"],
+                    "hr": list(HR_SIGNALS)},
+        "weights": {"project1": 0.18, "project2": 0.18, "dsa_complexity": 0.24, "cs_grilling": 0.28, "hr": 0.12},
+        "comment": "Designed: text interview, 75 minutes, server-enforced deadline. Stage machine lives in "
+                   "capgemini_interview/commit/flow.py.",
+    },
 }
 
 STAGE_LABELS = {
