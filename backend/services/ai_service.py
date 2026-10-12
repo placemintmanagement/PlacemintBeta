@@ -24,6 +24,7 @@ existing callers (mcq_pool.py reads HAIKU[1]/SONNET[1] directly) — only model[
 vestigial but left in place rather than touching every call site that reads it.
 """
 from __future__ import annotations
+import atexit
 import os
 import json
 import re
@@ -66,6 +67,87 @@ def _get_openai_client() -> AsyncOpenAI:
     if _openai_client is None:
         _openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
     return _openai_client
+
+
+# ---- Dev/test spend guard & observability (2026-10 cost-cutting pass) -----
+# Process-wide, in-memory only (never persisted, never sent anywhere) counter
+# around call_json_gpt -- the ONE function in this file, and in the whole
+# codebase, that reaches real OpenAI. Always-on counting/logging is harmless
+# in production (a counter and a log line); the only behaviour change is the
+# DEV_MAX_MODEL_CALLS cap below, which defaults to 0 = unlimited, so
+# production (which never sets it) is unchanged.
+#
+# Pricing note: gpt-5.4-mini has no public rate card (it is this codebase's
+# forward-looking model id, not a model that exists today). The defaults
+# below approximate real-world gpt-4o-mini list pricing as the closest real
+# analog (per frontend/e2e/ai-assisted-preview.spec.js's own comment calling
+# this call path "GPT-4o mini"). Override via env if actual billed rates
+# differ -- this is a dev-visibility estimate only, never shown to a
+# candidate and never used to alter grading.
+_GPT_MINI_INPUT_USD_PER_1M = float(os.environ.get("GPT_MINI_INPUT_USD_PER_1M", "0.15"))
+_GPT_MINI_OUTPUT_USD_PER_1M = float(os.environ.get("GPT_MINI_OUTPUT_USD_PER_1M", "0.60"))
+_USD_TO_INR = float(os.environ.get("USD_TO_INR", "88"))
+
+_model_call_stats: Dict[str, Any] = {
+    "calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "est_cost_usd": 0.0,
+}
+
+
+def _dev_max_model_calls() -> int:
+    """DEV_MAX_MODEL_CALLS: default 0 = unlimited (production default,
+    unchanged). Any positive value raises once that many real calls have
+    already been made, before the next one is sent."""
+    try:
+        return int(os.environ.get("DEV_MAX_MODEL_CALLS", "0"))
+    except ValueError:
+        return 0
+
+
+def get_model_call_stats() -> Dict[str, Any]:
+    """Read-only snapshot for tests/scripts to assert on or print."""
+    return dict(_model_call_stats)
+
+
+def reset_model_call_stats() -> None:
+    """Dev/test only -- lets a test session or script start its counter at
+    zero rather than accumulating across unrelated runs in the same process."""
+    _model_call_stats.update(calls=0, prompt_tokens=0, completion_tokens=0, est_cost_usd=0.0)
+
+
+def print_model_call_summary() -> None:
+    """One-line summary, printed once at process exit (see atexit.register
+    below) -- only if the real client was actually used, so a fully-mocked
+    pytest run or script prints nothing extra."""
+    stats = _model_call_stats
+    if stats["calls"] == 0:
+        return
+    line = f"calls={stats['calls']} est_cost=₹{stats['est_cost_usd'] * _USD_TO_INR:.2f}"
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        # Some Windows console codepages (cp1252) can't encode ₹ (Rs
+        # sign); fall back to an ASCII-safe rendering rather than crashing
+        # the atexit hook (which would otherwise print an ignored-exception
+        # traceback on every process exit after any real call).
+        print(line.replace("₹", "Rs."))
+
+
+atexit.register(print_model_call_summary)
+
+
+def _record_model_call(model: str, prompt_tokens: int, completion_tokens: int) -> None:
+    cost_usd = (prompt_tokens / 1_000_000) * _GPT_MINI_INPUT_USD_PER_1M + \
+               (completion_tokens / 1_000_000) * _GPT_MINI_OUTPUT_USD_PER_1M
+    _model_call_stats["calls"] += 1
+    _model_call_stats["prompt_tokens"] += prompt_tokens
+    _model_call_stats["completion_tokens"] += completion_tokens
+    _model_call_stats["est_cost_usd"] += cost_usd
+    logger.info(
+        "call_json_gpt: model=%s prompt_tokens=%d completion_tokens=%d running_calls=%d "
+        "running_est_cost=₹%.4f",
+        model, prompt_tokens, completion_tokens, _model_call_stats["calls"],
+        _model_call_stats["est_cost_usd"] * _USD_TO_INR,
+    )
 
 
 # Cognizant Round 1 (Speaking / Reading & Listening) voice transcription.
@@ -206,6 +288,48 @@ async def call_text(system: str, prompt: str, session_id: Optional[str] = None) 
     return "".join(block.text for block in resp.content if hasattr(block, "text"))
 
 
+def _dev_model_cache_enabled() -> bool:
+    """DEV_MODEL_CACHE=1 (default OFF). Hard-disabled when ENVIRONMENT is
+    production, regardless of the env var -- this cache must never serve a
+    stale/cached grading response in prod."""
+    if os.environ.get("ENVIRONMENT") == "production":
+        return False
+    return os.environ.get("DEV_MODEL_CACHE", "") == "1"
+
+
+_DEV_MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", ".dev_model_cache")
+
+
+def _cache_key(model: str, system_full: str, prompt: str, temperature: Optional[float],
+               reasoning_effort: Optional[str]) -> str:
+    import hashlib
+    payload = json.dumps(
+        {"model": model, "system": system_full, "prompt": prompt,
+         "temperature": temperature, "reasoning_effort": reasoning_effort},
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _cache_read(key: str) -> Optional[dict]:
+    path = os.path.join(_DEV_MODEL_CACHE_DIR, f"{key}.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _cache_write(key: str, record: dict) -> None:
+    try:
+        os.makedirs(_DEV_MODEL_CACHE_DIR, exist_ok=True)
+        path = os.path.join(_DEV_MODEL_CACHE_DIR, f"{key}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(record, f)
+    except Exception:
+        logger.exception("dev model cache: failed to write %s", key)
+
+
 async def call_json_gpt(
     system: str, prompt: str, model: str = GPT_MINI, temperature: Optional[float] = None,
     reasoning_effort: Optional[str] = None, usage_sink: Optional[list] = None,
@@ -218,13 +342,39 @@ async def call_json_gpt(
     (AI-Assisted Coding) staged-conversation grading (stage_sufficiency_prompt/
     bug_explanation_grading_prompt, called from server.py) -- GPT_MINI
     (gpt-5.4-mini) is the model for that round. Reuses the same
-    _extract_json parser as call_json since that logic is provider-agnostic."""
+    _extract_json parser as call_json since that logic is provider-agnostic.
+
+    Dev/test cost controls (2026-10 cost-cutting pass), both OFF by default
+    and both no-ops in production:
+      - DEV_MODEL_CACHE=1 serves an identical repeat call (same model, full
+        prompt, temperature, schema-via-prompt-text) from a gitignored disk
+        cache instead of paying for it again. A cache hit makes no real call
+        and does not count against DEV_MAX_MODEL_CALLS.
+      - DEV_MAX_MODEL_CALLS, if set above 0, raises before the call that
+        would exceed it (see _dev_max_model_calls)."""
     system_full = (
         system
         + "\n\nCRITICAL: Respond ONLY with valid JSON. No prose, no code fences, "
           "no leading/trailing commentary. If unsure, return the best-guess JSON that "
           "matches the requested shape."
     )
+    cache_on = _dev_model_cache_enabled()
+    cache_key = _cache_key(model, system_full, prompt, temperature, reasoning_effort) if cache_on else None
+    if cache_key is not None:
+        cached = _cache_read(cache_key)
+        if cached is not None:
+            if usage_sink is not None:
+                usage_sink.append({**cached["usage"], "cached": True})
+            return cached["parsed"]
+
+    cap = _dev_max_model_calls()
+    if cap and _model_call_stats["calls"] >= cap:
+        raise RuntimeError(
+            f"DEV_MAX_MODEL_CALLS={cap} reached ({_model_call_stats['calls']} real OpenAI "
+            "calls already made this process) -- refusing to make another. Raise the cap "
+            "or investigate why so many real model calls are happening."
+        )
+
     client = _get_openai_client()
     # temperature is only sent when given, so every other caller keeps the
     # model's default sampling exactly as before.
@@ -241,6 +391,9 @@ async def call_json_gpt(
     )
     text = resp.choices[0].message.content or ""
     usage = getattr(resp, "usage", None)
+    prompt_tokens = usage.prompt_tokens if usage is not None else 0
+    completion_tokens = usage.completion_tokens if usage is not None else 0
+    _record_model_call(model, prompt_tokens, completion_tokens)
     if usage is not None:
         details = getattr(usage, "completion_tokens_details", None)
         record = {
@@ -253,6 +406,11 @@ async def call_json_gpt(
     parsed = _extract_json(text)
     if parsed is None:
         logger.warning("call_json_gpt: failed to parse. Raw text: %s", text[:400])
+    elif cache_key is not None:
+        _cache_write(cache_key, {
+            "parsed": parsed,
+            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+        })
     return parsed
 
 
