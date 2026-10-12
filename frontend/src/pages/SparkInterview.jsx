@@ -28,6 +28,13 @@ export default function SparkInterview({ interviewId, initial }) {
   const [view, setView] = useState(initial);
   const [answer, setAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // FEATURE A (humanize, cosmetic only): a brief "typing..." pause before the
+  // next interviewer message appears, and an idle nudge after IDLE_SECONDS of
+  // no input. Neither one changes the server deadline or turn timing -- both
+  // are purely client-side and a no-op when the server has HUMANIZE_ENABLED off
+  // (the server then never sets `ai_interviewer` on the view, so these paths
+  // just never trigger).
+  const [typing, setTyping] = useState(false);
   // Offset between the server clock and this device's clock, taken at receipt.
   const offsetRef = useRef(0);
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -71,6 +78,24 @@ export default function SparkInterview({ interviewId, initial }) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [view?.turns?.length, view?.current_question?.id]);
 
+  // FEATURE A idle prompt (STATED): after 90s with no input, ask the server
+  // for its fixed idle line. Resets on every keystroke and whenever the
+  // current question changes. A plain no-op call when the server has
+  // HUMANIZE_ENABLED off (interview_idle then just returns the view
+  // unchanged), so this is always safe to fire.
+  useEffect(() => {
+    if (!inProgress || !view?.current_question || typing) return;
+    const id = setTimeout(async () => {
+      try {
+        const { data } = await api.post(`/interview/${interviewId}/idle`);
+        applyView(data);
+      } catch {
+        // a failed idle ping is not worth surfacing to the candidate
+      }
+    }, 90000);
+    return () => clearTimeout(id);
+  }, [answer, view?.current_question?.id, inProgress, typing, interviewId, applyView]);
+
   const send = async () => {
     const q = view?.current_question;
     if (!q || !answer.trim() || submitting) return;
@@ -78,6 +103,19 @@ export default function SparkInterview({ interviewId, initial }) {
     try {
       const { data } = await api.post(`/interview/${interviewId}/answer`, { question_id: q.id, answer });
       setAnswer("");
+      if (data.ai_interviewer) {
+        // FEATURE A typing indicator (STATED, cosmetic only): 1-3s scaled to
+        // the next message's length before it appears. The server's
+        // deadline/turn timing is already settled by this point -- this
+        // delay only affects when the browser RENDERS the response it
+        // already has.
+        const text = data.current_question?.prompt || data.closing_message || "";
+        const delay = Math.min(3000, Math.max(1000, text.length * 12));
+        setTyping(true);
+        setSubmitting(false);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        setTyping(false);
+      }
       applyView(data);
     } catch (err) {
       const code = err.response?.data?.detail?.code;
@@ -103,7 +141,15 @@ export default function SparkInterview({ interviewId, initial }) {
         <div className="max-w-4xl mx-auto pm-in">
           <SectionLabel>{view.company_name} · interview</SectionLabel>
           <div className="flex flex-wrap items-end justify-between gap-4">
-            <PageTitle as="h2" style={{ fontSize: "clamp(1.75rem, 3vw, 2.25rem)" }}>Interview</PageTitle>
+            <div className="flex items-center gap-2">
+              <PageTitle as="h2" style={{ fontSize: "clamp(1.75rem, 3vw, 2.25rem)" }}>Interview</PageTitle>
+              {view.ai_interviewer && (
+                <span data-testid="spark-ai-tag" className="rounded-full px-3 py-1"
+                      style={{ fontSize: 11, fontWeight: 600, background: "rgba(7,59,67,0.08)", color: "var(--pm-ink)" }}>
+                  {view.persona_label || "AI interviewer"}
+                </span>
+              )}
+            </div>
             {inProgress && (
               <div data-testid="spark-countdown" className="font-display font-semibold" style={{ fontSize: 22, color: "var(--pm-ink)" }}>
                 {formatRemaining(remaining)} left
@@ -141,17 +187,22 @@ export default function SparkInterview({ interviewId, initial }) {
                 </div>
               </div>
             ))}
-            {inProgress && view.current_question && (
+            {inProgress && view.current_question && !typing && (
               <div className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "var(--pm-grey)", border: "1px solid rgba(7,59,67,0.08)" }}>
                 <div className="pm-eyebrow mb-1" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>{view.current_question.stage}</div>
                 {asText(view.current_question.prompt)}
+              </div>
+            )}
+            {inProgress && typing && (
+              <div data-testid="spark-typing-indicator" className="rounded-[18px] p-4 italic" style={{ ...META, background: "var(--pm-grey)" }}>
+                {view.persona_label || "Interviewer"} is typing…
               </div>
             )}
             <div ref={bottomRef} />
           </Card>
 
           {/* Input */}
-          {inProgress && view.current_question && (
+          {inProgress && view.current_question && !typing && (
             <div className="mt-4 flex gap-3 items-end">
               <textarea
                 data-testid="spark-answer-input"

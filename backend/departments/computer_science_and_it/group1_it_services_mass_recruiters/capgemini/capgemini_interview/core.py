@@ -789,9 +789,18 @@ def normalize_hr_flags(raw: Any, answer: str) -> Tuple[Dict[str, bool], List[Dic
 
 # ---- Scoring (INTERPOLATED, report-only) ----------------------------------
 def flags_score(flags: Dict[str, bool]) -> float:
+    """Mean of the flag values. Values are normally bool (True=1.0, False=0.0),
+    scored by truthy-count historically; FEATURE B's hint-credit rule (the
+    ONLY scoring change the owner authorized -- see capgemini_interview/
+    pushback.py) needs a key point found only on a pushback's second attempt
+    to count as a named partial value (e.g. 0.5), not full credit, so this
+    sums the actual numeric value rather than just checking truthiness.
+    Identical result to the old truthy-count for pure bool dicts (float(True)
+    == 1.0, float(False) == 0.0), so every existing non-pushback caller is
+    unaffected."""
     if not flags:
         return 0.0
-    return sum(1 for v in flags.values() if v) / len(flags)
+    return sum(float(v) for v in flags.values()) / len(flags)
 
 
 def project_followups_score(turn_flags: List[Dict[str, bool]]) -> Optional[float]:

@@ -111,6 +111,10 @@ from departments.computer_science_and_it.group1_it_services_mass_recruiters.capg
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini.capgemini_interview import (
     commit as capgemini_commit,
 )
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini.capgemini_interview import (
+    humanize as capgemini_humanize,
+    pushback as capgemini_pushback,
+)
 from collections import Counter
 
 ROOT_DIR = Path(__file__).parent
@@ -3227,11 +3231,11 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
     # 75 min): the server-side tier on the attempt picks the flow. null and
     # every other company keep the plan below.
     if capgemini_interview.is_spark((attempt.get("capgemini_tier") or {}).get("tier")):
-        return await _start_spark_interview(attempt, body.attempt_id, resume_projects, user)
+        return _capgemini_tag_view(await _start_spark_interview(attempt, body.attempt_id, resume_projects, user))
     if capgemini_interview.is_dave((attempt.get("capgemini_tier") or {}).get("tier")):
-        return await _start_dave_interview(attempt, body.attempt_id, resume_projects, user)
+        return _capgemini_tag_view(await _start_dave_interview(attempt, body.attempt_id, resume_projects, user))
     if capgemini_commit.is_commit((attempt.get("capgemini_tier") or {}).get("tier")):
-        return await _start_commit_interview(attempt, body.attempt_id, resume_projects, user)
+        return _capgemini_tag_view(await _start_commit_interview(attempt, body.attempt_id, resume_projects, user))
 
     # If the source company defines an interview_difficulty (e.g. "Core
     # Assessment (Default)" wants medium-skew DSA), pass that hint through
@@ -3300,12 +3304,54 @@ async def get_interview(interview_id: str, user: Dict[str, Any] = Depends(requir
     if not doc:
         raise HTTPException(404, "Not found")
     if doc.get("mode") == "spark":
-        return await _spark_refresh(doc)
+        return _capgemini_tag_view(await _spark_refresh(doc))
     if doc.get("mode") == "dave":
-        return await _dave_refresh(doc)
+        return _capgemini_tag_view(await _dave_refresh(doc))
     if doc.get("mode") == "commit":
-        return await _commit_refresh(doc)
+        return _capgemini_tag_view(await _commit_refresh(doc))
     return doc
+
+
+@api.post("/interview/{interview_id}/idle")
+async def interview_idle(interview_id: str, user: Dict[str, Any] = Depends(require_user)):
+    """FEATURE A idle prompt (STATED): the frontend calls this after
+    IDLE_SECONDS of no input. Rule-based, no model call, at most once per
+    question, never when under 2 minutes remain. A no-op (just the current
+    view, same as a refresh) when HUMANIZE_ENABLED is off, the interview
+    isn't in_progress, or the interview is not one of the three designed
+    Capgemini tiers (the generic flow has no humanizer wiring at all, per
+    the owner's stated scope)."""
+    interview = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not interview:
+        raise HTTPException(404, "Not found")
+    mode = interview.get("mode")
+    refresh_fn = {"spark": _spark_refresh, "dave": _dave_refresh, "commit": _commit_refresh}.get(mode)
+    if refresh_fn is None:
+        raise HTTPException(404, "Not an idle-aware interview")
+    if not humanize_enabled():
+        return _capgemini_tag_view(await refresh_fn(interview))
+    interview = await {"spark": _spark_finalize_if_expired, "dave": _dave_finalize_if_expired,
+                       "commit": _commit_finalize_if_expired}[mode](interview)
+    now = now_utc().timestamp()
+    state = interview["state"]
+    view_fn = {"spark": capgemini_interview.client_view, "dave": capgemini_interview.dave_client_view,
+              "commit": capgemini_commit.commit_client_view}[mode]
+    if state["status"] != "in_progress":
+        return _capgemini_tag_view(view_fn(interview, now))
+    current = interview.get("current_question") or {}
+    qid = current.get("id")
+    remaining = state["deadline_at"] - now
+    idle_used_ids = list(interview.get("idle_used_question_ids", []))
+    if qid and qid not in idle_used_ids and remaining >= capgemini_humanize.IDLE_MIN_REMAINING_SECONDS:
+        idle_used_ids.append(qid)
+        persist_fn = {"spark": _spark_persist, "dave": _dave_persist, "commit": _commit_persist}[mode]
+        count = interview.get("turn_count", 0)
+        await persist_fn(interview, count, {"idle_used_question_ids": idle_used_ids})
+        interview["idle_used_question_ids"] = idle_used_ids
+        view = view_fn(interview, now)
+        view["current_question"] = {"id": qid, "stage": current.get("stage"), "prompt": capgemini_humanize.IDLE_LINE}
+        return _capgemini_tag_view(view)
+    return _capgemini_tag_view(view_fn(interview, now))
 
 
 class AnswerIn(BaseModel):
@@ -3319,11 +3365,11 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
     if not interview:
         raise HTTPException(404, "Not found")
     if interview.get("mode") == "spark":
-        return await _spark_answer(interview, body)
+        return _capgemini_tag_view(await _spark_answer(interview, body))
     if interview.get("mode") == "dave":
-        return await _dave_answer(interview, body)
+        return _capgemini_tag_view(await _dave_answer(interview, body))
     if interview.get("mode") == "commit":
-        return await _commit_answer(interview, body)
+        return _capgemini_tag_view(await _commit_answer(interview, body))
     question = next((q for q in interview["questions"] if str(q.get("id")) == str(body.question_id)), None)
     if not question:
         raise HTTPException(404, "Question not found")
@@ -3540,6 +3586,23 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
     dsa_flags = interview.get("dsa_flags")
     dsa_problem_id = interview.get("dsa_problem_id")
     stage = state["stage"]
+    cur_id = str(current.get("id") or "")
+    humanize_on = humanize_enabled()
+
+    if humanize_on and capgemini_humanize.is_clarification_request(answer):
+        rephrased_ids = list(interview.get("rephrased_question_ids", []))
+        if cur_id not in rephrased_ids:
+            key = _capgemini_rephrase_key(stage, cur_id, state, dsa_problem_id, None, None)
+            rephrase_text = capgemini_humanize.rephrase_for(key, current["prompt"])
+            rephrased_ids.append(cur_id)
+            await _spark_persist(interview, count, {"rephrased_question_ids": rephrased_ids})
+            interview["rephrased_question_ids"] = rephrased_ids
+            view = capgemini_interview.client_view(interview, now)
+            view["current_question"] = {"id": cur_id, "stage": stage, "prompt": rephrase_text}
+            return view
+
+    is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
+
     turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
             "answer": stored, "verdict": None, "flags": None}
     turns.append(turn)  # appended first so the follow-up writer sees the question just answered
@@ -3551,7 +3614,10 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
                "prompt": capgemini_interview.project_question(interview.get("project"))}
     elif stage == "project":
         prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project_text"])
-        raw, verdict = await _spark_grade_answer(prompt, usage, "grade_project", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _spark_grade_answer(prompt, usage, "grade_project", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3559,7 +3625,10 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
         nxt = await _spark_next_followup(interview, state, model_answer, now, usage, turns)
     elif stage == "followups":
         prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project_text"])
-        raw, verdict = await _spark_grade_answer(prompt, usage, "grade_followup", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _spark_grade_answer(prompt, usage, "grade_followup", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3576,7 +3645,10 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
         rub = problem["rubric"]
         prompt = spark_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"],
                                         model_answer, complexity_only)
-        raw, verdict = await _spark_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _spark_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dsa_flags(raw, len(rub["required_approach"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3587,6 +3659,9 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
         capgemini_interview.advance_after_dsa_turn(state, dsa_flags["complexity_stated"])
         if state["stage"] != "done":
             nxt = {"id": "spark-dsa-complexity", "stage": "dsa", "prompt": capgemini_interview.COMPLEXITY_QUESTION}
+
+    humanize_prefix = (_capgemini_humanizer_prefix(nxt, state, stage, now, random)
+                      if (humanize_on and nxt is not None) else None)
 
     changes = {
         "state": state, "status": state["status"], "current_question": nxt, "turns": turns,
@@ -3601,7 +3676,10 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
         )
     await _spark_persist(interview, count, changes)
     interview.update(changes)
-    return capgemini_interview.client_view(interview, now)
+    view = capgemini_interview.client_view(interview, now)
+    if humanize_prefix and view.get("current_question"):
+        view["current_question"]["prompt"] = humanize_prefix + view["current_question"]["prompt"]
+    return view
 
 
 # ---- Capgemini Dave interview (text, 45 minutes) ---------------------------
@@ -3863,7 +3941,33 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
     cs_questions = interview.get("cs_questions")
     hr_questions = interview.get("hr_questions")
     stage = state["stage"]
-    is_nudge_reply = str(current.get("id") or "").endswith("-nudge")
+    cur_id = str(current.get("id") or "")
+    is_nudge_reply = cur_id.endswith("-nudge")
+    humanize_on = humanize_enabled()
+    pushback_on = pushback_enabled()
+
+    # ---- FEATURE A: clarification request -- rule-based, no model call,
+    # no grading, consumes no quota (STATED). Must run before any state
+    # mutation below, and before the turn is even recorded.
+    if humanize_on and capgemini_humanize.is_clarification_request(answer):
+        rephrased_ids = list(interview.get("rephrased_question_ids", []))
+        if cur_id not in rephrased_ids:
+            key = _capgemini_rephrase_key(stage, cur_id, state, dsa_problem_id, cs_questions, hr_questions)
+            company = _CAPGEMINI_COMPANY_NAME if stage == "hr" else None
+            rephrase_text = capgemini_humanize.rephrase_for(key, current["prompt"], company=company)
+            rephrased_ids.append(cur_id)
+            await _dave_persist(interview, count, {"rephrased_question_ids": rephrased_ids})
+            interview["rephrased_question_ids"] = rephrased_ids
+            view = capgemini_interview.dave_client_view(interview, now)
+            view["current_question"] = {"id": cur_id, "stage": stage, "prompt": rephrase_text}
+            return view
+
+    # ---- FEATURE A: pass phrase -- rule-based, no model call. Every
+    # grading call site below is wrapped to short-circuit to empty-raw
+    # (all key points absent, by construction of the existing normalize_*
+    # functions) instead of calling the model, when this is true.
+    is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
+
     turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
             "answer": stored, "verdict": None, "flags": None}
     turns.append(turn)
@@ -3875,7 +3979,10 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
                "prompt": capgemini_interview.project_question(interview.get("project1"))}
     elif stage == "project1":
         prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project1", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project1", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3883,7 +3990,10 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
         nxt = await _dave_next_followup(interview, state, model_answer, now, usage, turns)
     elif stage == "followups":
         prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_followup", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_followup", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3900,7 +4010,10 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
         nxt = {"id": "dave-project2-role", "stage": "project2", "prompt": q_text}
     elif stage == "project2" and current["id"] == "dave-project2-role":
         prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_role", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_role", "Your answer is recorded.")
         role_flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
         turn.update(flags=role_flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3910,7 +4023,10 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
         nxt = {"id": "dave-project2-challenge", "stage": "project2", "prompt": q_text}
     elif stage == "project2" and current["id"] == "dave-project2-challenge":
         prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_challenge", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_challenge", "Your answer is recorded.")
         challenge_flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
         turn.update(flags=challenge_flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3931,7 +4047,10 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
             nxt = {"id": "dave-dsa", "stage": "dsa", "prompt": capgemini_interview.dsa_question(problem)}
     elif stage == "project2" and current["id"] == "dave-project2-optional":
         prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_optional", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_optional", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3943,7 +4062,10 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
         problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
         rub = problem["rubric"]
         prompt = dave_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"], model_answer)
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -3951,54 +4073,173 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
         dsa_answer = model_answer
         capgemini_interview.dave_advance_after_dsa(state, now)
         nxt = {"id": "dave-time-complexity", "stage": "time_complexity", "prompt": capgemini_interview.DAVE_TIME_COMPLEXITY_QUESTION}
-    elif stage == "time_complexity":
+    elif stage == "time_complexity" and cur_id == "dave-time-complexity":
         problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
         prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
                                         "time", model_answer)
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         time_flags = flags
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_interview.dave_budget_exceeded(state, now, "complexity")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags, "time")
+                and capgemini_pushback.pushback_allowed("dave-time-complexity" in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append("dave-time-complexity")
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": "dave-time-complexity-pushback", "stage": "time_complexity", "prompt": pb_line}
+        else:
+            capgemini_interview.dave_advance_after_time_complexity(state)
+            nxt = {"id": "dave-space-complexity", "stage": "space_complexity", "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
+    elif stage == "time_complexity" and cur_id == "dave-time-complexity-pushback":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "time", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
+        first_flags = next((t["flags"] for t in turns if t.get("question_id") == "dave-time-complexity" and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        time_flags = credited
         capgemini_interview.dave_advance_after_time_complexity(state)
         nxt = {"id": "dave-space-complexity", "stage": "space_complexity", "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
-    elif stage == "space_complexity":
+    elif stage == "space_complexity" and cur_id == "dave-space-complexity":
         problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
         prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
                                         "space", model_answer)
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         space_flags = flags
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_interview.dave_budget_exceeded(state, now, "complexity")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags, "space")
+                and capgemini_pushback.pushback_allowed("dave-space-complexity" in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append("dave-space-complexity")
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": "dave-space-complexity-pushback", "stage": "space_complexity", "prompt": pb_line}
+        else:
+            capgemini_interview.dave_advance_after_space_complexity(state, now)
+            cs_questions = [dict(q) for q in capgemini_interview.dave_cs_pick_first_two()]
+            nxt = {"id": "dave-cs-0", "stage": "cs_fundamentals", "prompt": cs_questions[0]["text"]}
+    elif stage == "space_complexity" and cur_id == "dave-space-complexity-pushback":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "space", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
+        first_flags = next((t["flags"] for t in turns if t.get("question_id") == "dave-space-complexity" and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        space_flags = credited
         capgemini_interview.dave_advance_after_space_complexity(state, now)
         cs_questions = [dict(q) for q in capgemini_interview.dave_cs_pick_first_two()]
         nxt = {"id": "dave-cs-0", "stage": "cs_fundamentals", "prompt": cs_questions[0]["text"]}
-    elif stage == "cs_fundamentals" and not is_nudge_reply:
+    elif stage == "cs_fundamentals" and not is_nudge_reply and cur_id == f"dave-cs-{state.get('cs_index')}":
         idx = state["cs_index"]
         word_count = len(answer.split())
         remaining = state["deadline_at"] - now
-        if capgemini_interview.dave_cs_needs_nudge(state, word_count, remaining):
+        if not is_pass and capgemini_interview.dave_cs_needs_nudge(state, word_count, remaining):
             capgemini_interview.dave_mark_cs_nudged(state)
             nxt = {"id": f"dave-cs-{idx}-nudge", "stage": "cs_fundamentals", "prompt": capgemini_interview.CS_NUDGE_TEXT}
         else:
             q = cs_questions[idx]
             prompt = dave_cs_flags_prompt(current["prompt"], q["key_points"], model_answer)
-            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
             flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
             turn.update(flags=flags, verdict=verdict, rejections=rejections)
             flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
-            nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
-            if maybe_hr_questions is not None:
-                hr_questions = maybe_hr_questions
+            budget_gone = capgemini_interview.dave_budget_exceeded(state, now, "cs_fundamentals")
+            pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+            main_id = f"dave-cs-{idx}"
+            if (pushback_on and not is_pass
+                    and capgemini_pushback.should_pushback(model_answer, flags)
+                    and capgemini_pushback.pushback_allowed(main_id in pushed_back_ids,
+                                                            state.get("pushbacks_used", 0), remaining, budget_gone)):
+                pushed_back_ids.append(main_id)
+                state["pushed_back_question_ids"] = pushed_back_ids
+                state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+                pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+                state["last_pushback_line"] = pb_line
+                nxt = {"id": f"dave-cs-{idx}-pushback", "stage": "cs_fundamentals", "prompt": pb_line}
+            else:
+                nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
+                if maybe_hr_questions is not None:
+                    hr_questions = maybe_hr_questions
     elif stage == "cs_fundamentals" and is_nudge_reply:
         idx = state["cs_index"]
         q = cs_questions[idx]
         asked_prompt = turns[-2]["question"] if len(turns) >= 2 else current["prompt"]
         prompt = dave_cs_flags_prompt(asked_prompt, q["key_points"], model_answer)
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_interview.dave_budget_exceeded(state, now, "cs_fundamentals")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        main_id = f"dave-cs-{idx}"
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags)
+                and capgemini_pushback.pushback_allowed(main_id in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append(main_id)
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": f"dave-cs-{idx}-pushback", "stage": "cs_fundamentals", "prompt": pb_line}
+        else:
+            nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
+            if maybe_hr_questions is not None:
+                hr_questions = maybe_hr_questions
+    elif stage == "cs_fundamentals" and cur_id == f"dave-cs-{state.get('cs_index')}-pushback":
+        idx = state["cs_index"]
+        q = cs_questions[idx]
+        prompt = dave_cs_flags_prompt(q["text"], q["key_points"], model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+        first_flags = next((t["flags"] for t in turns
+                            if t.get("question_id") in (f"dave-cs-{idx}", f"dave-cs-{idx}-nudge") and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
         if maybe_hr_questions is not None:
@@ -4012,7 +4253,10 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
             nxt = {"id": f"dave-hr-{idx}-nudge", "stage": "hr", "prompt": capgemini_interview.HR_NUDGE_TEXT}
         else:
             prompt = dave_hr_flags_prompt(current["prompt"], model_answer)
-            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _dave_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
             flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
             turn.update(flags=flags, verdict=verdict, rejections=rejections)
             flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4020,11 +4264,17 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
     elif stage == "hr" and is_nudge_reply:
         idx = state["hr_index"]
         prompt = dave_hr_flags_prompt(turns[-2]["question"] if len(turns) >= 2 else current["prompt"], model_answer)
-        raw, verdict = await _dave_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         nxt = _dave_hr_advance_and_pick(state, now, idx, hr_questions)
+
+    humanize_prefix = (_capgemini_humanizer_prefix(nxt, state, stage, now, random)
+                      if (humanize_on and nxt is not None) else None)
 
     changes = {
         "state": state, "status": state["status"], "current_question": nxt, "turns": turns,
@@ -4041,7 +4291,10 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
         )
     await _dave_persist(interview, count, changes)
     interview.update(changes)
-    return capgemini_interview.dave_client_view(interview, now)
+    view = capgemini_interview.dave_client_view(interview, now)
+    if humanize_prefix and view.get("current_question"):
+        view["current_question"]["prompt"] = humanize_prefix + view["current_question"]["prompt"]
+    return view
 
 
 # ---- Capgemini Commit interview (text, 75 minutes, 7.50 LPA) ---------------
@@ -4307,6 +4560,23 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
     hr_questions = interview.get("hr_questions")
     stage = state["stage"]
     cur_id = str(current.get("id") or "")
+    humanize_on = humanize_enabled()
+    pushback_on = pushback_enabled()
+
+    if humanize_on and capgemini_humanize.is_clarification_request(answer):
+        rephrased_ids = list(interview.get("rephrased_question_ids", []))
+        if cur_id not in rephrased_ids:
+            key = _capgemini_rephrase_key(stage, cur_id, state, dsa_problem_id, cs_questions, hr_questions)
+            company = _CAPGEMINI_COMPANY_NAME if stage == "hr" else None
+            rephrase_text = capgemini_humanize.rephrase_for(key, current["prompt"], company=company)
+            rephrased_ids.append(cur_id)
+            await _commit_persist(interview, count, {"rephrased_question_ids": rephrased_ids})
+            interview["rephrased_question_ids"] = rephrased_ids
+            view = capgemini_commit.commit_client_view(interview, now)
+            view["current_question"] = {"id": cur_id, "stage": stage, "prompt": rephrase_text}
+            return view
+
+    is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
 
     turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
             "answer": stored, "verdict": None, "flags": None}
@@ -4319,7 +4589,10 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
                "prompt": capgemini_interview.project_question(interview.get("project1"))}
     elif stage == "project1":
         prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_project1", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_project1", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4330,7 +4603,10 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         nxt = {"id": f"commit-p1f{state['p1_followups_asked'] + 1}", "stage": "project1_followups", "prompt": text}
     elif stage == "project1_followups":
         prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_p1_followup", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_p1_followup", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4345,7 +4621,10 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
             nxt = {"id": "commit-project2", "stage": "project2", "prompt": q_text}
     elif stage == "project2":
         prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_project2", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_project2", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4356,7 +4635,10 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         nxt = {"id": f"commit-p2f{state['p2_followups_asked'] + 1}", "stage": "project2_followups", "prompt": text}
     elif stage == "project2_followups":
         prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_p2_followup", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_p2_followup", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4374,7 +4656,10 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
         rub = problem["rubric"]
         prompt = dave_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"], model_answer)
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4392,7 +4677,10 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
         rub = problem["rubric"]
         prompt = dave_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"], model_answer)
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_dsa_efficiency", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_dsa_efficiency", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4400,27 +4688,97 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         capgemini_commit.commit_advance_after_dsa(state, now)
         nxt = {"id": "commit-time-complexity", "stage": "time_complexity",
                "prompt": capgemini_interview.DAVE_TIME_COMPLEXITY_QUESTION}
-    elif stage == "time_complexity":
+    elif stage == "time_complexity" and cur_id == "commit-time-complexity":
         problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
         prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
                                         "time", model_answer)
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         time_flags = flags
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_commit.commit_budget_exceeded(state, now, "complexity")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags, "time")
+                and capgemini_pushback.pushback_allowed("commit-time-complexity" in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append("commit-time-complexity")
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": "commit-time-complexity-pushback", "stage": "time_complexity", "prompt": pb_line}
+        else:
+            capgemini_commit.commit_advance_after_time_complexity(state)
+            nxt = {"id": "commit-space-complexity", "stage": "space_complexity",
+                   "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
+    elif stage == "time_complexity" and cur_id == "commit-time-complexity-pushback":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "time", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
+        first_flags = next((t["flags"] for t in turns if t.get("question_id") == "commit-time-complexity" and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        time_flags = credited
         capgemini_commit.commit_advance_after_time_complexity(state)
         nxt = {"id": "commit-space-complexity", "stage": "space_complexity",
                "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
-    elif stage == "space_complexity":
+    elif stage == "space_complexity" and cur_id == "commit-space-complexity":
         problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
         prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
                                         "space", model_answer)
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         space_flags = flags
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_commit.commit_budget_exceeded(state, now, "complexity")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags, "space")
+                and capgemini_pushback.pushback_allowed("commit-space-complexity" in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append("commit-space-complexity")
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": "commit-space-complexity-pushback", "stage": "space_complexity", "prompt": pb_line}
+        else:
+            capgemini_commit.commit_advance_after_space_complexity(state, now)
+            bank = capgemini_commit.commit_cs_bank()
+            cs_questions = [dict(q) for q in capgemini_commit.commit_cs_pick_first_two(bank["oops"], bank["java"])]
+            cs_turn_flags = [[], []]
+            nxt = {"id": "commit-cs-0-main", "stage": "cs_grilling", "prompt": cs_questions[0]["text"]}
+    elif stage == "space_complexity" and cur_id == "commit-space-complexity-pushback":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "space", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
+        first_flags = next((t["flags"] for t in turns if t.get("question_id") == "commit-space-complexity" and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        space_flags = credited
         capgemini_commit.commit_advance_after_space_complexity(state, now)
         bank = capgemini_commit.commit_cs_bank()
         cs_questions = [dict(q) for q in capgemini_commit.commit_cs_pick_first_two(bank["oops"], bank["java"])]
@@ -4435,34 +4793,89 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         if cur_id == f"commit-cs-{idx}-nudge":
             asked_prompt = turns[-2]["question"] if len(turns) >= 2 else q["text"]
             prompt = dave_cs_flags_prompt(asked_prompt, q["key_points"], model_answer)
-            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_main", "Your answer is recorded.")
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_main", "Your answer is recorded.")
             flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
             turn.update(flags=flags, verdict=verdict, rejections=rejections)
             flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
             cs_turn_flags[idx].append(flags)
-            fu = q["follow_ups"][0]
-            capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
-            nxt = {"id": f"commit-cs-{idx}-fu1", "stage": "cs_grilling", "prompt": fu["text"]}
+            remaining = state["deadline_at"] - now
+            budget_gone = capgemini_commit.commit_budget_exceeded(state, now, "cs_grilling")
+            pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+            main_id = f"commit-cs-{idx}-main"
+            if (pushback_on and not is_pass
+                    and capgemini_pushback.should_pushback(model_answer, flags)
+                    and capgemini_pushback.pushback_allowed(main_id in pushed_back_ids,
+                                                            state.get("pushbacks_used", 0), remaining, budget_gone)):
+                pushed_back_ids.append(main_id)
+                state["pushed_back_question_ids"] = pushed_back_ids
+                state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+                pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+                state["last_pushback_line"] = pb_line
+                nxt = {"id": f"commit-cs-{idx}-pushback", "stage": "cs_grilling", "prompt": pb_line}
+            else:
+                fu = q["follow_ups"][0]
+                capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
+                nxt = {"id": f"commit-cs-{idx}-fu1", "stage": "cs_grilling", "prompt": fu["text"]}
         elif cur_id == f"commit-cs-{idx}-main":
             word_count = len(answer.split())
             remaining = state["deadline_at"] - now
-            if capgemini_commit.commit_cs_needs_nudge(state, word_count, remaining):
+            if not is_pass and capgemini_commit.commit_cs_needs_nudge(state, word_count, remaining):
                 capgemini_commit.commit_mark_cs_nudged(state)
                 nxt = {"id": f"commit-cs-{idx}-nudge", "stage": "cs_grilling", "prompt": capgemini_commit.CS_NUDGE_TEXT}
             else:
                 prompt = dave_cs_flags_prompt(q["text"], q["key_points"], model_answer)
-                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_main", "Your answer is recorded.")
+                if is_pass:
+                    raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+                else:
+                    raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_main", "Your answer is recorded.")
                 flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
                 turn.update(flags=flags, verdict=verdict, rejections=rejections)
                 flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
                 cs_turn_flags[idx].append(flags)
-                fu = q["follow_ups"][0]
-                capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
-                nxt = {"id": f"commit-cs-{idx}-fu1", "stage": "cs_grilling", "prompt": fu["text"]}
+                budget_gone = capgemini_commit.commit_budget_exceeded(state, now, "cs_grilling")
+                pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+                main_id = f"commit-cs-{idx}-main"
+                if (pushback_on and not is_pass
+                        and capgemini_pushback.should_pushback(model_answer, flags)
+                        and capgemini_pushback.pushback_allowed(main_id in pushed_back_ids,
+                                                                state.get("pushbacks_used", 0), remaining, budget_gone)):
+                    pushed_back_ids.append(main_id)
+                    state["pushed_back_question_ids"] = pushed_back_ids
+                    state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+                    pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+                    state["last_pushback_line"] = pb_line
+                    nxt = {"id": f"commit-cs-{idx}-pushback", "stage": "cs_grilling", "prompt": pb_line}
+                else:
+                    fu = q["follow_ups"][0]
+                    capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
+                    nxt = {"id": f"commit-cs-{idx}-fu1", "stage": "cs_grilling", "prompt": fu["text"]}
+        elif cur_id == f"commit-cs-{idx}-pushback":
+            prompt = dave_cs_flags_prompt(q["text"], q["key_points"], model_answer)
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_main", "Your answer is recorded.")
+            second_flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+            first_flags = next((t["flags"] for t in turns
+                                if t.get("question_id") in (f"commit-cs-{idx}-main", f"commit-cs-{idx}-nudge")
+                                and t.get("flags")), {})
+            credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+            turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+            flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            cs_turn_flags[idx].append(credited)
+            fu = q["follow_ups"][0]
+            capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
+            nxt = {"id": f"commit-cs-{idx}-fu1", "stage": "cs_grilling", "prompt": fu["text"]}
         elif cur_id == f"commit-cs-{idx}-fu1":
             fu = q["follow_ups"][0]
             prompt = dave_cs_flags_prompt(fu["text"], fu["key_points"], model_answer)
-            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_fu1", "Your answer is recorded.")
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_fu1", "Your answer is recorded.")
             flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(fu["key_points"]), model_answer)
             turn.update(flags=flags, verdict=verdict, rejections=rejections)
             flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4479,7 +4892,10 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         elif cur_id == f"commit-cs-{idx}-fu2":
             fu2 = q["follow_ups"][1]
             prompt = dave_cs_flags_prompt(fu2["text"], fu2["key_points"], model_answer)
-            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_fu2", "Your answer is recorded.")
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_fu2", "Your answer is recorded.")
             flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(fu2["key_points"]), model_answer)
             turn.update(flags=flags, verdict=verdict, rejections=rejections)
             flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4491,14 +4907,17 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         idx = state["hr_index"]
         word_count = len(answer.split())
         remaining = state["deadline_at"] - now
-        if capgemini_commit.commit_hr_needs_nudge(state, word_count, remaining,
+        if not is_pass and capgemini_commit.commit_hr_needs_nudge(state, word_count, remaining,
                                                    capgemini_interview.HR_NUDGE_WORD_THRESHOLD,
                                                    capgemini_interview.HR_NUDGE_MIN_REMAINING_SECONDS):
             capgemini_commit.commit_mark_hr_nudged(state)
             nxt = {"id": f"commit-hr-{idx}-nudge", "stage": "hr", "prompt": capgemini_interview.HR_NUDGE_TEXT}
         else:
             prompt = dave_hr_flags_prompt(current["prompt"], model_answer)
-            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
             flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
             turn.update(flags=flags, verdict=verdict, rejections=rejections)
             flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
@@ -4506,11 +4925,17 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
     elif stage == "hr" and cur_id.endswith("-nudge"):
         idx = state["hr_index"]
         prompt = dave_hr_flags_prompt(turns[-2]["question"] if len(turns) >= 2 else current["prompt"], model_answer)
-        raw, verdict = await _commit_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         nxt = _commit_hr_advance_and_pick(state, now, idx, hr_questions)
+
+    humanize_prefix = (_capgemini_humanizer_prefix(nxt, state, stage, now, random)
+                      if (humanize_on and nxt is not None) else None)
 
     changes = {
         "state": state, "status": state["status"], "current_question": nxt, "turns": turns,
@@ -4528,7 +4953,10 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
         )
     await _commit_persist(interview, count, changes)
     interview.update(changes)
-    return capgemini_commit.commit_client_view(interview, now)
+    view = capgemini_commit.commit_client_view(interview, now)
+    if humanize_prefix and view.get("current_question"):
+        view["current_question"]["prompt"] = humanize_prefix + view["current_question"]["prompt"]
+    return view
 
 
 # =============================================================================
@@ -5452,6 +5880,109 @@ def mcq_pool_worker_enabled(env_value: Optional[str] = None) -> bool:
     if raw is None:
         return True
     return raw.strip().lower() not in _MCQ_POOL_WORKER_OFF_VALUES
+
+
+# ---- Capgemini interview humanizer / pushback flags (default OFF) ----------
+_FEATURE_FLAG_ON_VALUES = {"1", "true", "yes", "on"}
+
+
+def humanize_enabled(env_value: Optional[str] = None) -> bool:
+    """HUMANIZE_ENABLED: default OFF; any of 1/true/yes/on turns it on."""
+    raw = os.environ.get("HUMANIZE_ENABLED") if env_value is None else env_value
+    return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
+
+
+def _capgemini_tag_view(view: dict) -> dict:
+    """FEATURE A: adds the "AI interviewer" persona tag to a Spark/Dave/
+    Commit client view, whenever HUMANIZE_ENABLED is on (STATED: "the UI
+    shows a small 'AI interviewer' tag. No claim to be human."). Applied at
+    every route-level return point (start/get/answer) so the tag is stable
+    across refreshes, not just on turns where an acknowledgement fired."""
+    if isinstance(view, dict) and view.get("mode") in ("spark", "dave", "commit") and humanize_enabled():
+        view["ai_interviewer"] = True
+        view["persona_label"] = capgemini_humanize.AI_INTERVIEWER_TAG
+    return view
+
+
+def pushback_enabled(env_value: Optional[str] = None) -> bool:
+    """PUSHBACK_ENABLED: default OFF; any of 1/true/yes/on turns it on."""
+    raw = os.environ.get("PUSHBACK_ENABLED") if env_value is None else env_value
+    return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
+
+
+_CAPGEMINI_COMPANY_NAME = "Capgemini"  # STATED: matches dave/hr.py's own COMPANY_NAME value exactly
+
+
+def _capgemini_rephrase_key(stage: str, current_id: str, state: dict, dsa_problem_id: Optional[str],
+                           cs_questions: Optional[list], hr_questions: Optional[list]) -> str:
+    """Resolves the capgemini_humanize.REPHRASES lookup key for whatever
+    question is currently being asked, shared by Dave and Commit (and,
+    trivially, Spark's own DSA-only case). Only the MAIN fixed-question id
+    (not a nudge or a Commit CS follow-up sub-id, neither of which has its
+    own rephrase entry -- see humanize.py's module docstring) resolves to
+    the underlying bank id; anything else returns current_id unchanged,
+    which safely falls through to rephrase_for's verbatim fallback since a
+    positional/nudge/follow-up id is never itself a REPHRASES key."""
+    if stage == "dsa" and dsa_problem_id and current_id.endswith("-dsa"):
+        return dsa_problem_id
+    if stage in ("cs_fundamentals", "cs_grilling") and cs_questions:
+        idx = state.get("cs_index", 0)
+        if idx < len(cs_questions) and current_id in (f"dave-cs-{idx}", f"commit-cs-{idx}-main"):
+            return cs_questions[idx]["id"]
+    if stage == "hr" and hr_questions:
+        idx = state.get("hr_index", 0)
+        if idx < len(hr_questions) and current_id in (f"dave-hr-{idx}", f"commit-hr-{idx}"):
+            return hr_questions[idx]["id"]
+    return current_id
+
+
+# STATED: a time-awareness line fires "at named points (for example entering
+# the last stage)". INTERPOLATED choice: the named point is entering "hr",
+# the actual last real stage for both Dave and Commit (their only stage
+# after hr is the synthetic "done" state, not a question stage); Spark has
+# no hr stage at all, so this never fires for Spark (STATED: Spark keeps
+# only acknowledgements/transitions/idle, no CS/complexity/time-awareness
+# content, since it has none of those stages).
+_CAPGEMINI_STAGE_TO_HUMANIZE_KEY = {"dsa": "dsa", "cs_fundamentals": "cs", "cs_grilling": "cs", "hr": "hr"}
+_CAPGEMINI_TIME_AWARENESS_STAGE = "hr"
+
+
+def _capgemini_humanizer_prefix(nxt: dict, state: dict, prev_stage: str, now: float, rng) -> Optional[str]:
+    """FEATURE A: computes the optional acknowledgement + stage-transition +
+    one-time time-awareness prefix for nxt, WITHOUT mutating nxt itself --
+    the caller must apply the returned text only to the CLIENT-FACING
+    view's copy of current_question, never to the stored/persisted one.
+    Reason: current_question['prompt'] is reused later as grading context
+    (e.g. spark_project_flags_prompt(current['prompt'], ...), dave_cs_flags_
+    prompt(q['text'], ...)) when the candidate's answer to THIS question is
+    graded on the NEXT request -- contaminating it with cosmetic
+    interviewer chatter would leak into what the grader sees, which the
+    equivalence test (flags on vs off must produce identical grading
+    prompts when no pushback triggers) is specifically designed to catch.
+    Mutates `state`'s small bookkeeping fields (last_ack_line,
+    last_transition_line, time_awareness_given) so lines don't repeat
+    back-to-back across separate HTTP requests -- persisted automatically
+    since the caller always includes `state` in its own `changes` dict.
+    Shared by Dave, Commit and Spark; the stage-name keys above cover all
+    three tiers' stage vocabularies and this is otherwise tier-agnostic."""
+    parts = []
+    is_first_after_intro = prev_stage == "intro"
+    ack = capgemini_humanize.maybe_acknowledgement(rng, state.get("last_ack_line"), is_first_after_intro)
+    if ack:
+        parts.append(ack)
+        state["last_ack_line"] = ack
+    new_stage = nxt.get("stage")
+    if new_stage and new_stage != prev_stage:
+        key = _CAPGEMINI_STAGE_TO_HUMANIZE_KEY.get(new_stage)
+        if key:
+            line = capgemini_humanize.stage_transition_line(key, rng, state.get("last_transition_line"))
+            parts.append(line)
+            state["last_transition_line"] = line
+        if new_stage == _CAPGEMINI_TIME_AWARENESS_STAGE and not state.get("time_awareness_given"):
+            state["time_awareness_given"] = True
+            minutes = capgemini_humanize.minutes_remaining(state["deadline_at"], now)
+            parts.append(capgemini_humanize.time_remaining_line(minutes))
+    return (" ".join(parts) + " ") if parts else None
 
 
 @app.on_event("startup")
