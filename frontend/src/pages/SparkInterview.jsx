@@ -119,7 +119,8 @@ export default function SparkInterview({ interviewId, initial }) {
       applyView(data);
     } catch (err) {
       const code = err.response?.data?.detail?.code;
-      if (code === "time_up" || code === "stale_question" || code === "stale_turn" || code === "interview_closed") {
+      if (code === "time_up" || code === "stale_question" || code === "stale_turn" || code === "interview_closed"
+          || code === "turn_in_progress") {
         toast.message(err.response?.data?.detail?.message || "Refreshing the interview");
         await refresh();
       } else {

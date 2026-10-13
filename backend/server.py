@@ -3515,19 +3515,38 @@ def _turn_claim_is_stale(claim: Optional[dict], now: float) -> bool:
     return (now - claimed_at) > _TURN_CLAIM_STALE_SECONDS
 
 
+def _subdoc_leaf_filter(field: str, value: Optional[dict]) -> dict:
+    """A filter matching an embedded sub-document (`current_question`,
+    `in_flight`) by its individual leaf fields via Mongo dot-notation,
+    rather than by whole-object equality. MongoDB's whole-subdocument
+    equality match (`{field: {...}}`) compares the exact BSON byte
+    layout, which is sensitive to embedded field ORDER -- confirmed
+    empirically against a real mongod: {"a": 1, "b": 2} does not match a
+    stored {"b": 2, "a": 1}, even though they are the same dict in
+    Python. `current_question`/`in_flight` dicts are built at several
+    call sites across this file, so relying on every one of them using
+    the exact same key order would be fragile; per-leaf-field dot-paths
+    sidestep the issue entirely, in both Mongo (native dot-notation) and
+    the test suite's in-memory fake (spark_support.py's _Coll._match,
+    which also resolves dot-paths)."""
+    if value is None:
+        return {field: None}
+    return {f"{field}.{k}": v for k, v in value.items()}
+
+
 async def _claim_turn_or_409(interview: dict, now: float) -> Optional[dict]:
     """Atomic compare-and-swap on `in_flight`, keyed by {interview_id,
     turn_count, current_question} -- turn_count is the SAME atomicity key
-    the persist guard already uses; current_question is matched by whole-
-    object equality (not a dot-path lookup) so this also only ever claims
-    the question the caller actually fetched, without needing a Mongo
-    dot-notation query. `prior` is whatever this request's own (already-
-    fetched) copy of the interview showed for `in_flight` -- the CAS
-    re-checks that against the LIVE document atomically, so a second
-    concurrent request that raced in after `prior` was captured still
-    correctly loses here, with zero model calls made. Raises 409
-    immediately (no DB round-trip) when the fast, in-memory check alone
-    already shows a live, non-stale claim held by someone else.
+    the persist guard already uses; current_question and in_flight are
+    both matched per-leaf-field via dot-notation (_subdoc_leaf_filter),
+    not whole-object equality (see its docstring for why). `prior` is
+    whatever this request's own (already-fetched) copy of the interview
+    showed for `in_flight` -- the CAS re-checks that against the LIVE
+    document atomically, so a second concurrent request that raced in
+    after `prior` was captured still correctly loses here, with zero
+    model calls made. Raises 409 immediately (no DB round-trip) when the
+    fast, in-memory check alone already shows a live, non-stale claim
+    held by someone else.
 
     Returns None for a company/mode this guard does not apply to (no
     current_question at all -- the generic, non-Capgemini interview path),
@@ -3543,7 +3562,8 @@ async def _claim_turn_or_409(interview: dict, now: float) -> Optional[dict]:
     claim = {"question_id": str(current_question.get("id")), "claimed_at": now}
     result = await db.interviews.update_one(
         {"interview_id": interview["interview_id"], "turn_count": interview.get("turn_count", 0),
-         "current_question": current_question, "in_flight": prior},
+         **_subdoc_leaf_filter("current_question", current_question),
+         **_subdoc_leaf_filter("in_flight", prior)},
         {"$set": {"in_flight": claim}},
     )
     if result.matched_count == 0:
@@ -3559,12 +3579,14 @@ async def _release_turn_claim(interview: dict, claim: Optional[dict]) -> None:
     (nothing was ever claimed) or if the live document's `in_flight` no
     longer equals exactly this claim (someone/something else already
     cleared or overrode it, e.g. a stale-claim override) -- this only
-    does real work on the ordinary path, where nothing else clears it."""
+    does real work on the ordinary path, where nothing else clears it.
+    Matched per-leaf-field (_subdoc_leaf_filter), not whole-object
+    equality -- see that function's docstring."""
     if claim is None:
         return
     try:
         await db.interviews.update_one(
-            {"interview_id": interview["interview_id"], "in_flight": claim},
+            {"interview_id": interview["interview_id"], **_subdoc_leaf_filter("in_flight", claim)},
             {"$set": {"in_flight": None}},
         )
     except Exception:

@@ -28,8 +28,19 @@ class _Coll:
         self.docs = docs if docs is not None else []
 
     @staticmethod
+    def _resolve_path(doc, path):
+        """Mongo dot-notation (e.g. "current_question.id") descends into
+        nested dicts; a plain key behaves exactly as doc.get(k) always did."""
+        cur = doc
+        for part in path.split("."):
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(part)
+        return cur
+
+    @staticmethod
     def _match(doc, query):
-        return all(doc.get(k) == v for k, v in (query or {}).items())
+        return all(_Coll._resolve_path(doc, k) == v for k, v in (query or {}).items())
 
     async def insert_one(self, doc):
         self.docs.append(json.loads(json.dumps(doc, default=str)))
