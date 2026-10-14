@@ -31,6 +31,15 @@ import pytest
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
 
+# Pinned to the last commit BEFORE this diff landed (2026-10 TCS static-bank
+# work), not a floating "HEAD" -- once this diff itself gets committed, HEAD
+# moves past the baseline and a bare "HEAD:" lookup would load the NEW code
+# as its own "before" snapshot, silently turning every "is new, not a
+# modification" assertion false. Update this hash only if a deliberate
+# reason exists to re-baseline (e.g. a later, unrelated commit touches the
+# same functions again and the new baseline should include it).
+BASELINE_COMMIT = "2155881"
+
 # difficulty_target strings actually used, today, by some company's "coding"
 # section per companies.py (grepped at write-time: Wipro uses the per-problem
 # list ["easy_medium", "hard"]; Zoho uses "easy_medium" for R2 and "hard" for
@@ -42,11 +51,12 @@ EXISTING_DIFFICULTY_TARGETS = [None, "easy_medium", "hard", "medium"]
 
 
 def _load_head_problem_bank() -> types.ModuleType:
-    """Load banks/problem_bank.py as it exists at git HEAD (i.e. before this
-    session's uncommitted 'easy'-branch diff) into a standalone module, isolated
-    from the live one under sys.modules so both can be imported side by side."""
+    """Load banks/problem_bank.py as it existed at BASELINE_COMMIT (before
+    this session's 'easy'-branch / seen_at / sample_problems_with_reuse
+    diff) into a standalone module, isolated from the live one under
+    sys.modules so both can be imported side by side."""
     src = subprocess.check_output(
-        ["git", "show", "HEAD:backend/banks/problem_bank.py"],
+        ["git", "show", f"{BASELINE_COMMIT}:backend/banks/problem_bank.py"],
         cwd=REPO_ROOT, text=True,
     )
     mod = types.ModuleType("problem_bank_at_head")

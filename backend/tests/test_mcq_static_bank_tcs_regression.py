@@ -43,13 +43,18 @@ import pytest
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
 
+# Pinned to the last commit BEFORE this diff landed, not a floating "HEAD"
+# -- see test_problem_bank_tcs_regression.py's identical comment for why a
+# bare "HEAD:" lookup breaks the moment this diff itself gets committed.
+BASELINE_COMMIT = "2155881"
+
 
 def _load_head_mcq_static_bank() -> types.ModuleType:
-    """Load banks/mcq_static_bank.py as it exists at git HEAD (before this
-    session's uncommitted .limit()/rng/topic_bank_size diff) into a
+    """Load banks/mcq_static_bank.py as it existed at BASELINE_COMMIT
+    (before this diff's .limit()/rng/topic_bank_size changes) into a
     standalone module, isolated from the live one under sys.modules."""
     src = subprocess.check_output(
-        ["git", "show", "HEAD:backend/banks/mcq_static_bank.py"],
+        ["git", "show", f"{BASELINE_COMMIT}:backend/banks/mcq_static_bank.py"],
         cwd=REPO_ROOT, text=True,
     )
     mod = types.ModuleType("mcq_static_bank_at_head")
