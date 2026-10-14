@@ -114,6 +114,7 @@ from departments.computer_science_and_it.group1_it_services_mass_recruiters.capg
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini.capgemini_interview import (
     humanize as capgemini_humanize,
     pushback as capgemini_pushback,
+    dsa_hints as capgemini_dsa_hints,
 )
 from collections import Counter
 
@@ -3304,11 +3305,11 @@ async def get_interview(interview_id: str, user: Dict[str, Any] = Depends(requir
     if not doc:
         raise HTTPException(404, "Not found")
     if doc.get("mode") == "spark":
-        return _capgemini_tag_view(await _spark_refresh(doc))
+        return _capgemini_tag_view(await _spark_refresh(doc), doc)
     if doc.get("mode") == "dave":
-        return _capgemini_tag_view(await _dave_refresh(doc))
+        return _capgemini_tag_view(await _dave_refresh(doc), doc)
     if doc.get("mode") == "commit":
-        return _capgemini_tag_view(await _commit_refresh(doc))
+        return _capgemini_tag_view(await _commit_refresh(doc), doc)
     return doc
 
 
@@ -3329,7 +3330,7 @@ async def interview_idle(interview_id: str, user: Dict[str, Any] = Depends(requi
     if refresh_fn is None:
         raise HTTPException(404, "Not an idle-aware interview")
     if not humanize_enabled():
-        return _capgemini_tag_view(await refresh_fn(interview))
+        return _capgemini_tag_view(await refresh_fn(interview), interview)
     interview = await {"spark": _spark_finalize_if_expired, "dave": _dave_finalize_if_expired,
                        "commit": _commit_finalize_if_expired}[mode](interview)
     now = now_utc().timestamp()
@@ -3337,7 +3338,7 @@ async def interview_idle(interview_id: str, user: Dict[str, Any] = Depends(requi
     view_fn = {"spark": capgemini_interview.client_view, "dave": capgemini_interview.dave_client_view,
               "commit": capgemini_commit.commit_client_view}[mode]
     if state["status"] != "in_progress":
-        return _capgemini_tag_view(view_fn(interview, now))
+        return _capgemini_tag_view(view_fn(interview, now), interview)
     current = interview.get("current_question") or {}
     qid = current.get("id")
     remaining = state["deadline_at"] - now
@@ -3350,8 +3351,8 @@ async def interview_idle(interview_id: str, user: Dict[str, Any] = Depends(requi
         interview["idle_used_question_ids"] = idle_used_ids
         view = view_fn(interview, now)
         view["current_question"] = {"id": qid, "stage": current.get("stage"), "prompt": capgemini_humanize.IDLE_LINE}
-        return _capgemini_tag_view(view)
-    return _capgemini_tag_view(view_fn(interview, now))
+        return _capgemini_tag_view(view, interview)
+    return _capgemini_tag_view(view_fn(interview, now), interview)
 
 
 class AnswerIn(BaseModel):
@@ -3381,7 +3382,7 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
                 result = await _commit_answer(interview, body)
         finally:
             await _release_turn_claim(interview, claim)
-        return _capgemini_tag_view(result)
+        return _capgemini_tag_view(result, interview)
     question = next((q for q in interview["questions"] if str(q.get("id")) == str(body.question_id)), None)
     if not question:
         raise HTTPException(404, "Question not found")
@@ -3453,11 +3454,14 @@ async def _spark_grade_answer(prompt: str, usage: list, purpose: str, fallback: 
     return raw, _spark_verdict(raw, fallback)
 
 
-def _spark_score_doc(turns: list, dsa_flags: Optional[dict]) -> dict:
+def _spark_score_doc(turns: list, dsa_flags: Optional[dict], hints_used: int = 0) -> dict:
     pf_flags = [t["flags"] for t in turns if t.get("stage") in ("project", "followups") and t.get("flags")]
+    dsa = capgemini_interview.dsa_score(dsa_flags)
+    if hints_enabled():
+        dsa = capgemini_dsa_hints.apply_hint_penalty(dsa, hints_used)
     return capgemini_interview.interview_score(
         capgemini_interview.project_followups_score(pf_flags),
-        capgemini_interview.dsa_score(dsa_flags),
+        dsa,
     )
 
 
@@ -3478,13 +3482,25 @@ def _spark_log_rejections(interview_id: str, question_id: str, rejections: list,
     return records
 
 
+def _report_answer_entry(t: dict) -> dict:
+    """Shared by Spark/Dave/Commit's own _xxx_report_answers below. The
+    "needed_hint" key is added ONLY when HINTS_ENABLED is on AND this
+    particular turn was actually flagged needed_hint=True (by the DSA-stage
+    grading branch, when hints_used > 0 at grading time) -- so with the flag
+    off, or on any turn that never used a hint, this is byte-for-byte the
+    same 2-key grade dict as before this feature existed."""
+    entry = {"question_id": t["question_id"], "answer": t["answer"],
+             "grade": {"one_line_verdict": t.get("verdict") or "",
+                       "score": round(100 * capgemini_interview.flags_score(t["flags"]))}}
+    if hints_enabled() and t.get("needed_hint"):
+        entry["needed_hint"] = True
+    return entry
+
+
 def _spark_report_answers(turns: list) -> list:
     # Only graded turns go to the report (the ungraded intro is context, not a
     # score). The 0-100 score is the element-flag score of that turn (INTERPOLATED).
-    return [{"question_id": t["question_id"], "answer": t["answer"],
-             "grade": {"one_line_verdict": t.get("verdict") or "",
-                       "score": round(100 * capgemini_interview.flags_score(t["flags"]))}}
-            for t in turns if t.get("flags")]
+    return [_report_answer_entry(t) for t in turns if t.get("flags")]
 
 
 # ---- Shared turn-claim guard (Spark/Dave/Commit) ---------------------------
@@ -3593,6 +3609,78 @@ async def _release_turn_claim(interview: dict, claim: Optional[dict]) -> None:
         logger.exception("failed to release turn claim for interview %s", interview.get("interview_id"))
 
 
+# ---- Shared DSA-hint interception (Spark/Dave/Commit) ----------------------
+# Runs at the very top of the DSA solving stage, before any grading/model
+# call, so a hint/answer-request/confirmation message costs nothing and never
+# reaches the real grader. See capgemini_dsa_hints for the detection and
+# ladder-dispensing logic; this wrapper is only the server-side plumbing
+# shared by all three tiers: build the hint-turn, persist it through the SAME
+# turn_count-guarded persist every other turn uses (so it also passes through
+# the SAME _claim_turn_or_409 atomic claim at the top of submit_interview_answer
+# -- that guard wraps the whole dispatch, not just the grading branches), and
+# return the client view. A hint/answer-request/confirmation turn DOES
+# increment turn_count -- DECISION (documented per the owner's own framing):
+# yes, it should, because it is a turn like any other for race-guard
+# purposes (the loser of a concurrent double-submit on the same question
+# must still get 409 turn_in_progress) even though it never advances the
+# interview's stage or consumes a model call. Entirely gated behind
+# hints_enabled(): with the flag off this function is a no-op (returns None
+# immediately) and none of its callers' behaviour changes at all.
+#
+# The DSA problem statement is NEVER overwritten by any reply here, for any
+# of the four kinds (hint / hint_exhausted / answer_request / confirmation):
+# current_question is left completely untouched in both the persisted
+# document AND the returned view, unlike FEATURE A's clarification-rephrase/
+# idle-nudge overlays above (which DO swap the shown prompt) -- a hint is
+# supplementary feedback on an unchanged question, not a replacement
+# question, and the candidate must always be able to see the problem
+# statement and keep typing their real answer. _claim_turn_or_409's
+# next-request CAS filter keeps matching the same stable current_question
+# it always has.
+#
+# A granted HINT is persisted to `dsa_hints_shown` (interview document) and
+# surfaced in every view's `hints.shown` for as long as the flag is on --
+# it must survive a refresh. An answer-request/confirmation/exhausted reply
+# is NOT persisted anywhere beyond its own turn in `turns` -- it is
+# delivered as a one-off `notice` on THIS response only (STATED: "may stay
+# a one-off note"), via the same toast mechanism the frontend already uses
+# for soft-refetch messages, and never reappears on a later refresh.
+#
+# The request itself is always recorded as its own turn in `turns`
+# (question=the original prompt, answer=what the candidate typed, flags=
+# None so it's never graded/reported), so the exchange is never lost from
+# the transcript either way.
+async def _handle_dsa_hint_message(interview: dict, tier: str, answer: str, current: dict, stage: str,
+                                   dsa_problem_id: Optional[str], stored_answer: str, now: float, count: int,
+                                   turns: list, persist_fn, view_fn) -> Optional[dict]:
+    cur_id = str(current.get("id") or "")
+    if not (hints_enabled() and stage == "dsa" and capgemini_dsa_hints.is_dsa_solving_question(cur_id)):
+        return None
+    hints_used = interview.get("hints_used", 0)
+    result = capgemini_dsa_hints.handle_dsa_message(
+        tier, answer, dsa_problem_id, hints_used, random, interview.get("last_hint_lead_in"))
+    if result is None:
+        return None  # a genuine solving attempt (or unmatched chatter) -- caller proceeds with normal grading
+    turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
+            "answer": stored_answer, "verdict": None, "flags": None,
+            "is_hint_turn": True, "hint_kind": result["kind"]}
+    changes = {
+        "turns": turns + [turn], "turn_count": count + 1, "hints_used": result["hints_used"],
+        "last_hint_lead_in": (result["lead_in"] if result["lead_in"] is not None
+                              else interview.get("last_hint_lead_in")),
+    }
+    if result["kind"] == "hint":
+        shown = list(interview.get("dsa_hints_shown", []))
+        shown.append({"level": result["hints_used"], "text": result["text"], "lead_in": result["lead_in"]})
+        changes["dsa_hints_shown"] = shown
+    await persist_fn(interview, count, changes)
+    interview.update(changes)
+    view = view_fn(interview, now)
+    if result["kind"] != "hint":
+        view["notice"] = {"kind": result["kind"], "text": result["reply"]}
+    return view
+
+
 async def _spark_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
     # Optimistic guard: a double-submitted answer cannot advance the stage twice.
     res = await db.interviews.update_one(
@@ -3615,7 +3703,7 @@ async def _spark_finish(interview: dict, now: float, timed_out: bool) -> None:
     count = interview.get("turn_count", 0)
     changes = {
         "state": state, "status": state["status"], "current_question": None,
-        "spark_score": _spark_score_doc(turns, interview.get("dsa_flags")),
+        "spark_score": _spark_score_doc(turns, interview.get("dsa_flags"), interview.get("hints_used", 0)),
         "answers": _spark_report_answers(turns), "completed_at": iso(now_utc()),
         "turn_count": count + 1,
     }
@@ -3721,6 +3809,12 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
 
     is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
 
+    hint_view = await _handle_dsa_hint_message(interview, "spark", answer, current, stage, dsa_problem_id,
+                                               stored, now, count, turns, _spark_persist,
+                                               capgemini_interview.client_view)
+    if hint_view is not None:
+        return hint_view
+
     turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
             "answer": stored, "verdict": None, "flags": None}
     turns.append(turn)  # appended first so the follow-up writer sees the question just answered
@@ -3769,6 +3863,8 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
             raw, verdict = await _spark_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dsa_flags(raw, len(rub["required_approach"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        if not complexity_only and hints_enabled() and interview.get("hints_used", 0) > 0:
+            turn["needed_hint"] = True
         flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         if dsa_flags is None:
             dsa_flags = flags
@@ -3788,7 +3884,7 @@ async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
     }
     if state["status"] == "completed":
         changes.update(
-            spark_score=_spark_score_doc(turns, dsa_flags),
+            spark_score=_spark_score_doc(turns, dsa_flags, interview.get("hints_used", 0)),
             answers=_spark_report_answers(turns),
             completed_at=iso(now_utc()),
         )
@@ -3857,15 +3953,18 @@ async def _dave_grade_answer(prompt: str, usage: list, purpose: str, fallback: s
 
 
 def _dave_score_doc(turns: list, dsa_flags: Optional[dict], time_flags: Optional[dict],
-                    space_flags: Optional[dict]) -> dict:
+                    space_flags: Optional[dict], hints_used: int = 0) -> dict:
     p1f_flags = [t["flags"] for t in turns if t.get("stage") in ("project1", "followups") and t.get("flags")]
     p2_flags = [t["flags"] for t in turns if t.get("stage") == "project2" and t.get("flags")]
     cs_flags = [t["flags"] for t in turns if t.get("stage") == "cs_fundamentals" and t.get("flags")]
     hr_flags = [t["flags"] for t in turns if t.get("stage") == "hr" and t.get("flags")]
+    dsa_complexity = capgemini_interview.dave_dsa_complexity_score(dsa_flags, time_flags, space_flags)
+    if hints_enabled():
+        dsa_complexity = capgemini_dsa_hints.apply_hint_penalty(dsa_complexity, hints_used)
     return capgemini_interview.dave_interview_score(
         capgemini_interview.project_followups_score(p1f_flags),
         capgemini_interview.project_followups_score(p2_flags),
-        capgemini_interview.dave_dsa_complexity_score(dsa_flags, time_flags, space_flags),
+        dsa_complexity,
         capgemini_interview.project_followups_score(cs_flags),
         capgemini_interview.project_followups_score(hr_flags),
     )
@@ -3938,10 +4037,7 @@ def _dave_log_rejections(interview_id: str, question_id: str, rejections: list, 
 
 
 def _dave_report_answers(turns: list) -> list:
-    return [{"question_id": t["question_id"], "answer": t["answer"],
-             "grade": {"one_line_verdict": t.get("verdict") or "",
-                       "score": round(100 * capgemini_interview.flags_score(t["flags"]))}}
-            for t in turns if t.get("flags")]
+    return [_report_answer_entry(t) for t in turns if t.get("flags")]
 
 
 async def _dave_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
@@ -3964,7 +4060,7 @@ async def _dave_finish(interview: dict, now: float, timed_out: bool) -> None:
     changes = {
         "state": state, "status": state["status"], "current_question": None,
         "dave_score": _dave_score_doc(turns, interview.get("dave_dsa_flags"), interview.get("dave_time_flags"),
-                                      interview.get("dave_space_flags")),
+                                      interview.get("dave_space_flags"), interview.get("hints_used", 0)),
         "answers": _dave_report_answers(turns), "completed_at": iso(now_utc()),
         "turn_count": count + 1,
     }
@@ -4086,6 +4182,12 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
     # functions) instead of calling the model, when this is true.
     is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
 
+    hint_view = await _handle_dsa_hint_message(interview, "dave", answer, current, stage, dsa_problem_id,
+                                               stored, now, count, turns, _dave_persist,
+                                               capgemini_interview.dave_client_view)
+    if hint_view is not None:
+        return hint_view
+
     turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
             "answer": stored, "verdict": None, "flags": None}
     turns.append(turn)
@@ -4186,6 +4288,8 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
             raw, verdict = await _dave_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        if hints_enabled() and interview.get("hints_used", 0) > 0:
+            turn["needed_hint"] = True
         flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         dsa_flags = flags
         dsa_answer = model_answer
@@ -4403,7 +4507,7 @@ async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
     }
     if state["status"] == "completed":
         changes.update(
-            dave_score=_dave_score_doc(turns, dsa_flags, time_flags, space_flags),
+            dave_score=_dave_score_doc(turns, dsa_flags, time_flags, space_flags, interview.get("hints_used", 0)),
             answers=_dave_report_answers(turns),
             completed_at=iso(now_utc()),
         )
@@ -4479,23 +4583,23 @@ def _commit_log_rejections(interview_id: str, question_id: str, rejections: list
 
 
 def _commit_report_answers(turns: list) -> list:
-    return [{"question_id": t["question_id"], "answer": t["answer"],
-             "grade": {"one_line_verdict": t.get("verdict") or "",
-                       "score": round(100 * capgemini_interview.flags_score(t["flags"]))}}
-            for t in turns if t.get("flags")]
+    return [_report_answer_entry(t) for t in turns if t.get("flags")]
 
 
 def _commit_score_doc(turns: list, dsa_flags: Optional[dict], efficiency_flags: Optional[dict],
                       time_flags: Optional[dict], space_flags: Optional[dict],
-                      cs_turn_flags: Optional[list]) -> dict:
+                      cs_turn_flags: Optional[list], hints_used: int = 0) -> dict:
     p1_flags = [t["flags"] for t in turns if t.get("stage") in ("project1", "project1_followups") and t.get("flags")]
     p2_flags = [t["flags"] for t in turns if t.get("stage") in ("project2", "project2_followups") and t.get("flags")]
     cs_pooled = [capgemini_commit.commit_cs_question_pooled_flags(q_flags) for q_flags in (cs_turn_flags or []) if q_flags]
     hr_flags = [t["flags"] for t in turns if t.get("stage") == "hr" and t.get("flags")]
+    dsa_complexity = capgemini_commit.commit_dsa_complexity_score(dsa_flags, efficiency_flags, time_flags, space_flags)
+    if hints_enabled():
+        dsa_complexity = capgemini_dsa_hints.apply_hint_penalty(dsa_complexity, hints_used)
     return capgemini_commit.commit_interview_score(
         capgemini_interview.project_followups_score(p1_flags),
         capgemini_interview.project_followups_score(p2_flags),
-        capgemini_commit.commit_dsa_complexity_score(dsa_flags, efficiency_flags, time_flags, space_flags),
+        dsa_complexity,
         capgemini_interview.project_followups_score(cs_pooled) if cs_pooled else None,
         capgemini_interview.project_followups_score(hr_flags),
     )
@@ -4523,7 +4627,7 @@ async def _commit_finish(interview: dict, now: float, timed_out: bool) -> None:
         "commit_score": _commit_score_doc(
             turns, interview.get("commit_dsa_flags"), interview.get("commit_efficiency_flags"),
             interview.get("commit_time_flags"), interview.get("commit_space_flags"),
-            interview.get("commit_cs_turn_flags"),
+            interview.get("commit_cs_turn_flags"), interview.get("hints_used", 0),
         ),
         "answers": _commit_report_answers(turns), "completed_at": iso(now_utc()),
         "turn_count": count + 1,
@@ -4696,6 +4800,12 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
 
     is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
 
+    hint_view = await _handle_dsa_hint_message(interview, "commit", answer, current, stage, dsa_problem_id,
+                                               stored, now, count, turns, _commit_persist,
+                                               capgemini_commit.commit_client_view)
+    if hint_view is not None:
+        return hint_view
+
     turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
             "answer": stored, "verdict": None, "flags": None}
     turns.append(turn)
@@ -4780,6 +4890,8 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
             raw, verdict = await _commit_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        if hints_enabled() and interview.get("hints_used", 0) > 0:
+            turn["needed_hint"] = True
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         dsa_flags = flags
         dsa_answer = model_answer
@@ -4801,6 +4913,8 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
             raw, verdict = await _commit_grade_answer(prompt, usage, "grade_dsa_efficiency", "Your answer is recorded.")
         flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
         turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        if hints_enabled() and interview.get("hints_used", 0) > 0:
+            turn["needed_hint"] = True
         flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
         efficiency_flags = flags
         capgemini_commit.commit_advance_after_dsa(state, now)
@@ -5065,7 +5179,8 @@ async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
     }
     if state["status"] == "completed":
         changes.update(
-            commit_score=_commit_score_doc(turns, dsa_flags, efficiency_flags, time_flags, space_flags, cs_turn_flags),
+            commit_score=_commit_score_doc(turns, dsa_flags, efficiency_flags, time_flags, space_flags, cs_turn_flags,
+                                           interview.get("hints_used", 0)),
             answers=_commit_report_answers(turns),
             completed_at=iso(now_utc()),
         )
@@ -5749,6 +5864,8 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
             "verdicts": [a["grade"].get("one_line_verdict", "") for a in answered],
             "completed": interview_doc.get("status") == "completed",
         }
+        if hints_enabled():
+            interview_summary["hints_used"] = interview_doc.get("hints_used", 0)
 
     # A Spark, Dave or Commit attempt's report is neither read from nor
     # written to the cache while its interview is still open: the report
@@ -6010,21 +6127,52 @@ def humanize_enabled(env_value: Optional[str] = None) -> bool:
     return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
 
 
-def _capgemini_tag_view(view: dict) -> dict:
+def _capgemini_tag_view(view: dict, interview: Optional[dict] = None) -> dict:
     """FEATURE A: adds the "AI interviewer" persona tag to a Spark/Dave/
     Commit client view, whenever HUMANIZE_ENABLED is on (STATED: "the UI
     shows a small 'AI interviewer' tag. No claim to be human."). Applied at
     every route-level return point (start/get/answer) so the tag is stable
-    across refreshes, not just on turns where an acknowledgement fired."""
+    across refreshes, not just on turns where an acknowledgement fired.
+
+    Also adds a "hints" field (used/limit/available/shown), whenever
+    HINTS_ENABLED is on, for the frontend's "Ask for a hint" button and its
+    display of hints already shown -- `interview` is the raw interview
+    document (for `hints_used`/`dsa_hints_shown`), optional because the
+    start routes only have the already-built view in hand; a freshly
+    created interview has used 0 hints and shown none regardless, so the
+    defaults are correct there. `shown` is the SAME list on every refresh
+    (it is read straight from the persisted document, never recomputed),
+    which is what makes a hint survive a refresh. Both additions are
+    no-ops, and this function returns `view` completely unchanged, when
+    their respective flag is off."""
     if isinstance(view, dict) and view.get("mode") in ("spark", "dave", "commit") and humanize_enabled():
         view["ai_interviewer"] = True
         view["persona_label"] = capgemini_humanize.AI_INTERVIEWER_TAG
+    if isinstance(view, dict) and view.get("mode") in ("spark", "dave", "commit") and hints_enabled():
+        mode = view["mode"]
+        used = (interview or {}).get("hints_used", 0)
+        limit = capgemini_dsa_hints.HINT_LIMITS.get(mode, 0)
+        cur_id = (view.get("current_question") or {}).get("id")
+        available = (view.get("status") == "in_progress" and used < limit
+                    and capgemini_dsa_hints.is_dsa_solving_question(cur_id))
+        shown = (interview or {}).get("dsa_hints_shown", [])
+        view["hints"] = {"used": used, "limit": limit, "available": available, "shown": shown}
     return view
 
 
 def pushback_enabled(env_value: Optional[str] = None) -> bool:
     """PUSHBACK_ENABLED: default OFF; any of 1/true/yes/on turns it on."""
     raw = os.environ.get("PUSHBACK_ENABLED") if env_value is None else env_value
+    return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
+
+
+def hints_enabled(env_value: Optional[str] = None) -> bool:
+    """HINTS_ENABLED: default OFF; any of 1/true/yes/on turns it on. Gates
+    every single piece of the DSA-hints feature (detection, scoring penalty,
+    and the extra "hints" field on the client view) -- with it off, none of
+    that code runs at all, so behaviour is byte-for-byte unchanged from
+    before this feature existed."""
+    raw = os.environ.get("HINTS_ENABLED") if env_value is None else env_value
     return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
 
 

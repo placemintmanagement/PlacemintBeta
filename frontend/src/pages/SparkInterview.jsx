@@ -84,7 +84,7 @@ export default function SparkInterview({ interviewId, initial }) {
   // HUMANIZE_ENABLED off (interview_idle then just returns the view
   // unchanged), so this is always safe to fire.
   useEffect(() => {
-    if (!inProgress || !view?.current_question || typing) return;
+    if (!inProgress || !view?.current_question?.id || typing) return;
     const id = setTimeout(async () => {
       try {
         const { data } = await api.post(`/interview/${interviewId}/idle`);
@@ -96,27 +96,39 @@ export default function SparkInterview({ interviewId, initial }) {
     return () => clearTimeout(id);
   }, [answer, view?.current_question?.id, inProgress, typing, interviewId, applyView]);
 
-  const send = async () => {
+  // Shared by the normal Send button and the DSA-stage "Ask for a hint"
+  // button below -- both post through the exact same answer endpoint (no
+  // new route), get the exact same soft-refetch handling for a 409
+  // (turn_in_progress included -- the hint path shares the same atomic
+  // turn claim as any other submission), and the exact same
+  // submitting-disabled guard. `clearDraft` is false for a hint request so
+  // the candidate's own in-progress typed answer is never touched by it.
+  const submitAnswer = async (text, clearDraft) => {
     const q = view?.current_question;
-    if (!q || !answer.trim() || submitting) return;
+    if (!q || !text.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const { data } = await api.post(`/interview/${interviewId}/answer`, { question_id: q.id, answer });
-      setAnswer("");
+      const { data } = await api.post(`/interview/${interviewId}/answer`, { question_id: q.id, answer: text });
+      if (clearDraft) setAnswer("");
       if (data.ai_interviewer) {
         // FEATURE A typing indicator (STATED, cosmetic only): 1-3s scaled to
         // the next message's length before it appears. The server's
         // deadline/turn timing is already settled by this point -- this
         // delay only affects when the browser RENDERS the response it
         // already has.
-        const text = data.current_question?.prompt || data.closing_message || "";
-        const delay = Math.min(3000, Math.max(1000, text.length * 12));
+        const text2 = data.current_question?.prompt || data.closing_message || "";
+        const delay = Math.min(3000, Math.max(1000, text2.length * 12));
         setTyping(true);
         setSubmitting(false);
         await new Promise((resolve) => setTimeout(resolve, delay));
         setTyping(false);
       }
       applyView(data);
+      // A one-off answer-request/confirmation/exhausted-hint reply (STATED:
+      // "may stay a one-off note") -- never persisted, so it is shown here
+      // and only here, as a toast, exactly like the existing soft-refetch
+      // messages below. It never touches the problem statement.
+      if (data.notice?.text) toast.message(data.notice.text);
     } catch (err) {
       const code = err.response?.data?.detail?.code;
       if (code === "time_up" || code === "stale_question" || code === "stale_turn" || code === "interview_closed"
@@ -130,6 +142,9 @@ export default function SparkInterview({ interviewId, initial }) {
       setSubmitting(false);
     }
   };
+
+  const send = () => submitAnswer(answer, true);
+  const askForHint = () => submitAnswer("Can I get a hint?", false);
 
   if (!view) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Loading…</div></PageShell></div>;
 
@@ -189,11 +204,20 @@ export default function SparkInterview({ interviewId, initial }) {
               </div>
             ))}
             {inProgress && view.current_question && !typing && (
-              <div className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "var(--pm-grey)", border: "1px solid rgba(7,59,67,0.08)" }}>
+              <div data-testid="spark-problem-statement" className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "var(--pm-grey)", border: "1px solid rgba(7,59,67,0.08)" }}>
                 <div className="pm-eyebrow mb-1" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>{view.current_question.stage}</div>
                 {asText(view.current_question.prompt)}
               </div>
             )}
+            {/* Hints shown so far for the DSA problem above -- persisted, so
+                these come back on a refresh, never replace the statement. */}
+            {inProgress && (view.hints?.shown || []).map((h, i) => (
+              <div key={i} data-testid="spark-hint-shown" className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "rgba(7,59,67,0.05)", border: "1px solid rgba(7,59,67,0.08)" }}>
+                <div className="pm-eyebrow mb-1" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>Hint {h.level}</div>
+                <span className="italic" style={{ color: "rgba(11,42,48,0.7)" }}>{asText(h.lead_in)}</span>{" "}
+                {asText(h.text)}
+              </div>
+            ))}
             {inProgress && typing && (
               <div data-testid="spark-typing-indicator" className="rounded-[18px] p-4 italic" style={{ ...META, background: "var(--pm-grey)" }}>
                 {view.persona_label || "Interviewer"} is typing…
@@ -214,9 +238,20 @@ export default function SparkInterview({ interviewId, initial }) {
                 className="pm-input flex-1"
                 style={{ fontSize: 15 }}
               />
+              {view.hints?.available && (
+                <Button data-testid="spark-ask-hint" onClick={askForHint} disabled={submitting}
+                        className="h-[54px] !px-4" style={{ background: "transparent", color: "var(--pm-ink)", border: "1px solid rgba(7,59,67,0.2)" }}>
+                  Ask for a hint
+                </Button>
+              )}
               <Button data-testid="spark-submit-answer" onClick={send} disabled={submitting || !answer.trim()} className="h-[54px] !px-5">
                 {submitting ? "…" : <><SendHorizontal size={16} aria-hidden="true" /> Send</>}
               </Button>
+            </div>
+          )}
+          {inProgress && view.hints && (
+            <div data-testid="spark-hints-used" className="mt-2" style={META}>
+              Hints used: {view.hints.used}/{view.hints.limit}
             </div>
           )}
 
