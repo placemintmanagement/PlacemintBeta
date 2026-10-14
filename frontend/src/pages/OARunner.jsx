@@ -65,6 +65,15 @@ export default function OARunner() {
   const [submitting, setSubmitting] = useState(false);
   const [tick, setTick] = useState(0); // rerender for timer
   const startTimeRef = useRef({}); // per-section start times
+  // Optional-section gate (today: only TCS NQT's Part B -- see companies.py's
+  // "optional": True on the "advanced"/"coding" sections and
+  // tcs_recruitment_process.py's PART_B_OPTIONAL_NOTE). A Set, not a single
+  // flag, so a multi-section optional tail (not true for TCS's 2 sections
+  // today, but the backend endpoint is generic) only re-prompts for a
+  // section not yet decided. Deliberately keyed on section.key rather than
+  // persisted server-side: re-prompting on a refresh is the safer default
+  // for a choice this consequential (track estimate), not a bug.
+  const [dismissedGates, setDismissedGates] = useState(() => new Set());
 
   // Initial load
   useEffect(() => {
@@ -128,6 +137,52 @@ export default function OARunner() {
   if (attempt.status === "completed") {
     setTimeout(() => navigate(`/attempt/${attemptId}/review`, { replace: true }), 200);
     return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Redirecting to review…</div></PageShell></div>;
+  }
+
+  // Optional-section gate (today: only TCS NQT's Part B). Checked BEFORE the
+  // "still generating" screen below on purpose -- a candidate choosing to
+  // finish here shouldn't have to wait for Part B's background generation
+  // first. Wording must stay in sync with
+  // tcs_recruitment_process.py's PART_B_OPTIONAL_NOTE (OFFICIAL-TCS source).
+  if (currentSection?.optional && !dismissedGates.has(currentSection.key)) {
+    const finishPartAEarly = async () => {
+      setSubmitting(true);
+      try {
+        const { data } = await api.post(`/oa/${attemptId}/finish-part-a`);
+        navigate(`/attempt/${attemptId}/review`, { state: data.tcs_tier ? { tcs_tier: data.tcs_tier } : null });
+      } catch (err) {
+        const detail = err.response?.data?.detail;
+        toast.error((detail && detail.message) || detail || "Could not finish early");
+      } finally { setSubmitting(false); }
+    };
+    return (
+      <div>
+        <Header light />
+        <PageShell>
+          <div className="max-w-2xl mx-auto py-24 text-center pm-in">
+            <SectionLabel>part b · optional</SectionLabel>
+            <PageTitle style={{ fontSize: "clamp(1.5rem, 3vw, 2rem)" }}>Foundation is done. Part B is optional.</PageTitle>
+            <p className="mt-3" style={BODY}>
+              Part B is optional. TCS's own guidance: it is "mandatory if you aspire for a Digital or
+              Prime offer." You can finish here with Foundation alone, or continue to Part B for a
+              chance at a higher track. Your estimated track will be shown on the results page.
+            </p>
+            <div className="mt-8 flex items-center justify-center gap-3 flex-wrap">
+              <Button data-testid={TID.oaContinuePartB}
+                      onClick={() => setDismissedGates(s => new Set(s).add(currentSection.key))}
+                      className="!py-2.5 !px-5">
+                Continue to Part B <ChevronRight size={14} aria-hidden="true" />
+              </Button>
+              <Button data-testid={TID.oaFinishPartA} onClick={finishPartAEarly} disabled={submitting}
+                      style={{ background: "transparent", color: "var(--pm-ink)", border: "1px solid rgba(7,59,67,0.2)" }}
+                      className="!py-2.5 !px-5">
+                {submitting ? "Finishing…" : "Finish here (Foundation only)"}
+              </Button>
+            </div>
+          </div>
+        </PageShell>
+      </div>
+    );
   }
 
   // The CURRENT section has no questions yet — show a targeted waiting screen
@@ -204,7 +259,10 @@ export default function OARunner() {
         // Navigate with the tier before refreshing the attempt. The refreshed
         // attempt is completed, so the render-time redirect below would
         // otherwise replace this entry and drop the tier from its state.
-        navigate(`/attempt/${attemptId}/review`, { state: data.capgemini_tier ? { capgemini_tier: data.capgemini_tier } : null });
+        const tierState = data.capgemini_tier ? { capgemini_tier: data.capgemini_tier }
+          : data.tcs_tier ? { tcs_tier: data.tcs_tier }
+          : null;
+        navigate(`/attempt/${attemptId}/review`, { state: tierState });
         return;
       }
       // Refresh attempt to move forward

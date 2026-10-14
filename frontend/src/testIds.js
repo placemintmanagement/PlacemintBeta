@@ -36,6 +36,8 @@ export const TID = {
   oaRunBtn: "oa-run-btn",
   oaNextSection: "oa-next-section",
   oaFinishSection: "oa-finish-section",
+  oaContinuePartB: "oa-continue-part-b",
+  oaFinishPartA: "oa-finish-part-a",
   oaCardTile: (qid, tileId) => `oa-card-tile-${qid}-${tileId}`,
   oaConnectPoint: (qid, pointId) => `oa-connect-point-${qid}-${pointId}`,
   oaConnectSubmit: (qid) => `oa-connect-submit-${qid}`,
