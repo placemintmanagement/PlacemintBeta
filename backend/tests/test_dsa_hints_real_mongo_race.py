@@ -54,7 +54,7 @@ async def _seed(db):
     await db.resumes.delete_many({})
     await db.reports.delete_many({})
     await db.oa_attempts.insert_one(_spark_attempt("spark"))
-    await db.resumes.insert_one({"resume_id": "res1", "analysis": {"extracted_projects": SPARK_PROJECTS}})
+    await db.resumes.insert_one({"resume_id": "res1", "user_id": "u1", "analysis": {"extracted_projects": SPARK_PROJECTS}})
 
 
 async def _advance_to_spark_dsa(doc_id, model):

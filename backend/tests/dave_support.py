@@ -83,7 +83,7 @@ def dave_world(monkeypatch):
     clock = _Clock()
     model = _DaveModel()
     fake = SimpleNamespace(interviews=_Coll(), oa_attempts=_Coll([_attempt("dave")]), reports=_Coll(),
-                           resumes=_Coll([{"resume_id": "res1", "analysis": {"extracted_projects": DAVE_PROJECTS}}]))
+                           resumes=_Coll([{"resume_id": "res1", "user_id": "u1", "analysis": {"extracted_projects": DAVE_PROJECTS}}]))
     monkeypatch.setattr(server, "db", fake)
     monkeypatch.setattr(server, "now_utc", clock.now)
     monkeypatch.setattr(server, "call_json_gpt", model)

@@ -1849,6 +1849,20 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
     if cluster_options and body.cluster not in cluster_options:
         raise HTTPException(400, f"cluster must be one of {cluster_options}")
 
+    # Ownership/scope check (2026-10): a resume_id must belong to the
+    # requesting user AND have been analyzed for this same company --
+    # otherwise it's rejected outright, same 404-on-scope-mismatch
+    # convention as get_resume's own user_id-scoped lookup above. This
+    # mirrors cluster's existing "an optional field, if given, must be
+    # valid" treatment rather than silently ignoring a bad value.
+    if body.resume_id:
+        resume_doc = await db.resumes.find_one(
+            {"resume_id": body.resume_id, "user_id": user["user_id"], "company_id": body.company_id},
+            {"_id": 0},
+        )
+        if not resume_doc:
+            raise HTTPException(404, "Resume not found")
+
     # TCS static-bank feasibility pre-check (2026-10, zero-AI-calls pass):
     # BEFORE creating the attempt or charging a run, confirm the static bank
     # can actually fill one attempt's draw -- recycling means this never
@@ -3458,7 +3472,13 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
 
     resume_projects: List[dict] = []
     if attempt.get("resume_id"):
-        resume = await db.resumes.find_one({"resume_id": attempt["resume_id"]}, {"_id": 0})
+        # Ownership check (2026-10): scope by user_id too, not just
+        # resume_id -- a mismatch behaves exactly like "no resume at all"
+        # (the existing graceful path below), never leaking whether a
+        # resume with that id exists for someone else.
+        resume = await db.resumes.find_one(
+            {"resume_id": attempt["resume_id"], "user_id": user["user_id"]}, {"_id": 0}
+        )
         if resume:
             resume_projects = resume.get("analysis", {}).get("extracted_projects", []) or []
 

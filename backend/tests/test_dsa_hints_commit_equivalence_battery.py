@@ -40,7 +40,7 @@ def _build_commit_world(monkeypatch):
     clock = _Clock()
     model = _CommitModel()
     fake = SimpleNamespace(interviews=_Coll(), oa_attempts=_Coll([_attempt("commit")]), reports=_Coll(),
-                           resumes=_Coll([{"resume_id": "res1", "analysis": {"extracted_projects": COMMIT_PROJECTS}}]))
+                           resumes=_Coll([{"resume_id": "res1", "user_id": "u1", "analysis": {"extracted_projects": COMMIT_PROJECTS}}]))
     monkeypatch.setattr(server, "db", fake)
     monkeypatch.setattr(server, "now_utc", clock.now)
     monkeypatch.setattr(server, "call_json_gpt", model)

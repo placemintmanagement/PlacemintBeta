@@ -76,7 +76,7 @@ async def _seed(db, tier, projects):
     await db.resumes.delete_many({})
     await db.reports.delete_many({})
     await db.oa_attempts.insert_one(_spark_attempt(tier))
-    await db.resumes.insert_one({"resume_id": "res1", "analysis": {"extracted_projects": projects}})
+    await db.resumes.insert_one({"resume_id": "res1", "user_id": "u1", "analysis": {"extracted_projects": projects}})
 
 
 USER = {"user_id": "u1", "name": "Priya"}
