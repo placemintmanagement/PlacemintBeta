@@ -2839,6 +2839,8 @@ def sample_problems(
     - ``difficulty_target``:
         * 'easy_medium' \u2013 60% Easy + 40% Medium (Zoho R2)
         * 'hard'        \u2013 all Hard (Zoho R3, IBM DSA)
+        * 'medium'      \u2013 all Medium (Core Assessment track)
+        * 'easy'        \u2013 all Easy (TCS NQT Advanced Coding, profile A slot 1)
         * None          \u2013 15/65/20 Easy/Medium/Hard
     - ``needs_buggy``: only sample problems that have a ``buggy_code`` field
       (Automata Fix requires it).
@@ -2874,6 +2876,17 @@ def sample_problems(
             # Should never happen with current bank depth (10 Mediums), but
             # top up with Easy as a last resort rather than under-serving.
             picks += take("Easy", count - len(picks))
+    elif difficulty_target == "easy":
+        # All Easy -- TCS NQT Advanced Coding profile A's first slot (the
+        # other slot is a separate 'medium' call; see
+        # tcs_recruitment_process.py's apply_coding_profile).
+        picks = take("Easy", count)
+        if len(picks) < count:
+            # Bank depth is 24 Easy as of 2026-10 (see tcs_bank_gap_report.md
+            # in scratchpad) -- this top-up should not trigger for TCS's
+            # single-Easy-problem draw, but mirrors 'medium's same
+            # never-under-serve fallback rather than assuming it never will.
+            picks += take("Medium", count - len(picks))
     else:
         want_e = max(0, int(round(count * 0.15)))
         want_h = max(0, int(round(count * 0.20)))
