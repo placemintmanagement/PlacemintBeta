@@ -2883,6 +2883,37 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
     if not section:
         raise HTTPException(404, "Section not found")
 
+    # Server-side section-order enforcement, generic across every company
+    # (see the registry-wide test in test_oa_section_order_enforcement.py).
+    # Previously submit_section found the target section purely by key, with
+    # no check that it was the CURRENT one, and always advanced
+    # current_section_index by 1 regardless of which key was actually
+    # submitted -- a client could submit sections out of order, or submit
+    # the same section twice, and the server would accept and grade both.
+    # The attempt_not_in_progress check also covers the attempt-already-
+    # completed case reached via POST .../finish-part-a, which marks
+    # "completed" WITHOUT advancing current_section_index past whatever
+    # optional section was skipped -- so a plain index-vs-key check alone
+    # would not have caught a late submit to that still-"current" section.
+    if attempt.get("status") != "in_progress":
+        raise HTTPException(409, {
+            "code": "attempt_not_in_progress",
+            "message": "This attempt is not in progress.",
+        })
+    if body.section_key in attempt.get("section_results", {}):
+        raise HTTPException(409, {
+            "code": "section_already_submitted",
+            "message": "This section was already submitted.",
+        })
+    current_idx = attempt.get("current_section_index", 0)
+    current_key = attempt["sections"][current_idx]["key"] if current_idx < len(attempt["sections"]) else None
+    if body.section_key != current_key:
+        raise HTTPException(409, {
+            "code": "wrong_section_order",
+            "message": "Sections must be submitted in order.",
+            "expected_section_key": current_key,
+        })
+
     stype = section["type"]
     if stype == "coding":
         result = await _grade_coding_section(section, body.answers)

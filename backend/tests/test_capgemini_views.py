@@ -36,11 +36,19 @@ def _section_results():
     }
 
 
-def _attempt_with_tier(tier_doc):
+def _attempt_with_tier(tier_doc, status="completed", current_section_index=1):
+    # status/current_section_index default to a POST-completion state (used
+    # by test_get_oa_returns_only_tier_and_lpa, where the tier is already
+    # stored). The submit_section tests below override both to a realistic
+    # PRE-submission state ("in_progress", index 0, pointing at the one
+    # section about to be submitted) -- required now that submit_section
+    # enforces status == "in_progress" and section_key == the section at
+    # current_section_index (see server.py's ordering checks); the old code
+    # never read either field here, so this distinction was previously moot.
     return {
         "attempt_id": "att_1", "user_id": "u1", "company_id": "capgemini", "company_name": "Capgemini",
-        "status": "completed", "sections": [{"key": "round5_cognitive", "type": "mcq", "questions": []}],
-        "section_results": _section_results(), "answers": {}, "current_section_index": 1,
+        "status": status, "sections": [{"key": "round5_cognitive", "type": "mcq", "questions": []}],
+        "section_results": _section_results(), "answers": {}, "current_section_index": current_section_index,
         "capgemini_tier": tier_doc,
     }
 
@@ -65,7 +73,7 @@ def test_get_oa_returns_only_tier_and_lpa(monkeypatch):
 
 
 def test_submit_section_response_has_no_breakdown(monkeypatch):
-    fake = _FakeDb(_attempt_with_tier(None))
+    fake = _FakeDb(_attempt_with_tier(None, status="in_progress", current_section_index=0))
     monkeypatch.setattr(server, "db", fake)
     monkeypatch.setattr(server, "_grade_mcq_like", lambda section, answers: {"score": 0.7, "passed": True})
     body = server.SubmitSectionIn(section_key="round5_cognitive", answers={})
@@ -79,7 +87,7 @@ def test_submit_section_response_has_no_breakdown(monkeypatch):
 
 
 def test_submit_section_cognitive_055_gives_no_tier(monkeypatch):
-    fake = _FakeDb(_attempt_with_tier(None))
+    fake = _FakeDb(_attempt_with_tier(None, status="in_progress", current_section_index=0))
     monkeypatch.setattr(server, "db", fake)
     monkeypatch.setattr(server, "_grade_mcq_like", lambda section, answers: {"score": 0.55, "passed": False})
     body = server.SubmitSectionIn(section_key="round5_cognitive", answers={})

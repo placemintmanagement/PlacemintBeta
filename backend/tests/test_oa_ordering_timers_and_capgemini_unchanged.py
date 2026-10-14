@@ -1,15 +1,13 @@
 """Three things requested for the TCS Part-B work, that are about the shared
 OA engine rather than TCS specifically:
 
-1. Whether Foundation-style sections are actually non-reorderable and
-   actually have a server-enforced timer TODAY. These are written as
-   strict xfail probes, not passing tests, because direct experimentation
-   (see the probe in this file) shows NEITHER property currently holds for
-   ANY company's submit_section flow -- this predates the TCS work and is
-   not something this session's diff introduced or touched. Marking them
-   xfail(strict=True) keeps this gap visible in test output (as XFAIL, not
-   a silent pass) rather than asserting the current, unenforced behavior
-   as if it were the desired spec.
+1. Section ordering is now server-enforced (submit_section's 409
+   wrong_section_order / section_already_submitted / attempt_not_in_progress
+   checks -- see the registry-wide coverage in
+   test_oa_section_order_enforcement.py for every company). The timer probe
+   stays an xfail: no per-section deadline is stored or enforced anywhere
+   today (see scratchpad/server_timer_design.md for the design to close that
+   gap -- deliberately not built in this pass).
 2. That the client cannot set or influence tcs_tier via the normal
    submit_section completion path (finish-part-a's equivalent is covered in
    test_tcs_finish_part_a.py).
@@ -77,27 +75,9 @@ def _attempt(current_section_index=0, company_id="tcs-nqt", section_results=None
     return doc
 
 
-# ---- 1. Ordering / timers: current, real behavior -- marked xfail(strict) --
+# ---- 1. Ordering is now server-enforced (was xfail, now a real assertion) --
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "GAP (pre-existing, not TCS-specific): submit_section looks up the "
-        "target section by body.section_key via `next(s for s in "
-        "attempt['sections'] if s['key'] == body.section_key)`, not by "
-        "position, and then unconditionally advances current_section_index "
-        "by 1 regardless of which key was actually submitted. There is no "
-        "check anywhere that body.section_key == "
-        "attempt['sections'][current_section_index]['key']. Today a client "
-        "CAN submit 'reasoning' (Foundation's 3rd section) while "
-        "current_section_index is still 0 ('numerical'), and the server "
-        "accepts and grades it. Decision #5 wants Foundation to be "
-        "non-reorderable server-side; this is the gap that would need "
-        "closing to make that true -- flagged here rather than silently "
-        "patched into the shared 14-company submit_section endpoint."
-    ),
-)
-def test_foundation_sections_are_not_yet_reorder_blocked_server_side(monkeypatch):
+def test_foundation_sections_are_reorder_blocked_server_side(monkeypatch):
     fake = _FakeDb([_attempt(current_section_index=0)])  # should still be on "numerical"
     server.db = fake
     monkeypatch.setattr(
@@ -105,11 +85,14 @@ def test_foundation_sections_are_not_yet_reorder_blocked_server_side(monkeypatch
         lambda section, answers: {"score": 1.0, "correct": 1, "total": 1, "passed": True},
     )
     body = server.SubmitSectionIn(section_key="reasoning", answers={})  # out of order
-    with pytest.raises(HTTPException):
-        # Desired behavior: the server should REJECT this (409/400). Today
-        # it does not raise at all -- it grades "reasoning" and advances the
-        # index -- so this assertion currently fails, which is the point.
+    with pytest.raises(HTTPException) as exc:
         asyncio.run(server.submit_section("a1", body, user={"user_id": "u1"}))
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "wrong_section_order"
+    assert exc.value.detail["expected_section_key"] == "numerical"
+    # And it must not have been graded or advanced.
+    assert "reasoning" not in fake.oa_attempts.docs["a1"]["section_results"]
+    assert fake.oa_attempts.docs["a1"]["current_section_index"] == 0
 
 
 @pytest.mark.xfail(

@@ -269,7 +269,7 @@ export default function OARunner() {
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Submit failed");
+      await handleSectionSubmitError(err);
     } finally { setSubmitting(false); }
   };
 
@@ -296,8 +296,28 @@ export default function OARunner() {
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Submit failed");
+      await handleSectionSubmitError(err);
     } finally { setSubmitting(false); }
+  };
+
+  // Shared recovery for a submit_section 409 (wrong_section_order /
+  // section_already_submitted / attempt_not_in_progress) -- these mean our
+  // local view of the attempt is stale (another tab already advanced it, or
+  // a double-submit race lost to the first request), not a real failure the
+  // candidate caused. Resync silently from the server instead of showing an
+  // error: no error banner, and refetching restores current_section_index
+  // and section_results from server truth, so nothing already submitted is
+  // lost. Any other status (404/500/etc) is a real failure and still toasts.
+  const handleSectionSubmitError = async (err) => {
+    if (err.response?.status === 409) {
+      try {
+        const { data: fresh } = await api.get(`/oa/${attemptId}`);
+        setAttempt(fresh);
+      } catch { /* ignore -- next interaction will retry */ }
+      return;
+    }
+    const detail = err.response?.data?.detail;
+    toast.error((detail && detail.message) || detail || "Submit failed");
   };
 
   const progressPct = (attempt.current_section_index / attempt.sections.length) * 100;
