@@ -12,6 +12,7 @@ import re
 import random
 import difflib
 import asyncio
+import contextlib
 import uuid
 import hmac
 import hashlib
@@ -49,10 +50,27 @@ from pydantic import BaseModel, EmailStr, Field
 import pdfplumber
 
 from companies import COMPANIES, DEPARTMENTS, get_company, get_department
+
+# Companies whose EVERY section is marked "source": "static_bank_only"
+# (today: only TCS NQT) -- derived from the registry itself, not
+# hardcoded, so marking a future company the same way in companies.py
+# automatically extends the per-attempt AIForbiddenError guard (see
+# submit_section/finish_oa_part_a/final_report below) and
+# check_tcs_static_feasibility's sibling checks without a second place to
+# update. A company with NO sections at all is deliberately excluded
+# (all() on an empty generator is vacuously True, which would be wrong here).
+_STATIC_BANK_ONLY_COMPANY_IDS = {
+    c["id"] for c in COMPANIES
+    if c.get("sections") and all(s.get("source") == "static_bank_only" for s in c["sections"])
+}
 from services import capgemini_tiers
 from services import tcs_tiers
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_recruitment_process import (
     apply_coding_profile as _tcs_apply_coding_profile,
+    draw_tcs_foundation_and_advanced as _tcs_draw_foundation_and_advanced,
+    draw_tcs_coding_problems as _tcs_draw_coding_problems,
+    check_tcs_static_feasibility as _tcs_check_static_feasibility,
+    TCSBankBlockedError as _TCSBankBlockedError,
 )
 from services.code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
 from banks.problem_bank import sample_problems as _sample_problems
@@ -97,6 +115,8 @@ from services.ai_service import (
     dave_complexity_prompt,
     dave_cs_flags_prompt,
     dave_hr_flags_prompt,
+    AIForbiddenError,
+    forbid_ai_calls,
 )
 from banks import mcq_pool
 from banks import mcq_static_bank
@@ -1737,6 +1757,63 @@ async def _gen_and_persist_section(attempt_id: str, company_name: str, index: in
         chunk_idx += 1
 
 
+async def _generate_tcs_sections_bg(attempt_id: str, company: dict, user_id: str):
+    """TCS-only background generation (2026-10 zero-AI-calls pass): static-
+    bank-only, SEQUENTIAL (not asyncio.gather'd like every other company's
+    _generate_all_sections_bg below) -- draw_tcs_foundation_and_advanced's
+    own docstring explains why sequential ordering is what makes "never
+    repeat a question within one attempt" hold for free, across sections
+    that share a canonical topic (numerical/advanced both draw "aptitude";
+    reasoning/advanced both draw "reasoning"). forbid_ai_calls() wraps the
+    whole thing as a tripwire: the draw functions never call an LLM by
+    construction, so this should be a complete no-op in practice, but makes
+    any future regression here raise loudly instead of silently billing a
+    model call."""
+    sections = company["sections"]
+    try:
+        with forbid_ai_calls():
+            attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id}, {"sections": 1, "_id": 0})
+            current_sections = (attempt or {}).get("sections") or sections
+
+            mcq_results = await _tcs_draw_foundation_and_advanced(attempt_id, user_id, current_sections)
+            for key, questions in mcq_results.items():
+                index = next(i for i, s in enumerate(sections) if s["key"] == key)
+                await db.oa_attempts.update_one(
+                    {"attempt_id": attempt_id},
+                    {"$set": {f"sections.{index}.questions": questions}},
+                )
+
+            coding_section = next((s for s in current_sections if s["key"] == "coding"), None)
+            coding_index = next(i for i, s in enumerate(sections) if s["key"] == "coding")
+            difficulty_targets = (coding_section or {}).get("difficulty_targets") or ["medium", "medium"]
+            existing_coding = (coding_section or {}).get("questions")
+            coding_questions = await _tcs_draw_coding_problems(
+                attempt_id, user_id, difficulty_targets, existing_questions=existing_coding,
+            )
+            await db.oa_attempts.update_one(
+                {"attempt_id": attempt_id},
+                {"$set": {f"sections.{coding_index}.questions": coding_questions}},
+            )
+
+        await db.oa_attempts.update_one(
+            {"attempt_id": attempt_id},
+            {"$set": {"generation_status": "ready"}},
+        )
+        logger.info("bg gen: TCS attempt %s ready (static-bank-only, zero AI calls)", attempt_id)
+    except _TCSBankBlockedError as e:
+        logger.warning("TCS static bank blocked for attempt %s: %s", attempt_id, e)
+        await db.oa_attempts.update_one(
+            {"attempt_id": attempt_id},
+            {"$set": {"generation_status": "failed", "generation_error": str(e)[:400]}},
+        )
+    except Exception as e:  # pragma: no cover
+        logger.exception("TCS bg gen crashed for %s: %s", attempt_id, e)
+        await db.oa_attempts.update_one(
+            {"attempt_id": attempt_id},
+            {"$set": {"generation_status": "failed", "generation_error": str(e)[:400]}},
+        )
+
+
 async def _generate_all_sections_bg(attempt_id: str, company: dict, user_id: str):
     """Background task: generate each section concurrently. Every finished
     section is written back to Mongo AS SOON as it's ready (not batched at the
@@ -1771,6 +1848,21 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
     cluster_options = company.get("cluster_options")
     if cluster_options and body.cluster not in cluster_options:
         raise HTTPException(400, f"cluster must be one of {cluster_options}")
+
+    # TCS static-bank feasibility pre-check (2026-10, zero-AI-calls pass):
+    # BEFORE creating the attempt or charging a run, confirm the static bank
+    # can actually fill one attempt's draw -- recycling means this never
+    # fails for an ordinary "this candidate has seen a lot of questions"
+    # reason (recycling handles that), only for a genuinely too-small bank.
+    # A real HTTP 503 here (not a silently-doomed background generation)
+    # per the explicit requirement. See
+    # tcs_recruitment_process.check_tcs_static_feasibility's own docstring
+    # for why this check doesn't need (and deliberately doesn't use) a
+    # specific user_id.
+    if company["id"] == "tcs-nqt":
+        infeasible_reason = await _tcs_check_static_feasibility()
+        if infeasible_reason:
+            raise HTTPException(503, {"code": "static_bank_too_small", "message": infeasible_reason})
 
     # -- Entitlements gate ---------------------------------------------------
     # 1) Roll the 30-day window forward for Basic/Pro if needed.
@@ -1854,7 +1946,14 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
         )
 
     # Kick off background generation. asyncio.create_task returns immediately.
-    asyncio.create_task(_generate_all_sections_bg(attempt_id, company, user["user_id"]))
+    # TCS: dedicated static-bank-only, sequential generator (see its own
+    # docstring for why sequential, not gathered, is required) -- never the
+    # generic concurrent per-section path every other company uses, which
+    # has a live-LLM fallback TCS must never reach.
+    if company["id"] == "tcs-nqt":
+        asyncio.create_task(_generate_tcs_sections_bg(attempt_id, company, user["user_id"]))
+    else:
+        asyncio.create_task(_generate_all_sections_bg(attempt_id, company, user["user_id"]))
     attempt.pop("_id", None)
     return attempt
 
@@ -2231,7 +2330,33 @@ async def _grade_gamified_round_section(section: dict, answers: Dict[str, Any], 
     return result_out
 
 
-async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
+def _template_coding_note(vpass: int, vtotal: int, hpass: int, htotal: int, pct: float) -> Dict[str, Any]:
+    """Deterministic, template-based stand-in for the AI "note" on a graded
+    coding problem (2026-10, TCS zero-AI-calls pass) -- correctness/scoring
+    was ALREADY sandbox-only before this (the AI note's own score field is
+    read nowhere; `pct` from test results is what's actually used), so this
+    only replaces the free-text feedback with a fixed template built from
+    the same test counts, never a model call."""
+    if pct >= 1.0:
+        correctness = f"Passed all {vtotal + htotal} tests ({vpass} visible, {hpass} hidden)."
+    elif pct > 0:
+        correctness = f"Passed {vpass + hpass} of {vtotal + htotal} tests ({vpass}/{vtotal} visible, {hpass}/{htotal} hidden)."
+    else:
+        correctness = f"Passed 0 of {vtotal + htotal} tests."
+    return {
+        "score": int(round(pct * 100)),
+        "complexity_note": "",
+        "correctness_note": correctness,
+        "style_note": "",
+        "flagged_for_review": False,
+        "flag_reason": None,
+    }
+
+
+async def _grade_coding_section(section: dict, answers: Dict[str, Any], use_ai_note: bool = True) -> dict:
+    """`use_ai_note=False` (TCS, 2026-10 zero-AI-calls pass): skip the
+    call_json_gpt narrative-feedback call entirely and use a fixed template
+    built from the same sandbox test results instead -- never a model call."""
     problems = section.get("questions", [])
     per_problem = []
     total_score = 0.0
@@ -2259,12 +2384,15 @@ async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
         tests_pass = vpass + hpass
         tests_total = vtotal + htotal
         pct = (tests_pass / tests_total) if tests_total else 0
-        # AI grade for note
-        note = await call_json_gpt(
-            "You are a coding interviewer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
-            grade_coding_prompt(p, code, language, vpass, vtotal, hpass, htotal),
-        ) or {"score": int(pct * 100), "complexity_note": "", "correctness_note": "", "style_note": ""}
-        note = _attach_grading_flag(note)
+        if use_ai_note:
+            # AI grade for note
+            note = await call_json_gpt(
+                "You are a coding interviewer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+                grade_coding_prompt(p, code, language, vpass, vtotal, hpass, htotal),
+            ) or {"score": int(pct * 100), "complexity_note": "", "correctness_note": "", "style_note": ""}
+            note = _attach_grading_flag(note)
+        else:
+            note = _template_coding_note(vpass, vtotal, hpass, htotal, pct)
         per_problem.append({
             "problem_id": pid,
             "title": p.get("title"),
@@ -2915,34 +3043,42 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
         })
 
     stype = section["type"]
-    if stype == "coding":
-        result = await _grade_coding_section(section, body.answers)
-    elif stype == "debugging":
-        result = await _grade_debugging_section(section, body.answers)
-    elif stype == "ai_assisted":
-        # body.answers is deliberately IGNORED here -- see
-        # _finalize_ai_assisted_section's docstring for why (Round 4's
-        # true state lives in db.ai_assisted_sessions, not an answers
-        # payload; a client-supplied score/stage claim has no effect).
-        result = await _finalize_ai_assisted_section(section, attempt_id, user["user_id"])
-    elif stype == "essay":
-        result = await _grade_essay_section(section, body.answers)
-    elif stype == "speaking":
-        result = await _grade_speaking_section(section, body.answers)
-    elif stype == "reading_listening":
-        result = _grade_reading_listening_section(section, body.answers)
-    elif stype == "comm_mixed":
-        result = await _grade_comm_mixed_section(section, body.answers)
-    elif stype == "voice_mixed":
-        result = await _grade_voice_mixed_section(section, body.answers)
-    elif stype == "gamified_round":
-        result = await _grade_gamified_round_section(section, body.answers, attempt_id)
-    elif stype == "capgemini_round1":
-        result = await _grade_capgemini_round1_section(section, body.answers)
-    elif stype == "capgemini_round2_ai_literacy":
-        result = await _grade_capgemini_round2_ai_literacy_section(section, body.answers)
-    else:  # mcq / topic_mcq / pseudocode / comm / grammar / comprehension / capgemini_round2_technical
-        result = _grade_mcq_like(section, body.answers)
+    # Per-attempt AI-forbidden guard (2026-10, zero-AI-calls pass): any
+    # attempt for a static_bank_only company (today: TCS) must never reach
+    # a model call anywhere in its grading, not just coding -- wrapping the
+    # WHOLE dispatch below, not just the coding branch, is the genuine
+    # "per-attempt guard" the task asked for, not a TCS-coding-only patch.
+    is_static_bank_only = attempt.get("company_id") in _STATIC_BANK_ONLY_COMPANY_IDS
+    ai_guard = forbid_ai_calls() if is_static_bank_only else contextlib.nullcontext()
+    with ai_guard:
+        if stype == "coding":
+            result = await _grade_coding_section(section, body.answers, use_ai_note=not is_static_bank_only)
+        elif stype == "debugging":
+            result = await _grade_debugging_section(section, body.answers)
+        elif stype == "ai_assisted":
+            # body.answers is deliberately IGNORED here -- see
+            # _finalize_ai_assisted_section's docstring for why (Round 4's
+            # true state lives in db.ai_assisted_sessions, not an answers
+            # payload; a client-supplied score/stage claim has no effect).
+            result = await _finalize_ai_assisted_section(section, attempt_id, user["user_id"])
+        elif stype == "essay":
+            result = await _grade_essay_section(section, body.answers)
+        elif stype == "speaking":
+            result = await _grade_speaking_section(section, body.answers)
+        elif stype == "reading_listening":
+            result = _grade_reading_listening_section(section, body.answers)
+        elif stype == "comm_mixed":
+            result = await _grade_comm_mixed_section(section, body.answers)
+        elif stype == "voice_mixed":
+            result = await _grade_voice_mixed_section(section, body.answers)
+        elif stype == "gamified_round":
+            result = await _grade_gamified_round_section(section, body.answers, attempt_id)
+        elif stype == "capgemini_round1":
+            result = await _grade_capgemini_round1_section(section, body.answers)
+        elif stype == "capgemini_round2_ai_literacy":
+            result = await _grade_capgemini_round2_ai_literacy_section(section, body.answers)
+        else:  # mcq / topic_mcq / pseudocode / comm / grammar / comprehension / capgemini_round2_technical
+            result = _grade_mcq_like(section, body.answers)
 
     # Persist
     section_results = attempt.get("section_results", {})
@@ -5923,6 +6059,51 @@ async def oa_ai_assisted_self_review(attempt_id: str, section_key: str, body: Ai
 # =============================================================================
 
 @api.get("/report/{attempt_id}")
+def _build_tcs_template_report(attempt: dict, oa_summary: dict, review: dict) -> Dict[str, Any]:
+    """Deterministic, template-based final-report narrative for TCS (2026-10
+    zero-AI-calls pass) -- no call_json, ever, unless TCS_REPORT_USE_AI is
+    explicitly turned on. Built purely from oa_summary/review (which are
+    themselves purely computed, no model call either -- see oa_review) and
+    the attempt's own stored tcs_tier (whitelisted via tcs_tiers.client_view,
+    same server-computed-only guarantee every other TCS tier display has).
+    Same {overall_verdict, overall_score, narrative, weakest_dimension,
+    strongest_dimension, next_steps} shape call_json's AI report returns, so
+    the frontend's FinalReport page needs no TCS-specific rendering."""
+    section_results = oa_summary["section_results"]
+    scored = [(k, v.get("score") or 0.0) for k, v in section_results.items()]
+    strongest = max(scored, key=lambda kv: kv[1])[0] if scored else ""
+    weak_topics = sorted((k for k, s in scored if s < 0.5), key=lambda k: section_results[k].get("score") or 0)
+
+    tcs_tier_doc = attempt.get("tcs_tier")
+    track_line = ""
+    if tcs_tier_doc:
+        track_view = tcs_tiers.client_view(tcs_tier_doc)
+        if track_view.get("tier"):
+            track_line = f" Estimated track: {track_view['tier'].capitalize()} ({track_view.get('lpa_note', '')})."
+        else:
+            track_line = " No track estimate was reached (TCS does not publish its real cutoffs)."
+
+    section_lines = "; ".join(
+        f"{k}: {round((v.get('score') or 0) * 100)}%" for k, v in section_results.items()
+    )
+    narrative = (
+        f"TCS NQT -- composite score {int(oa_summary['composite_score'] * 100)}%, "
+        f"verdict: {oa_summary['verdict']}. Section scores -- {section_lines}."
+        f"{track_line}"
+    )
+    next_steps = [f"Revisit {k} (scored {round((section_results[k].get('score') or 0) * 100)}%)." for k in weak_topics] or [
+        "No section scored below 50% -- keep practicing at this level."
+    ]
+    return {
+        "overall_verdict": oa_summary["verdict"],
+        "overall_score": int(oa_summary["composite_score"] * 100),
+        "narrative": narrative,
+        "weakest_dimension": review["weakest_section"] or "",
+        "strongest_dimension": strongest,
+        "next_steps": next_steps,
+    }
+
+
 async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
     attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
     if not attempt:
@@ -5975,20 +6156,29 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
     if cached:
         return cached
 
-    report = await call_json(
-        "You are a senior career coach. Write ONE cohesive report. Return only strict JSON.",
-        final_report_prompt(attempt["company_name"], resume_analysis, oa_summary, interview_summary),
-        model=SONNET,
-        max_tokens=8000,  # longest, most synthesis-heavy output in the app; extra
-                          # headroom above the 4096 default costs nothing if unused
-    ) or {
-        "overall_verdict": oa_summary["verdict"],
-        "overall_score": int(oa_summary["composite_score"] * 100),
-        "narrative": "Report generation failed; showing raw OA verdict.",
-        "weakest_dimension": review["weakest_section"] or "",
-        "strongest_dimension": "",
-        "next_steps": [],
-    }
+    is_static_bank_only = attempt.get("company_id") in _STATIC_BANK_ONLY_COMPANY_IDS
+    if is_static_bank_only and not tcs_report_use_ai_enabled():
+        # TCS, TCS_REPORT_USE_AI off (the default): deterministic template,
+        # never call_json. forbid_ai_calls() here is a tripwire, not load-
+        # bearing -- _build_tcs_template_report never calls an LLM by
+        # construction, so this should be a complete no-op in practice.
+        with forbid_ai_calls():
+            report = _build_tcs_template_report(attempt, oa_summary, review)
+    else:
+        report = await call_json(
+            "You are a senior career coach. Write ONE cohesive report. Return only strict JSON.",
+            final_report_prompt(attempt["company_name"], resume_analysis, oa_summary, interview_summary),
+            model=SONNET,
+            max_tokens=8000,  # longest, most synthesis-heavy output in the app; extra
+                              # headroom above the 4096 default costs nothing if unused
+        ) or {
+            "overall_verdict": oa_summary["verdict"],
+            "overall_score": int(oa_summary["composite_score"] * 100),
+            "narrative": "Report generation failed; showing raw OA verdict.",
+            "weakest_dimension": review["weakest_section"] or "",
+            "strongest_dimension": "",
+            "next_steps": [],
+        }
 
     doc = {
         "report_id": new_id("rep"),
@@ -6271,6 +6461,18 @@ def hints_enabled(env_value: Optional[str] = None) -> bool:
     that code runs at all, so behaviour is byte-for-byte unchanged from
     before this feature existed."""
     raw = os.environ.get("HINTS_ENABLED") if env_value is None else env_value
+    return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
+
+
+def tcs_report_use_ai_enabled(env_value: Optional[str] = None) -> bool:
+    """TCS_REPORT_USE_AI: default OFF (opposite polarity from every other
+    flag here -- OFF is the SAFE/zero-AI-calls state, not a disabled
+    feature). With it off (the default), final_report builds TCS's report
+    narrative from a fixed template over oa_summary alone, never calling
+    call_json. Flipping it on is an explicit, deliberate opt BACK into the
+    model call every other company still gets -- not a bug, a one-line
+    escape hatch the owner asked for."""
+    raw = os.environ.get("TCS_REPORT_USE_AI") if env_value is None else env_value
     return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
 
 

@@ -71,13 +71,22 @@ COMPANIES: List[Dict[str, Any]] = [
             # --- Part A: Foundation (75 min OFFICIAL-TCS, 65 Qs, mandatory) ---
             # Minutes: OFFICIAL-TCS. Counts (20/25/20): USER-SUPPLIED-SECONDARY
             # (screenshot/AI summary), PUBLIC-SOURCE-ONLY agrees (FACE Prep).
-            {"key": "numerical", "name": "Numerical Ability", "type": "mcq", "count": 20, "minutes": 25, "cutoff": 0.5},
-            {"key": "verbal", "name": "Verbal Ability", "type": "mcq", "count": 25, "minutes": 25, "cutoff": 0.5},
-            {"key": "reasoning", "name": "Reasoning Ability", "type": "mcq", "count": 20, "minutes": 25, "cutoff": 0.5},
+            # "source": "static_bank_only" (STATED-BY-USER, 2026-10 zero-AI-
+            # calls pass): on EVERY TCS section. server.py's generation
+            # dispatch checks this before its generic per-type branching and
+            # routes to tcs_recruitment_process's dedicated static-only draw
+            # functions instead -- never the generic live-LLM fallback path
+            # every other company's plain "mcq"/extra_topics sections can
+            # still reach. See tcs_recruitment_process.py's module docstring
+            # on draw_tcs_foundation_and_advanced/draw_tcs_coding_problems.
+            {"key": "numerical", "name": "Numerical Ability", "type": "mcq", "count": 20, "minutes": 25, "cutoff": 0.5, "source": "static_bank_only"},
+            {"key": "verbal", "name": "Verbal Ability", "type": "mcq", "count": 25, "minutes": 25, "cutoff": 0.5, "source": "static_bank_only"},
+            {"key": "reasoning", "name": "Reasoning Ability", "type": "mcq", "count": 20, "minutes": 25, "cutoff": 0.5, "source": "static_bank_only"},
             # --- Part B: Advanced (115 min OFFICIAL-TCS, optional) ---
             {
                 "key": "advanced", "name": "Advanced Quantitative + Reasoning Ability",
                 "type": "mcq", "count": 15, "minutes": 25, "cutoff": 0.5, "optional": True,
+                "source": "static_bank_only",
                 # Minutes + "shares one window" structure: OFFICIAL-TCS.
                 # 15-question total: USER-SUPPLIED-SECONDARY ("14-15").
                 # 10 Quant / 5 Reasoning split: PUBLIC-SOURCE-ONLY (FACE Prep)
@@ -101,7 +110,7 @@ COMPANIES: List[Dict[str, Any]] = [
             # that module's docstring). Languages: see TCS_CODING_LANGUAGES
             # in tcs_recruitment_process.py (C, C++, Java, Python --
             # STATED-BY-USER, C# excluded as sandbox-unsupported).
-            {"key": "coding", "name": "Advanced Coding", "type": "coding", "count": 2, "minutes": 90, "cutoff": 0.5, "optional": True},
+            {"key": "coding", "name": "Advanced Coding", "type": "coding", "count": 2, "minutes": 90, "cutoff": 0.5, "optional": True, "source": "static_bank_only"},
         ],
     },
     {

@@ -25,6 +25,7 @@ vestigial but left in place rather than touching every call site that reads it.
 """
 from __future__ import annotations
 import atexit
+import contextvars
 import os
 import json
 import re
@@ -34,6 +35,54 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
+
+
+# ---- AI-forbidden guard (2026-10, TCS zero-AI-calls pass) -----------------
+# A company whose entire OA flow is marked "source": "static_bank_only" in
+# companies.py (today: only TCS NQT) must never reach a real model call --
+# not "the tests happen to mock it", a genuine production-code guard. This
+# lives HERE, inside call_json/call_json_gpt's own bodies (the actual
+# functions every caller in the codebase ultimately runs, regardless of
+# which module imported a reference to them -- server.py, banks/mcq_pool.py
+# and capgemini_recruitment_process.py each hold their own independent
+# import of these names, so a guard wrapping only one of those bindings
+# would miss the others; putting the check in the shared function body
+# itself is the one place that can't be bypassed by import path).
+#
+# Default (contextvar False): zero behavior change for every call site that
+# never uses forbid_ai_calls() -- i.e. every company except the
+# static_bank_only ones.
+class AIForbiddenError(RuntimeError):
+    """Raised when call_json/call_json_gpt is invoked while AI calls are
+    forbidden for the current operation (a static_bank_only company's OA
+    flow). A correctness guard, not a test-only stub -- active in
+    production code, not only under pytest."""
+
+
+_ai_forbidden_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar("ai_forbidden", default=False)
+
+
+class forbid_ai_calls:
+    """Context manager: any call_json/call_json_gpt invoked anywhere in the
+    call stack while this is active raises AIForbiddenError immediately,
+    before any real network call. Reentrant-safe (nested use leaves the
+    flag True until the OUTERMOST context exits)."""
+
+    def __enter__(self):
+        self._token = _ai_forbidden_ctx.set(True)
+        return self
+
+    def __exit__(self, *exc):
+        _ai_forbidden_ctx.reset(self._token)
+        return False
+
+
+def _check_ai_allowed(fn_name: str) -> None:
+    if _ai_forbidden_ctx.get():
+        raise AIForbiddenError(
+            f"{fn_name} invoked while AI calls are forbidden for this attempt "
+            "(a static_bank_only company's OA flow must never reach a model call)."
+        )
 
 HAIKU = ("anthropic", "claude-haiku-4-5-20251001")
 SONNET = ("anthropic", "claude-sonnet-4-5-20250929")
@@ -246,6 +295,7 @@ async def call_json(
     `session_id` is accepted for backward compatibility with existing call sites
     but unused — every call here was already stateless per-call even under the
     old emergentintegrations path (a fresh LlmChat was constructed every time)."""
+    _check_ai_allowed("call_json")
     system_full = (
         system
         + "\n\nCRITICAL: Respond ONLY with valid JSON. No prose, no code fences, "
@@ -348,6 +398,7 @@ async def call_json_gpt(
         and does not count against DEV_MAX_MODEL_CALLS.
       - DEV_MAX_MODEL_CALLS, if set above 0, raises before the call that
         would exceed it (see _dev_max_model_calls)."""
+    _check_ai_allowed("call_json_gpt")
     system_full = (
         system
         + "\n\nCRITICAL: Respond ONLY with valid JSON. No prose, no code fences, "
