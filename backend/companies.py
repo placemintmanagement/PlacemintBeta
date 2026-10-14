@@ -33,55 +33,75 @@ COMPANIES: List[Dict[str, Any]] = [
         "department": "cse",
         "group": "Group 1: IT Services & Mass Recruiters",
         "name": "TCS NQT",
-        "tagline": "Foundation (Ninja) \u2192 Advanced Quant+Reasoning (Digital) \u2192 Advanced Coding (Prime)",
+        "tagline": "Foundation \u2192 Advanced Quant+Reasoning \u2192 Advanced Coding (Part B optional; Digital/Prime need it)",
         "logo": "SiTcs",
         "verified": True,
-        "time_minutes": 191,
-        # Rebuilt 2026-07-21 per newly confirmed 2026 TCS iON research, replacing
-        # the earlier estimated structure entirely. No email-writing section --
-        # none existed in the prior structure either, nothing removed.
-        # No negative marking anywhere below -- confirmed absent, same as before.
+        "time_minutes": 190,  # OFFICIAL-TCS
+        # Rebuilt 2026-10 against the owner's explicit per-field source
+        # decisions -- see tcs_recruitment_process.py's module docstring for
+        # the full tagging convention (OFFICIAL-TCS / STATED-BY-USER /
+        # USER-SUPPLIED-SECONDARY / PUBLIC-SOURCE-ONLY / CONFLICTING-SOURCES /
+        # INTERPOLATED) and the official source:
+        # https://www.tcs.com/careers/india/tcs-all-india-nqt-hiring
+        # No negative marking anywhere below -- OFFICIAL-TCS (via the tcsion
+        # NQT page).
         #
-        # Exam-behavior requirements (real TCS iON UX, NOT built today -- flagged
-        # for the frontend team to eventually match): section switching disabled,
-        # sub-section switching disabled, browser tab-switch ends the exam
-        # immediately, candidates CAN revisit already-answered questions within
-        # the current section. None of this is enforced by this schema yet.
+        # Exam-behavior requirements (OFFICIAL-TCS real TCS iON UX, NOT built
+        # today -- flagged for the frontend team to eventually match): section
+        # switching disabled, sub-section switching disabled, browser
+        # tab-switch ends the exam immediately, candidates CAN revisit
+        # already-answered questions within the current section. None of this
+        # is enforced by this schema yet.
         #
-        # "Ninja/Digital/Prime tiers" is a DESCRIPTIVE label only, same as before
-        # this change -- server.py has no actual per-tier gating logic today, so
-        # there's nothing to "re-verify" beyond keeping the label accurate.
+        # "part_b_optional": the official page's own wording is Part B is
+        # "mandatory if you aspire for a Digital or Prime offer" -- OFFICIAL-TCS.
+        # Read by server.py's start_oa (applies the coding-profile roll) and
+        # its POST /oa/{id}/finish-part-a (only allowed when every remaining
+        # section is itself marked "optional": True, below). Everyone is still
+        # offered and encouraged to attempt both parts; skipping Part B caps
+        # the track estimate at Ninja (services/tcs_tiers.py).
+        "part_b_optional": True,
         "scoring_mode": "sectional",
         "chips": [
-            "Foundation: 3 mandatory sections (Ninja)",
-            "Advanced R1: combined Quant+Reasoning pool (Digital)",
-            "Advanced R2: 3 coding problems (Prime)",
+            "Foundation: 3 mandatory sections",
+            "Part B (optional): combined Quant+Reasoning pool",
+            "Part B (optional): 2 coding problems, profile-drawn",
         ],
         "sections": [
-            # --- Part A: Foundation (76 min, 65 Qs, mandatory for Ninja) ---
+            # --- Part A: Foundation (75 min OFFICIAL-TCS, 65 Qs, mandatory) ---
+            # Minutes: OFFICIAL-TCS. Counts (20/25/20): USER-SUPPLIED-SECONDARY
+            # (screenshot/AI summary), PUBLIC-SOURCE-ONLY agrees (FACE Prep).
             {"key": "numerical", "name": "Numerical Ability", "type": "mcq", "count": 20, "minutes": 25, "cutoff": 0.5},
-            {"key": "verbal", "name": "Verbal Ability", "type": "mcq", "count": 25, "minutes": 26, "cutoff": 0.5},
+            {"key": "verbal", "name": "Verbal Ability", "type": "mcq", "count": 25, "minutes": 25, "cutoff": 0.5},
             {"key": "reasoning", "name": "Reasoning Ability", "type": "mcq", "count": 20, "minutes": 25, "cutoff": 0.5},
-            # --- Part B: Advanced (115 min, mandatory for Digital/Prime) ---
+            # --- Part B: Advanced (115 min OFFICIAL-TCS, optional) ---
             {
                 "key": "advanced", "name": "Advanced Quantitative + Reasoning Ability",
-                "type": "mcq", "count": 15, "minutes": 25, "cutoff": 0.5,
-                # Source gives a SHARED 14-16 questions combined (not each) --
-                # picked 15 (midpoint), split via extra_topics below, confirmed
-                # 2026-07-21.
+                "type": "mcq", "count": 15, "minutes": 25, "cutoff": 0.5, "optional": True,
+                # Minutes + "shares one window" structure: OFFICIAL-TCS.
+                # 15-question total: USER-SUPPLIED-SECONDARY ("14-15").
+                # 10 Quant / 5 Reasoning split: PUBLIC-SOURCE-ONLY (FACE Prep)
+                # -- TCS itself does not publish the split.
                 "extra_topics": [
                     # key must be a canonical topic key (mcq_static_bank.CANONICAL_TOPICS),
                     # not a raw section-key alias like "quant" -- extra_topics are checked
                     # directly against CANONICAL_TOPICS (server.py's _generate_extra_topics),
                     # they don't go through SECTION_KEY_TO_TOPIC. "quant" would silently get
                     # 0% static-bank draw and hit a never-populated "core-quant" pool key.
-                    {"key": "aptitude", "name": "Advanced Quantitative Ability", "count": 8},
-                    {"key": "reasoning", "name": "Advanced Reasoning Ability", "count": 7},
+                    {"key": "aptitude", "name": "Advanced Quantitative Ability", "count": 10},
+                    {"key": "reasoning", "name": "Advanced Reasoning Ability", "count": 5},
                 ],
             },
-            # 3 questions per explicit user override (2026-07-21) of the source's
-            # internal table discrepancy (which suggested 2) -- going with 3.
-            {"key": "coding", "name": "Advanced Coding", "type": "coding", "count": 3, "minutes": 90, "cutoff": 0.5},
+            # 2 problems: STATED-BY-USER (not the earlier 3-problem guess).
+            # 90 minutes: OFFICIAL-TCS. difficulty_targets is set PER-ATTEMPT
+            # by server.py's start_oa calling
+            # tcs_recruitment_process.apply_coding_profile() -- not a static
+            # value here, since the profile (A: 1 easy+1 medium, B: 2 medium)
+            # is a seeded 50/50 draw per attempt (INTERPOLATED weight; see
+            # that module's docstring). Languages: see TCS_CODING_LANGUAGES
+            # in tcs_recruitment_process.py (C, C++, Java, Python --
+            # STATED-BY-USER, C# excluded as sandbox-unsupported).
+            {"key": "coding", "name": "Advanced Coding", "type": "coding", "count": 2, "minutes": 90, "cutoff": 0.5, "optional": True},
         ],
     },
     {
