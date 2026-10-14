@@ -6078,8 +6078,10 @@ def _build_tcs_template_report(attempt: dict, oa_summary: dict, review: dict) ->
     track_line = ""
     if tcs_tier_doc:
         track_view = tcs_tiers.client_view(tcs_tier_doc)
-        if track_view.get("tier"):
-            track_line = f" Estimated track: {track_view['tier'].capitalize()} ({track_view.get('lpa_note', '')})."
+        raw_tier = track_view.get("tier")
+        tier_name = tcs_tiers.TCS_TIER_DISPLAY_NAMES.get(raw_tier, raw_tier)
+        if tier_name:
+            track_line = f" Estimated track: {tier_name} ({track_view.get('reason', '')})."
         else:
             track_line = " No track estimate was reached (TCS does not publish its real cutoffs)."
 

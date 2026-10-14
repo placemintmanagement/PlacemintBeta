@@ -11,7 +11,10 @@ const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
 const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
 
 const TIER_NAMES = { spark: "Spark", dave: "Dave", commit: "Commit" };
-const TCS_TRACK_NAMES = { ninja: "Ninja", digital: "Digital", prime: "Prime" };
+const TCS_TRACK_NAMES = {
+  ninja: "Ninja", digital: "Digital", prime: "Prime",
+  not_qualified: "Below the estimated Foundation cutoff",
+};
 
 // Shown once, right after the final section of a Capgemini attempt. The tier
 // is computed by the server (services/capgemini_tiers.py) and passed here in
@@ -38,9 +41,12 @@ function TierUnlockCard({ tier, onDismiss }) {
 }
 
 // TCS equivalent of TierUnlockCard. The track is computed server-side
-// (services/tcs_tiers.py, all thresholds INTERPOLATED) and passed here in
-// the navigation state; the label is explicit that this is an ESTIMATE,
-// since TCS does not publish its real cutoffs.
+// (services/tcs_tiers.py: Foundation ratio + per-problem sandbox test-pass
+// ratios, never a model call) and passed here in the navigation state; the
+// section label and `reason` text are explicit that this is an ESTIMATE,
+// since TCS does not publish its real cutoffs. client_view() only ever
+// returns {tier, lpa, lpa_note, reason, qualified} -- no `label` field --
+// so this section label is a fixed string, not server-driven.
 function TCSTrackCard({ tier, onDismiss }) {
   return (
     <Card padding="24px 28px" className="mt-6" style={{ borderRadius: 24 }}>
@@ -48,10 +54,13 @@ function TCSTrackCard({ tier, onDismiss }) {
         <>
           <SectionLabel>estimated track (TCS does not publish cutoffs)</SectionLabel>
           <CardTitle style={{ fontSize: 24 }}>{TCS_TRACK_NAMES[tier.tier] || tier.tier}</CardTitle>
-          <div className="mt-2" style={{ fontSize: 16, color: "rgba(11,42,48,0.75)" }}>
-            UG {tier.lpa?.ug} · PG {tier.lpa?.pg}
-          </div>
-          {tier.lpa_note && <div className="mt-1" style={META}>{tier.lpa_note}</div>}
+          {tier.lpa && (
+            <div className="mt-2" style={{ fontSize: 16, color: "rgba(11,42,48,0.75)" }}>
+              UG {tier.lpa?.ug} · PG {tier.lpa?.pg}
+            </div>
+          )}
+          {tier.lpa_note && tier.lpa && <div className="mt-1" style={META}>{tier.lpa_note}</div>}
+          {tier.reason && <div className="mt-3" style={BODY}>{tier.reason}</div>}
         </>
       ) : (
         <>
