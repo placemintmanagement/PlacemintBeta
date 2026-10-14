@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 _RAW: List[Dict[str, Any]] = [
     # ------------------------------------------------------------------ EASY
@@ -2820,14 +2820,72 @@ async def get_seen_ids(user_id: str, topic: str = "coding") -> set:
     return set(doc.get("question_ids", [])) if doc else set()
 
 
+def bank_size_by_difficulty(difficulty: str) -> int:
+    """Total problem count at this difficulty, seen or unseen, across every
+    candidate -- feasibility checks and the bank-readiness report. No DB
+    access (the bank itself is the in-memory _RAW/_BANK list, not Mongo)."""
+    diff_name = {"easy": "Easy", "medium": "Medium", "hard": "Hard"}.get(difficulty, difficulty)
+    return sum(1 for p in _BANK if p["difficulty"] == diff_name)
+
+
 async def mark_seen(user_id: str, question_ids: List[str], topic: str = "coding") -> None:
     if _db is None or not question_ids:
         return
+    now = _now_iso()
+    # seen_at per id (2026-10, TCS static-only pass): records when each
+    # problem was last served, same convention mcq_static_bank.py already
+    # uses -- lets a recycle-aware sampler prefer the least-recently-seen
+    # problem instead of a purely random repeat. Purely additive: existing
+    # callers that only ever read question_ids are unaffected.
+    seen_at = {f"seen_at.{qid}": now for qid in question_ids if "." not in qid and "$" not in qid}
     await _db.problem_bank_seen.update_one(
         {"user_id": user_id, "topic": topic},
-        {"$addToSet": {"question_ids": {"$each": question_ids}}, "$set": {"updated_at": _now_iso()}},
+        {"$addToSet": {"question_ids": {"$each": question_ids}}, "$set": {"updated_at": now, **seen_at}},
         upsert=True,
     )
+
+
+async def sample_problems_with_reuse(
+    user_id: str, difficulty_target: str, exclude_ids: Optional[set] = None,
+    rng: Optional[random.Random] = None, topic: str = "coding",
+) -> Tuple[List[Dict[str, Any]], int]:
+    """ONE problem for `difficulty_target`, preferring unseen, falling back
+    to this user's least-recently-seen problem of that exact difficulty
+    once the unseen pool for it is exhausted. Never crosses difficulty
+    tiers (unlike sample_problems' own shortfall backfill, which tops up
+    from a different tier) -- recycling must stay within the slot's own
+    declared difficulty. `exclude_ids` additionally excludes ids already
+    drawn earlier in the SAME attempt (so problem 1 and problem 2 can never
+    collide even when both resolve to the same difficulty, e.g. TCS profile
+    B's two Medium slots). Returns (items, unfilled) -- items has 0 or 1
+    entries; unfilled is 1 if the bank (bank size, not just this user's
+    unseen subset) is too small to serve even one DISTINCT problem of this
+    difficulty that isn't already in exclude_ids."""
+    exclude_ids = set(exclude_ids or set())
+    diff_name = {"easy": "Easy", "medium": "Medium", "hard": "Hard"}.get(difficulty_target, difficulty_target)
+    pool = [p for p in _BANK if p["difficulty"] == diff_name and p["id"] not in exclude_ids]
+    if not pool:
+        return [], 1
+    seen = await get_seen_ids(user_id, topic)
+    unseen = [p for p in pool if p["id"] not in seen]
+    if unseen:
+        pick_from = unseen
+        if rng is not None:
+            pick_from = list(unseen)
+            rng.shuffle(pick_from)
+        picked = pick_from[0]
+        await mark_seen(user_id, [picked["id"]], topic)
+        return [picked], 0
+    # Unseen exhausted for this difficulty -- recycle, least-recently-seen first.
+    doc = await _db.problem_bank_seen.find_one({"user_id": user_id, "topic": topic}) if _db is not None else None
+    seen_at = (doc or {}).get("seen_at") or {}
+    candidates = list(pool)
+    if rng is not None:
+        rng.shuffle(candidates)
+    candidates.sort(key=lambda p: seen_at.get(p["id"], ""))
+    picked = candidates[0]
+    await mark_seen(user_id, [picked["id"]], topic)
+    return [picked], 0
 
 
 def sample_problems(

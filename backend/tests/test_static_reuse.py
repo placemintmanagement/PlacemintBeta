@@ -14,6 +14,12 @@ class _Cursor:
     def __init__(self, docs):
         self._docs = docs
 
+    def limit(self, n):
+        # Mirrors real pymongo/motor cursor chaining: limit() truncates and
+        # returns the (same) cursor for further chaining/await.
+        self._docs = self._docs[:n]
+        return self
+
     async def to_list(self, length=None):
         return list(self._docs if length is None else self._docs[:length])
 

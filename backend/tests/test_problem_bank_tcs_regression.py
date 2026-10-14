@@ -19,6 +19,7 @@ These tests prove that claim mechanically rather than by inspection alone:
    place), and its interview-stage DSA problems (Dave/Spark) are static
    copied dicts, not live sample_problems() calls.
 """
+import asyncio
 import random
 import subprocess
 import sys
@@ -175,3 +176,126 @@ def test_capgemini_round1_round2_section_types_are_not_the_generic_coding_type()
         "Capgemini now has a plain 'coding'-type section -- re-audit whether "
         "it routes through problem_bank.sample_problems()."
     )
+
+
+# ---- mark_seen() -- every company's real call shape (server.py:1079 etc.) --
+# This diff added `seen_at` timestamp tracking (TCS's recycling needs it).
+# The pre-existing $addToSet/question_ids/updated_at behavior every other
+# company's coding/debugging/ai_assisted sections depend on must be
+# unchanged -- proven here against HEAD with a minimal fake Mongo double.
+
+class _FakeSeenColl:
+    def __init__(self):
+        self.docs = []
+
+    async def update_one(self, query, update, upsert=False):
+        target = next(
+            (d for d in self.docs if d.get("user_id") == query.get("user_id") and d.get("topic") == query.get("topic")),
+            None,
+        )
+        if target is None:
+            if not upsert:
+                return
+            target = dict(query)
+            self.docs.append(target)
+        for field, values in update.get("$addToSet", {}).items():
+            target.setdefault(field, [])
+            for v in values.get("$each", []):
+                if v not in target[field]:
+                    target[field].append(v)
+        for field, value in update.get("$set", {}).items():
+            if "." in field:
+                head, sub = field.split(".", 1)
+                target.setdefault(head, {})[sub] = value
+            else:
+                target[field] = value
+
+
+class _FakeProblemBankSeenDb:
+    def __init__(self):
+        self.problem_bank_seen = _FakeSeenColl()
+
+
+@pytest.mark.parametrize("question_ids", [["two-sum"], ["two-sum", "lru-cache"], []])
+def test_mark_seen_addtoset_and_question_ids_unchanged_from_head(
+    question_ids, head_problem_bank, live_problem_bank,
+):
+    # Real call shape: await problem_bank.mark_seen(user_id, [p["id"] for p in picks])
+    # -- default topic="coding", used by every company's "coding" section.
+    head_db = _FakeProblemBankSeenDb()
+    head_problem_bank.init(head_db)
+    asyncio.run(head_problem_bank.mark_seen("u-regress", question_ids))
+
+    live_db = _FakeProblemBankSeenDb()
+    live_problem_bank.init(live_db)
+    asyncio.run(live_problem_bank.mark_seen("u-regress", question_ids))
+
+    if not question_ids:
+        assert head_db.problem_bank_seen.docs == []
+        assert live_db.problem_bank_seen.docs == []
+        return
+
+    head_doc = head_db.problem_bank_seen.docs[0]
+    live_doc = live_db.problem_bank_seen.docs[0]
+    assert head_doc["question_ids"] == live_doc["question_ids"] == question_ids
+    assert "updated_at" in head_doc and "updated_at" in live_doc
+    # The new, additive bit: live also records a per-id seen_at, HEAD never did.
+    assert "seen_at" not in head_doc
+    assert "seen_at" in live_doc
+    for qid in question_ids:
+        assert qid in live_doc["seen_at"]
+
+
+def test_mark_seen_second_call_still_addtoset_not_overwrite(head_problem_bank, live_problem_bank):
+    # Two separate mark_seen calls for the same user/topic must UNION
+    # question_ids (the original $addToSet contract), not replace the list --
+    # same assertion against both HEAD and live to prove the new $set keys
+    # (seen_at.*) didn't accidentally change the $addToSet merge behavior.
+    head_db = _FakeProblemBankSeenDb()
+    head_problem_bank.init(head_db)
+    asyncio.run(head_problem_bank.mark_seen("u2", ["two-sum"]))
+    asyncio.run(head_problem_bank.mark_seen("u2", ["lru-cache"]))
+
+    live_db = _FakeProblemBankSeenDb()
+    live_problem_bank.init(live_db)
+    asyncio.run(live_problem_bank.mark_seen("u2", ["two-sum"]))
+    asyncio.run(live_problem_bank.mark_seen("u2", ["lru-cache"]))
+
+    assert head_db.problem_bank_seen.docs[0]["question_ids"] == ["two-sum", "lru-cache"]
+    assert live_db.problem_bank_seen.docs[0]["question_ids"] == ["two-sum", "lru-cache"]
+
+
+# ---- sample_problems_with_reuse / bank_size_by_difficulty are NEW, --------
+# ---- TCS-only additions, not modifications of an existing function -------
+
+def test_sample_problems_with_reuse_and_bank_size_by_difficulty_are_new(head_problem_bank, live_problem_bank):
+    assert not hasattr(head_problem_bank, "sample_problems_with_reuse"), (
+        "sample_problems_with_reuse already existed at HEAD -- this is supposed "
+        "to be a brand-new, TCS-only function; re-audit what actually changed."
+    )
+    assert not hasattr(head_problem_bank, "bank_size_by_difficulty")
+    assert hasattr(live_problem_bank, "sample_problems_with_reuse")
+    assert hasattr(live_problem_bank, "bank_size_by_difficulty")
+
+
+def test_no_other_company_calls_sample_problems_with_reuse():
+    # Only tcs_recruitment_process.py may call the new function -- every
+    # other company's coding section must still go through the unmodified
+    # sample_problems()/sample_problems_with_reuse-free path.
+    import ast
+
+    tcs_path = (
+        BACKEND_DIR / "departments" / "computer_science_and_it" /
+        "group1_it_services_mass_recruiters" / "tcs" / "tcs_recruitment_process.py"
+    )
+    other_dirs = [
+        p for p in (BACKEND_DIR / "departments").rglob("*_recruitment_process.py")
+        if p != tcs_path
+    ]
+    for path in other_dirs:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == "sample_problems_with_reuse":
+                pytest.fail(f"{path} references sample_problems_with_reuse -- TCS-only function leaked to another company")
+            if isinstance(node, ast.Name) and node.id == "sample_problems_with_reuse":
+                pytest.fail(f"{path} references sample_problems_with_reuse -- TCS-only function leaked to another company")

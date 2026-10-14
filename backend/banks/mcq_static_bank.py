@@ -107,7 +107,7 @@ async def sample_static(user_id: str, topic: str, count: int) -> List[dict]:
     if _db is None or count <= 0:
         return []
     seen = await get_seen_ids(user_id, topic)
-    cursor = _db.mcq_static_bank.find({"topic": topic, "question_id": {"$nin": list(seen)}})
+    cursor = _db.mcq_static_bank.find({"topic": topic, "question_id": {"$nin": list(seen)}}).limit(count)
     docs = await cursor.to_list(length=count)
     if not docs:
         return []
@@ -138,12 +138,23 @@ def _item_from_doc(d: dict) -> dict:
     }
 
 
-async def sample_static_with_reuse(user_id: str, topic: str, count: int) -> Tuple[List[dict], int, int]:
+async def sample_static_with_reuse(
+    user_id: str, topic: str, count: int, rng: Optional[random.Random] = None,
+) -> Tuple[List[dict], int, int]:
     """Static-only draw with no LLM call. Serves up to `count` unseen questions
     for `topic` (sample_static), then fills any shortfall with this user's
     least-recently-seen static questions. Returns (items, reused, unfilled):
     `reused` counts questions repeated from earlier draws, `unfilled` counts
-    slots the bank could not fill at all (the bank is smaller than `count`)."""
+    slots the bank could not fill at all (the bank is smaller than `count`).
+
+    `rng`: optional seeded random.Random, used ONLY to break ties among
+    candidates sharing the same seen_at (most commonly: several questions
+    with no recorded seen_at at all, sorting as equally "oldest") -- shuffled
+    BEFORE the stable least-recently-seen sort, so the sort key still
+    dominates and only genuine ties get randomized, deterministically, per
+    the given seed. Omitting `rng` (the default) leaves candidates in
+    whatever order Mongo's cursor returned them -- byte-identical to this
+    function's behavior before `rng` existed, for every existing caller."""
     if _db is None or count <= 0:
         return [], 0, max(count, 0)
     items = await sample_static(user_id, topic, count)
@@ -156,13 +167,25 @@ async def sample_static_with_reuse(user_id: str, topic: str, count: int) -> Tupl
     candidates = await _db.mcq_static_bank.find(
         {"topic": topic, "question_id": {"$nin": list(served)}}
     ).to_list(length=None)
+    if rng is not None:
+        rng.shuffle(candidates)
     # Oldest last-served first. A question with no recorded time was served
-    # before seen_at existed, so it sorts as oldest.
+    # before seen_at existed, so it sorts as oldest. Python's sort is
+    # stable, so a prior rng.shuffle only affects the order WITHIN ties.
     candidates.sort(key=lambda d: seen_at.get(d["question_id"], ""))
     reused_docs = candidates[:short]
     reused = [_item_from_doc(d) for d in reused_docs]
     await mark_seen(user_id, topic, [it["id"] for it in reused])
     return items + reused, len(reused), short - len(reused)
+
+
+async def topic_bank_size(topic: str) -> int:
+    """Total question count for `topic`, seen or unseen, across every
+    candidate -- used for feasibility checks (e.g. TCS's static-only draw)
+    and the bank-readiness report. No LLM call, no seen-state involved."""
+    if _db is None:
+        return 0
+    return await _db.mcq_static_bank.count_documents({"topic": topic})
 
 
 def split_counts(count: int) -> Tuple[int, int]:
