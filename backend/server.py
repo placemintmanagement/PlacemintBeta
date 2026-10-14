@@ -50,6 +50,10 @@ import pdfplumber
 
 from companies import COMPANIES, DEPARTMENTS, get_company, get_department
 from services import capgemini_tiers
+from services import tcs_tiers
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_recruitment_process import (
+    apply_coding_profile as _tcs_apply_coding_profile,
+)
 from services.code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
 from banks.problem_bank import sample_problems as _sample_problems
 from banks import problem_bank
@@ -1801,8 +1805,16 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
         })
 
     # Create attempt with PLACEHOLDER sections (no questions yet).
-    placeholder_sections = [{**s, "questions": []} for s in company["sections"]]
     attempt_id = new_id("oa")
+    placeholder_sections = [{**s, "questions": []} for s in company["sections"]]
+    if company["id"] == "tcs-nqt":
+        # Per-attempt seeded 50/50 coding-profile draw (profile A: 1 easy +
+        # 1 medium, profile B: 2 medium) -- must happen BEFORE this attempt's
+        # own section copy is stored, since difficulty_targets has to be
+        # baked into THIS attempt's "coding" section, not companies.py's
+        # shared config (which stays profile-agnostic). See
+        # tcs_recruitment_process.apply_coding_profile's own docstring.
+        placeholder_sections = _tcs_apply_coding_profile(placeholder_sections, attempt_id)
     attempt = {
         "attempt_id": attempt_id,
         "user_id": user["user_id"],
@@ -2062,10 +2074,12 @@ async def get_oa(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
     doc["sections"] = _strip_answer_fields_for_response(doc.get("sections", []))
     if doc.get("section_results"):
         doc["section_results"] = _client_section_results(doc["section_results"])
-    # The stored capgemini_tier carries the per-criterion breakdown for admin use.
-    # The candidate gets only the whitelisted {tier, lpa} view.
+    # The stored capgemini_tier/tcs_tier carries the per-criterion breakdown
+    # for admin use. The candidate gets only the whitelisted client view.
     if doc.get("capgemini_tier"):
         doc["capgemini_tier"] = capgemini_tiers.client_view(doc["capgemini_tier"])
+    if doc.get("tcs_tier"):
+        doc["tcs_tier"] = tcs_tiers.client_view(doc["tcs_tier"])
     return doc
 
 
@@ -2909,12 +2923,20 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
     status = "in_progress"
     if current_idx >= total_sections:
         status = "completed"
-    # Capgemini tier: computed here, server-side, only once the attempt is
-    # completed. Reads stored section_results alone, so nothing the client sends
-    # in this request can change the outcome.
+    # Capgemini tier / TCS track estimate: computed here, server-side, only
+    # once the attempt is completed. Reads stored section_results alone, so
+    # nothing the client sends in this request can change the outcome.
     tier_eval = None
+    tcs_tier_eval = None
     if status == "completed" and attempt.get("company_id") == "capgemini":
         tier_eval = capgemini_tiers.evaluate(section_results)
+    elif status == "completed" and attempt.get("company_id") == "tcs-nqt":
+        # Reaching "completed" via the normal sequential path means every
+        # section, including the optional Part B ones, was actually
+        # submitted -- part_b_attempted=True. The finish-early path (POST
+        # /oa/{id}/finish-part-a) is the other way to reach "completed" for
+        # this company, and passes False there instead.
+        tcs_tier_eval = tcs_tiers.evaluate(section_results, part_b_attempted=True)
     update = {
         "section_results": section_results,
         "answers": answers,
@@ -2924,10 +2946,55 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
     }
     if tier_eval is not None:
         update["capgemini_tier"] = {**tier_eval, "computed_at": iso(now_utc())}
+    if tcs_tier_eval is not None:
+        update["tcs_tier"] = {**tcs_tier_eval, "computed_at": iso(now_utc())}
     await db.oa_attempts.update_one({"attempt_id": attempt_id}, {"$set": update})
     response = {"section_result": result, "next_index": current_idx, "status": status}
     if tier_eval is not None:
         response["capgemini_tier"] = {"tier": tier_eval["tier"], "lpa": tier_eval["lpa"]}
+    if tcs_tier_eval is not None:
+        response["tcs_tier"] = tcs_tiers.client_view(tcs_tier_eval)
+    return response
+
+
+# Generic "finish early" for a company whose REMAINING sections are all
+# marked "optional": True in its companies.py config (today: only TCS's
+# "advanced"/"coding" Part B, per the official page's "mandatory if you
+# aspire for a Digital or Prime offer" wording -- see
+# tcs_recruitment_process.py's PART_B_OPTIONAL_NOTE). Written generically
+# (not "if company_id == tcs-nqt") so a future company with its own optional
+# tail doesn't need a second copy of this endpoint -- but it only does
+# anything today because TCS is the only company with any "optional": True
+# section at all. Deliberately a NEW route rather than overloading
+# submit_section: this never changes behavior for the other 13 companies'
+# existing submit flow, which has no "optional" concept and never will
+# unless a company's config adds one.
+@api.post("/oa/{attempt_id}/finish-part-a")
+async def finish_oa_part_a(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Not found")
+    if attempt.get("status") != "in_progress":
+        raise HTTPException(409, {"code": "not_in_progress", "message": "This attempt is not in progress."})
+    current_idx = attempt.get("current_section_index", 0)
+    remaining = attempt["sections"][current_idx:]
+    if not remaining:
+        raise HTTPException(400, {"code": "no_sections_remain", "message": "Nothing left to finish early."})
+    if not all(s.get("optional") for s in remaining):
+        raise HTTPException(409, {
+            "code": "mandatory_section_remains",
+            "message": "A mandatory section still remains; it must be submitted before finishing.",
+        })
+    section_results = attempt.get("section_results", {})
+    update: Dict[str, Any] = {"status": "completed", "completed_at": iso(now_utc())}
+    tcs_tier_eval = None
+    if attempt.get("company_id") == "tcs-nqt":
+        tcs_tier_eval = tcs_tiers.evaluate(section_results, part_b_attempted=False)
+        update["tcs_tier"] = {**tcs_tier_eval, "computed_at": iso(now_utc())}
+    await db.oa_attempts.update_one({"attempt_id": attempt_id}, {"$set": update})
+    response: Dict[str, Any] = {"status": "completed"}
+    if tcs_tier_eval is not None:
+        response["tcs_tier"] = tcs_tiers.client_view(tcs_tier_eval)
     return response
 
 
