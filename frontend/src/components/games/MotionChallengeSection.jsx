@@ -101,6 +101,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   const finishedRef = useRef(false); // guards against double-firing onComplete
   const levelTokenRef = useRef(0); // bumped on every goToLevel(); guards a stale state-sync response
   const hasMovedRef = useRef(false); // true once a real move/undo has landed for the CURRENT level
+  const goToLevelRef = useRef(null); // always the latest goToLevel -- see advanceAfterLevel below
 
   const instructions = config?.instructions || {
     title: "Motion Challenge",
@@ -147,18 +148,26 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   // already won/lost in a prior visit), and calling this with the stale
   // closure's currentId/levelIndex would record the wrong puzzleId and
   // transition from the wrong index.
-  const advanceAfterLevel = (outcome, puzzleId, fromIdx) => {
+  // goToLevel is called through a ref (set just below, right after goToLevel
+  // is defined) rather than named directly in this callback's own deps --
+  // the two functions are mutually referential (goToLevel's own deps list
+  // includes advanceAfterLevel), so naming goToLevel here directly would
+  // make each one's useCallback identity depend on the other's, defeating
+  // the memoization exhaustive-deps is asking for. The ref always points
+  // at the current goToLevel, so this calls the exact same function with
+  // the exact same timing as before.
+  const advanceAfterLevel = useCallback((outcome, puzzleId, fromIdx) => {
     setResults((prev) => [...prev, { puzzleId, outcome }]);
     setLevelOutcome(outcome);
     setTimeout(() => {
       setLevelOutcome(null);
       if (fromIdx + 1 < puzzles.length) {
-        goToLevel(fromIdx + 1);
+        goToLevelRef.current(fromIdx + 1);
       } else {
         finishSection();
       }
     }, 1200);
-  };
+  }, [puzzles.length, finishSection]);
 
   const goToLevel = useCallback((idx) => {
     const p = puzzles[idx];
@@ -191,6 +200,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
         setLoadError(describeError(err)); // optimistic placeholder stands, but surface why the sync failed
       });
   }, [puzzles, attemptId, sectionKey, advanceAfterLevel]);
+  goToLevelRef.current = goToLevel;
 
   useEffect(() => {
     if (phase !== "done") return;
