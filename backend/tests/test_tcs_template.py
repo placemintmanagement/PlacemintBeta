@@ -146,63 +146,13 @@ def test_apply_coding_profile_is_a_noop_on_a_list_without_a_coding_key():
 
 
 # ---- services/tcs_tiers.py --------------------------------------------------
+# The full classification-rule test suite (Foundation-ratio + per-problem
+# sandbox-pass-ratio based, 2026-10 replacement of the old Advanced-MCQ-based
+# rules) lives in its own dedicated file: test_tcs_track_classification.py.
+# Only the LPA table's basic shape is re-checked here, since it's unrelated
+# to which rule set decides the tier.
 
-def _section_results(foundation=65, advanced=15, coding=1.0):
-    return {
-        "numerical": {"correct": foundation // 3, "score": 1.0},
-        "verbal": {"correct": foundation // 3, "score": 1.0},
-        "reasoning": {"correct": foundation - 2 * (foundation // 3), "score": 1.0},
-        "advanced": {"correct": advanced, "score": advanced / 15},
-        "coding": {"score": coding},
-    }
-
-
-def test_without_part_b_tier_is_capped_at_ninja_even_with_perfect_foundation():
-    sr = _section_results(foundation=65)
-    result = tcs_tiers.evaluate(sr, part_b_attempted=False)
-    assert result["tier"] == "ninja"
-    assert result["part_b_attempted"] is False
-    assert result["advanced_score"] is None
-    assert result["coding_score"] is None
-
-
-def test_without_part_b_and_below_ninja_threshold_tier_is_none():
-    sr = _section_results(foundation=10)  # well under the INTERPOLATED ninja floor
-    result = tcs_tiers.evaluate(sr, part_b_attempted=False)
-    assert result["tier"] is None
-
-
-def test_with_part_b_and_strong_scores_reaches_prime():
-    sr = _section_results(foundation=65, advanced=15, coding=1.0)
-    result = tcs_tiers.evaluate(sr, part_b_attempted=True)
-    assert result["tier"] == "prime"
-    assert result["lpa"] == tcs_tiers.TCS_LPA["prime"]
-
-
-def test_with_part_b_and_mid_scores_reaches_digital_not_prime():
-    # Meets digital's INTERPOLATED thresholds (foundation>=39, advanced>=9,
-    # coding>=0.5) but not prime's (foundation>=46, advanced>=11, coding>=1.0).
-    sr = _section_results(foundation=40, advanced=10, coding=0.5)
-    result = tcs_tiers.evaluate(sr, part_b_attempted=True)
-    assert result["tier"] == "digital"
-
-
-def test_with_part_b_and_weak_scores_still_floors_at_ninja_or_none():
-    sr = _section_results(foundation=65, advanced=0, coding=0.0)
-    result = tcs_tiers.evaluate(sr, part_b_attempted=True)
-    # Strong Foundation alone still clears ninja's own (lower) bar.
-    assert result["tier"] == "ninja"
-
-
-def test_client_view_whitelists_only_tier_and_lpa():
-    sr = _section_results()
-    result = tcs_tiers.evaluate(sr, part_b_attempted=True)
-    view = tcs_tiers.client_view(result)
-    assert set(view.keys()) == {"tier", "lpa", "lpa_note"}
-    assert "criteria" not in view
-
-
-def test_lpa_table_has_all_three_tiers_with_ug_and_pg():
+def test_lpa_table_has_all_three_paying_tiers_with_ug_and_pg():
     for tier in ("ninja", "digital", "prime"):
         assert "ug" in tcs_tiers.TCS_LPA[tier]
         assert "pg" in tcs_tiers.TCS_LPA[tier]

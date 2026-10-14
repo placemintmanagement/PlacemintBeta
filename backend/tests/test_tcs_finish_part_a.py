@@ -52,6 +52,12 @@ class _FakeDb:
 
 
 def _section_results(foundation=65, advanced=0, coding=0.0):
+    # `advanced`/`coding` kwargs are vestigial here (kept only so existing
+    # call sites below don't need updating) -- the 2026-10 tcs_tiers.py
+    # classification rules no longer read the Advanced MCQ section at all,
+    # and every test in THIS file exercises finish-part-a, which always
+    # calls tcs_tiers.evaluate(..., part_b_attempted=False) -- the per-
+    # problem coding fields are never read in that path either.
     return {
         "numerical": {"correct": foundation // 3, "score": 1.0},
         "verbal": {"correct": foundation // 3, "score": 1.0},
@@ -163,13 +169,14 @@ def test_succeeds_when_only_optional_sections_remain_and_computes_ninja_tier():
     server.db = fake
     response = asyncio.run(server.finish_oa_part_a("att_1", user={"user_id": "u1"}))
     assert response["status"] == "completed"
-    assert response["tcs_tier"] == {
-        "tier": "ninja", "lpa": tcs_tiers.TCS_LPA["ninja"], "lpa_note": tcs_tiers.TCS_LPA_NOTE,
-    }
+    assert response["tcs_tier"]["tier"] == "ninja"
+    assert response["tcs_tier"]["lpa"] == tcs_tiers.TCS_LPA["ninja"]
+    assert response["tcs_tier"]["lpa_note"] == tcs_tiers.TCS_LPA_NOTE
+    assert "Part B was not attempted" in response["tcs_tier"]["reason"]
     stored = fake.oa_attempts.docs["att_1"]
     assert stored["status"] == "completed"
     assert stored["tcs_tier"]["part_b_attempted"] is False
-    assert "criteria" in stored["tcs_tier"]  # full breakdown kept server-side
+    assert "qualified" in stored["tcs_tier"]  # full breakdown kept server-side, not all exposed to the client
 
 
 def test_calling_it_twice_is_safe_second_call_409s_without_corrupting_first_result():
