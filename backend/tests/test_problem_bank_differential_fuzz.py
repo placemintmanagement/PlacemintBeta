@@ -1,31 +1,32 @@
-"""Stage 2c differential fuzzing: for every opted-in problem that has an
+"""Differential fuzzing: for every opted-in problem that has an
 independent checker -- the 15 Easy problems with one (12 from Stage 2b
 plus string-isomorphic/string-word-pattern/greedy-assign-cookies added
-this stage) and greedy-min-platforms (Stage 2a) -- compares the
-reference solution against the checker on FUZZ_TRIALS fresh seeded
-random inputs per problem. These are generated on the fly, never
-written into the bank's stored test_inputs. Any disagreement fails
-loudly with the exact input, per instruction: a real disagreement here
-means the reference or the checker is wrong, and that gets reported,
-not silently patched.
+in Stage 2c), greedy-min-platforms (Stage 2a), and all 21 Stage 2c
+batch-1 Medium problems (added in the uniqueness/checker follow-up) --
+compares the reference solution against the checker on FUZZ_TRIALS
+fresh seeded random inputs per problem. These are generated on the fly,
+never written into the bank's stored test_inputs. Any disagreement
+fails loudly with the exact input, per instruction: a real disagreement
+here means the reference or the checker is wrong, and that gets
+reported, not silently patched.
 
 No model is used anywhere in this file.
 
-Comparison mode (Stage 2c): exact string equality is used for every
-problem below, never "any valid answer" validity-checking. An audit of
-all 46 opted-in problems' output semantics found exactly one case where
-the "correct" answer isn't inherently unique -- two-sum's indices --
-and that is resolved at the SOURCE (problem_input_gen.py's
-_two_sum_random now rejection-samples until the drawn array has exactly
-one valid pair, matching the problem's own stated precondition) rather
-than by loosening this file's comparison. Every other checkered problem
-(fizzbuzz, max-subarray-sum, contains-duplicate, missing-number,
-buy-sell-stock, climb-stairs, merge-sorted, string-valid-anagram,
-string-roman-to-integer, tp-remove-duplicates-sorted, arr-majority-
-element, string-isomorphic, string-word-pattern, greedy-assign-cookies,
-greedy-min-platforms) outputs a boolean, a count, a single deterministic
-value, or a structurally/mathematically unique answer -- none of them
-has a legitimate "multiple valid answers" case to begin with.
+Comparison mode: exact string equality is used for every problem below,
+never "any valid answer" validity-checking. An audit of all 46 opted-in
+problems' output semantics (Stage 2c uniqueness follow-up) found
+exactly one case where the "correct" answer isn't inherently unique --
+two-sum's indices -- and that is resolved at the SOURCE
+(problem_input_gen.py's _two_sum_random now rejection-samples until the
+drawn array has exactly one valid pair, matching the problem's own
+stated precondition) rather than by loosening this file's comparison.
+Every other checkered problem outputs a boolean, a count, a single
+deterministic value, or a structurally/mathematically unique answer
+(see each problem's checker docstring in problem_input_gen.py, and the
+Stage 2c uniqueness-follow-up commit message, for the per-problem
+reasoning for the 21 Medium problems specifically) -- none of them has
+a legitimate "multiple valid answers" case to begin with, so exact
+equality is correct everywhere here.
 """
 import random
 
@@ -69,8 +70,8 @@ def _raw_by_id(pid):
     return next(r for r in problem_bank._RAW if r["id"] == pid)
 
 
-def test_exactly_16_problems_have_a_checker_to_fuzz():
-    assert len(FUZZ_TARGETS) == 16, sorted(FUZZ_TARGETS)
+def test_exactly_37_problems_have_a_checker_to_fuzz():
+    assert len(FUZZ_TARGETS) == 37, sorted(FUZZ_TARGETS)
 
 
 @pytest.mark.parametrize("pid", sorted(FUZZ_TARGETS))

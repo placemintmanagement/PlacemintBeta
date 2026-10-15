@@ -2844,7 +2844,31 @@ print(candidate)
 ]
 
 
-def _run_ref(code: str, stdin: str, timeout: int = 5) -> str:
+try:
+    _REF_TIMEOUT_DEFAULT = int(os.environ.get("PM_BANK_REF_TIMEOUT", "5"))
+except ValueError:
+    _REF_TIMEOUT_DEFAULT = 5
+# Stage 2c harness-side fix (2026-10): on a slow/antivirus-loaded dev or CI
+# machine, _run_ref's own bare subprocess.run() -- used only here, at
+# problem-bank AUTHORING/hydration time, to derive expected_output -- can
+# occasionally miss a tight wall-clock timeout even on a trivial reference
+# solution (confirmed directly: a 3-element two-sum input that normally
+# finishes in ~0.1s hit TimeoutExpired once under heavy load, and a
+# from-scratch full-bank hydration run with ZERO other load also failed
+# once out of two solo trials, with near-zero process CPU time consumed --
+# the signature of a blocked subprocess spawn, not slow computation; this
+# machine has Windows Defender real-time/IOAV protection active, which
+# scans newly-written files before they execute, exactly the write-then-
+# exec pattern used below, each of the ~800+ times a full hydration runs).
+# PM_BANK_REF_TIMEOUT lets a human operator raise this authoring-time-only
+# timeout for such an environment without touching the problem bank, any
+# problem's stated timeout semantics, or (separately, and NOT changed
+# here) services/code_runner.py's actual grading-time timeout at all. It
+# defaults to 5 -- today's behavior -- when unset, so this is a no-op
+# everywhere it isn't explicitly opted into.
+
+
+def _run_ref(code: str, stdin: str, timeout: int = _REF_TIMEOUT_DEFAULT) -> str:
     """Execute the reference solution once. Any failure raises \u2013 that means the
     bank has a mismatched problem and we want to know at load time, not
     silently during a user run."""

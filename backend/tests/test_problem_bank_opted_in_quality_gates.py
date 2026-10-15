@@ -165,7 +165,9 @@ def test_checker_coverage_report():
     """Not a correctness assertion on its own (the coverage split is a
     judgment call, not a bug if it changes) -- records, for the record,
     which opted-in problems have an independent checker and which
-    don't, and sanity-checks the two groups partition all 25."""
+    don't, and sanity-checks the two groups partition all 46 opted-in
+    problems (37 with a checker after the Stage 2c uniqueness/checker
+    follow-up added one to each of the 21 Medium batch-1 problems)."""
     opted_in = set(_opted_in_ids())
     without_checker = sorted(opted_in - set(WITH_CHECKER_IDS))
     assert set(WITH_CHECKER_IDS) | set(without_checker) == opted_in
