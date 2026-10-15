@@ -1433,6 +1433,17 @@ print(total)
         "statement": "A railway station has n trains with given arrival and departure times. Print the minimum number of platforms needed so that no train ever has to wait (a platform can be reused once the train on it departs, and a departure at the same time as another arrival frees the platform in time).",
         "input_format": "Line 1: n. Line 2: n arrival times. Line 3: n departure times.", "output_format": "Single integer: minimum platforms.",
         "constraints": "1 <= n <= 10^4",
+        # Fixed (2026-10, Stage 2a): was `arr[i] <= dep[j]`, which on a tie
+        # (arrival time == departure time) counted the arriving train as
+        # needing a NEW platform before ever freeing the departing one --
+        # the opposite of this problem's own stated rule ("a departure at
+        # the same time as another arrival frees the platform in time").
+        # Strict `<` processes the tied departure first, so the arrival
+        # reuses the just-freed platform instead of requiring an extra
+        # one. Only affects ties: whenever arr[i] != dep[j], `<` and `<=`
+        # take the same branch, so none of the 5 original test_inputs'
+        # outputs change (confirmed by test_problem_bank_tcs_regression-
+        # style comparison -- see test_greedy_min_platforms_fix.py).
         "reference_solution":
 """n = int(input())
 arr = sorted(map(int, input().split()))
@@ -1440,14 +1451,21 @@ dep = sorted(map(int, input().split()))
 i = j = 0
 cur = best = 0
 while i < n:
-    if arr[i] <= dep[j]:
+    if arr[i] < dep[j]:
         cur += 1; i += 1
         best = max(best, cur)
     else:
         cur -= 1; j += 1
 print(best)
 """,
-        "test_inputs": ["6\n900 940 950 1100 1500 1800\n910 1200 1120 1130 1900 2000", "3\n100 140 150\n110 200 220", "1\n900\n1000", "4\n100 200 300 400\n150 250 350 450", "3\n100 100 100\n200 200 200"],
+        # 6th input (2026-10, Stage 2a) is the new tie case this fix is
+        # for: train A departs at 200 exactly as train B arrives at 200 --
+        # correct answer is 1 (reuse), not 2. The original 5 are
+        # untouched/unreordered. target_tests opts this one problem in to
+        # serve all 6 (2 visible + 4 hidden) instead of the 5-test
+        # default -- see _hydrate's docstring.
+        "test_inputs": ["6\n900 940 950 1100 1500 1800\n910 1200 1120 1130 1900 2000", "3\n100 140 150\n110 200 220", "1\n900\n1000", "4\n100 200 300 400\n150 250 350 450", "3\n100 100 100\n200 200 200", "2\n100 200\n200 300"],
+        "target_tests": 6,
     },
     # ------------------------------------------------------------------ GRAPHS (net-new, 2026-09)
     {
@@ -2761,15 +2779,27 @@ def _run_ref(code: str, stdin: str, timeout: int = 5) -> str:
 
 
 def _hydrate(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Materialize a raw entry into the shape the OA engine expects."""
+    """Materialize a raw entry into the shape the OA engine expects.
+
+    `target_tests` (2026-10, Stage 2a) is an explicit PER-PROBLEM opt-in:
+    the total test count to serve, of which the first 2 are always
+    visible and the rest hidden. It defaults to 5, which reproduces the
+    original fixed `tests[2:5]` slicing byte-for-byte -- a problem's
+    _RAW entry that doesn't set this field is guaranteed identical
+    visible_tests/hidden_tests, in the same order, to before this field
+    existed (see tests/test_problem_bank_target_tests_regression.py,
+    which checks this for all 104 problems against git HEAD). Raising
+    target_tests past 5 only widens the hidden slice -- it never changes
+    which 2 tests are visible, and never re-orders anything."""
     ref = raw["reference_solution"]
+    target = raw.get("target_tests", 5)
     tests = [
         {"input": stdin, "expected_output": _run_ref(ref, stdin)}
         for stdin in raw["test_inputs"]
     ]
-    # First two are visible, rest are hidden.
+    # First two are visible, rest up to `target` are hidden.
     visible = tests[:2]
-    hidden = tests[2:5] if len(tests) > 2 else []
+    hidden = tests[2:target] if len(tests) > 2 else []
     return {
         "id": raw["id"],
         "title": raw["title"],
@@ -2784,6 +2814,39 @@ def _hydrate(raw: Dict[str, Any]) -> Dict[str, Any]:
         # Only include buggy_solution when present (used by Automata Fix rounds).
         **({"buggy_code": raw["buggy_solution"]} if "buggy_solution" in raw else {}),
     }
+
+
+def verify_with_independent_checker(problem_id: str, checker) -> int:
+    """Author-time correctness cross-check (2026-10, Stage 2a) -- NEVER
+    called from the live OA grading path, which only ever runs the
+    reference solution. `checker` is an independent implementation (e.g.
+    a brute-force one) taking the SAME raw stdin string a test_input
+    gives the reference solution, and returning the expected stdout
+    string. Compares it against this problem's reference_solution on
+    EVERY one of its test_inputs, raising immediately on the first
+    disagreement -- a reference solution that's subtly wrong relative to
+    its own problem statement (see greedy-min-platforms's prior bug) has
+    nothing in the normal _hydrate()/import path to catch it, since
+    expected_output is always *derived from* the reference solution, not
+    checked against anything else. Returns the number of test_inputs
+    compared (so a caller can also assert that's nonzero, catching an
+    accidentally-empty test_inputs list)."""
+    raw = next((r for r in _RAW if r["id"] == problem_id), None)
+    if raw is None:
+        raise ValueError(f"No problem with id {problem_id!r} in the bank")
+    ref = raw["reference_solution"]
+    checked = 0
+    for stdin in raw["test_inputs"]:
+        ref_out = _run_ref(ref, stdin)
+        checker_out = str(checker(stdin)).strip()
+        if ref_out != checker_out:
+            raise AssertionError(
+                f"{problem_id}: reference solution and independent checker "
+                f"disagree on input {stdin!r} -- reference={ref_out!r} "
+                f"checker={checker_out!r}"
+            )
+        checked += 1
+    return checked
 
 
 # Materialize the bank ONCE at import time so all runs share the same
