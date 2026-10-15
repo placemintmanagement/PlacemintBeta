@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import random
 import string as _string_mod
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
@@ -87,6 +88,8 @@ class ProblemInputSpec:
     random_input: Callable[[random.Random], str]
     validate: Callable[[str], bool]
     checker: Optional[Callable[[str], str]] = None  # independent/brute-force, if practical
+    large_cases: List[str] = None   # Stage 2c: >=2 inputs sized to stress the problem's
+                                     # intended complexity (see each registration's comment)
 
 
 SPECS: dict = {}
@@ -100,20 +103,34 @@ def _register(spec: ProblemInputSpec) -> None:
 # 1. two-sum  --  shape: int_array_with_target
 # =============================================================================
 
+def _two_sum_pair_count(vals: List[int], target: int) -> int:
+    return sum(1 for a in range(len(vals)) for b in range(a + 1, len(vals)) if vals[a] + vals[b] == target)
+
+
 def _two_sum_random(rng: random.Random) -> str:
-    n = rng.choice([2, 3, 5, rng.randint(6, 60)])
-    vals = rng.sample(range(-500, 500), n) if n <= 1000 else [rng.randint(-500, 500) for _ in range(n)]
-    i, j = rng.sample(range(n), 2)
-    target = vals[i] + vals[j]
-    return f"{n}\n{_fmt_arr(vals)}\n{target}\n"
+    # Rejection sampling (Stage 2c, after a differential-fuzz run found a
+    # 23-element draw with TWO valid pairs): the problem's own statement
+    # promises "each input has exactly one solution" -- picking i,j and
+    # setting target=vals[i]+vals[j] only guarantees AT LEAST one pair;
+    # with enough random values a second coincidental pair is possible.
+    # Retry until the drawn array genuinely has exactly one.
+    for _ in range(500):
+        n = rng.choice([2, 3, 5, rng.randint(6, 60)])
+        vals = rng.sample(range(-500, 500), n) if n <= 1000 else [rng.randint(-500, 500) for _ in range(n)]
+        i, j = rng.sample(range(n), 2)
+        target = vals[i] + vals[j]
+        if _two_sum_pair_count(vals, target) == 1:
+            return f"{n}\n{_fmt_arr(vals)}\n{target}\n"
+    raise RuntimeError("two-sum: could not draw a unique-solution input in 500 attempts")
 
 
 def _two_sum_validate(stdin: str) -> bool:
     lines = stdin.split("\n")
     n = int(lines[0])
     arr = list(map(int, lines[1].split()))
-    int(lines[2])  # target must parse
-    return len(arr) == n and 2 <= n <= 10000
+    target = int(lines[2])
+    return (len(arr) == n and 2 <= n <= 10000
+            and _two_sum_pair_count(arr, target) == 1)  # the problem's own "exactly one solution" precondition
 
 
 def _two_sum_checker(stdin: str) -> str:
@@ -492,16 +509,18 @@ TREE_IDS = [
 ]
 
 
-def _gen_tree_tokens(rng: random.Random, max_nodes: int, symmetric_bias: float = 0.0) -> List[str]:
+def _gen_tree_tokens(rng: random.Random, max_nodes: int, symmetric_bias: float = 0.0,
+                      lo: int = -100, hi: int = 100) -> List[str]:
     """Builds a level-order token list ('N' = missing child) for a random
     binary tree with at most max_nodes real nodes, BFS-style (the same
     shape build() in problem_bank.py expects). symmetric_bias > 0 skews
     toward actually-symmetric trees so tree-symmetric's generator doesn't
-    only ever produce 'NO' cases."""
+    only ever produce 'NO' cases. `lo`/`hi` (Stage 2c) let a caller
+    constrain node values -- e.g. tree-sum-root-to-leaf needs digits 0-9."""
     if max_nodes <= 0:
         return ["N"]
     n_real = rng.randint(1, max_nodes)
-    tokens = [str(gen_int(rng, -100, 100))]
+    tokens = [str(gen_int(rng, lo, hi))]
     real_so_far = 1
     i = 0
     while i < len(tokens) and real_so_far < n_real:
@@ -510,7 +529,7 @@ def _gen_tree_tokens(rng: random.Random, max_nodes: int, symmetric_bias: float =
             continue
         for _ in range(2):
             if real_so_far < n_real and rng.random() < 0.7:
-                tokens.append(str(gen_int(rng, -100, 100)))
+                tokens.append(str(gen_int(rng, lo, hi)))
                 real_so_far += 1
             else:
                 tokens.append("N")
@@ -558,15 +577,78 @@ for _tid in TREE_IDS:
     ))
 
 
+# ---- Shared BST builder (Stage 2c, Medium batch 1) -------------------------
+# Used by tree-validate-bst (mixed with plain random trees), tree-kth-
+# smallest-bst, and tree-lca-bst -- all three need a genuinely valid BST,
+# not just any binary tree, since their correctness depends on the BST
+# property. Builds by inserting distinct values in random order (so the
+# resulting shape varies, not just a sorted chain), then serializes with
+# the SAME BFS level-order convention _gen_tree_tokens/build() use.
+
+class _BSTNode:
+    __slots__ = ("v", "l", "r")
+
+    def __init__(self, v):
+        self.v = v
+        self.l = None
+        self.r = None
+
+
+def _bst_insert(root, v):
+    if root is None:
+        return _BSTNode(v)
+    if v < root.v:
+        root.l = _bst_insert(root.l, v)
+    else:
+        root.r = _bst_insert(root.r, v)
+    return root
+
+
+def _serialize_level_order(root) -> List[str]:
+    if root is None:
+        return ["N"]
+    tokens = [str(root.v)]
+    q = deque([root])
+    while q:
+        node = q.popleft()
+        for child in (node.l, node.r):
+            if child is not None:
+                tokens.append(str(child.v))
+                q.append(child)
+            else:
+                tokens.append("N")
+    return tokens
+
+
+def _build_random_bst(rng: random.Random, n_nodes: int, lo: int = -1000, hi: int = 1000):
+    """Returns (root, values) -- values is the exact set of distinct
+    values inserted, so a caller building a 'p q' / 'k' companion line
+    can pick from values actually present in the tree."""
+    n_nodes = max(1, n_nodes)
+    pool = list(range(lo, hi + 1))
+    rng.shuffle(pool)
+    values = pool[:n_nodes]
+    root = None
+    insert_order = values[:]
+    rng.shuffle(insert_order)
+    for v in insert_order:
+        root = _bst_insert(root, v)
+    return root, values
+
+
 # =============================================================================
 # 17. greedy-assign-cookies  --  shape: two_int_arrays
 # =============================================================================
 
 def _cookies_random(rng: random.Random) -> str:
-    n = rng.choice([1, 2, rng.randint(3, 80)])
-    m = rng.choice([1, 2, rng.randint(3, 80)])
-    g = gen_int_array(rng, n, 1, 100)
-    s = gen_int_array(rng, m, 1, 100)
+    # Capped at 10, not the stated 10^4 -- its independent checker below
+    # is a small-n brute force over value-combinations (Stage 2c), and
+    # this generator feeds BOTH the stored-test fill and the
+    # differential fuzz, both of which run through that checker.
+    n = rng.choice([1, 2, rng.randint(3, 10)])
+    m = rng.choice([1, 2, rng.randint(3, 10)])
+    g = gen_int_array(rng, n, 1, 20)
+    s = gen_int_array(rng, m, 1, 20)
     return f"{n}\n{_fmt_arr(g)}\n{m}\n{_fmt_arr(s)}\n"
 
 
@@ -577,12 +659,35 @@ def _cookies_validate(stdin: str) -> bool:
     return len(g) == n and len(s) == m and 1 <= n <= 10000 and 1 <= m <= 10000
 
 
+def _cookies_checker(stdin: str) -> str:
+    """Small-n brute force over value-combinations (Stage 2c): for
+    decreasing k, checks whether SOME k-subset of greeds and SOME
+    k-subset of cookie sizes admits a feasible 1-1 assignment -- which,
+    for two fixed same-size multisets, is possible iff their SORTED
+    forms dominate elementwise (a standard exchange-argument fact,
+    independent of the reference's single greedy sweep). Only valid for
+    small n, m -- the generator above caps both at 10 specifically so
+    this stays fast."""
+    lines = stdin.split("\n")
+    n = int(lines[0]); g = list(map(int, lines[1].split()))
+    m = int(lines[2]); s = list(map(int, lines[3].split()))
+    if n > 12 or m > 12:
+        raise ValueError("cookies brute-force checker only valid for small n, m")
+    from itertools import combinations
+    for k in range(min(n, m), 0, -1):
+        for gc in combinations(sorted(g), k):
+            for sc in combinations(sorted(s), k):
+                if all(a <= b for a, b in zip(sorted(gc), sorted(sc))):
+                    return str(k)
+    return "0"
+
+
 _register(ProblemInputSpec(
     "greedy-assign-cookies", "two_int_arrays",
     {"n_min": 1, "n_max": 10000, "m_min": 1, "m_max": 10000},
     ["1\n1\n1\n1", "1\n100\n1\n1",
-     f"10000\n{_fmt_arr([1] * 10000)}\n10000\n{_fmt_arr([1] * 10000)}"],
-    _cookies_random, _cookies_validate, None,
+     f"10\n{_fmt_arr([1] * 10)}\n10\n{_fmt_arr([1] * 10)}"],
+    _cookies_random, _cookies_validate, _cookies_checker,
 ))
 
 
@@ -686,12 +791,30 @@ def _isomorphic_validate(stdin: str) -> bool:
     return len(s) == len(t) and len(s) <= 100000
 
 
+def _isomorphic_checker(stdin: str) -> str:
+    """First-occurrence index-pattern matching (Stage 2c): s and t are
+    isomorphic iff mapping each character to the index of its first
+    occurrence gives the same sequence for both -- genuinely different
+    representation from the reference's mutual m1/m2 dict-consistency
+    walk, though both are O(n)."""
+    lines = stdin.split("\n")
+    s = lines[0]
+    t = lines[1] if len(lines) > 1 else ""
+    if len(s) != len(t):
+        return "NO"
+    first = {}
+    pattern_s = [first.setdefault(c, i) for i, c in enumerate(s)]
+    first = {}
+    pattern_t = [first.setdefault(c, i) for i, c in enumerate(t)]
+    return "YES" if pattern_s == pattern_t else "NO"
+
+
 _register(ProblemInputSpec(
     "string-isomorphic", "two_strings_equal_length",
     {"len_min": 0, "len_max": 100000},
     # "\n\n", not "\n" -- same EOF reasoning as string-valid-anagram above.
     ["\n\n", "a\na\n", "ab\naa\n"],
-    _isomorphic_random, _isomorphic_validate, None,
+    _isomorphic_random, _isomorphic_validate, _isomorphic_checker,
 ))
 
 
@@ -722,11 +845,28 @@ def _word_pattern_validate(stdin: str) -> bool:
     return 1 <= len(pattern) <= 300
 
 
+def _word_pattern_checker(stdin: str) -> str:
+    """Same first-occurrence index-pattern trick as string-isomorphic's
+    checker, applied to the pattern's characters and the words list --
+    an independent representation from the reference's mutual
+    dict-consistency walk."""
+    lines = stdin.split("\n")
+    pattern = lines[0]
+    words = lines[1].split() if len(lines) > 1 else []
+    if len(pattern) != len(words):
+        return "NO"
+    first = {}
+    pattern_seq = [first.setdefault(c, i) for i, c in enumerate(pattern)]
+    first = {}
+    words_seq = [first.setdefault(w, i) for i, w in enumerate(words)]
+    return "YES" if pattern_seq == words_seq else "NO"
+
+
 _register(ProblemInputSpec(
     "string-word-pattern", "pattern_and_words",
     {"pattern_len_min": 1, "pattern_len_max": 300},
     ["a\ndog", f"{'a' * 300}\n" + " ".join(["w0"] * 300)],
-    _word_pattern_random, _word_pattern_validate, None,
+    _word_pattern_random, _word_pattern_validate, _word_pattern_checker,
 ))
 
 
@@ -866,6 +1006,711 @@ _register(ProblemInputSpec(
 
 
 # =============================================================================
+# STAGE 2c, MEDIUM BATCH 1 (first 21 Medium problems by order in
+# problem_bank.py). No checkers required for this batch (none declared
+# below) -- only Easy problems got the "close the checker gap" treatment
+# this stage. New shapes needed beyond the Easy-stage core/composed set:
+#
+#   coins_and_amount        coin-change
+#   coins_and_target_count  combination-sum-count
+#   binary_grid             num-islands
+#   rotated_sorted_array    search-rotated
+#   tree_and_target         tree-path-sum
+#   bst_and_k               tree-kth-smallest-bst
+#   bst_and_pq              tree-lca-bst
+#   interval_list           greedy-merge-intervals, greedy-non-overlapping-removals
+#
+# Reused as-is from the Easy stage: list_of_strings (group-anagrams),
+# string (longest-substring-no-repeat, longest-palindromic), int_array
+# (product-except-self, container-water, greedy-jump-game), matrix
+# (rotate-image -- its first real use), two_int_arrays
+# (greedy-activity-selection), tree_level_order (the plain-tree and BST
+# problems below, via _gen_tree_tokens/_build_random_bst).
+# =============================================================================
+
+# ---- group-anagrams  --  shape: list_of_strings ----------------------------
+
+def _anagrams_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 40)])
+    words = []
+    for _ in range(n):
+        length = rng.randint(1, 6)
+        if rng.random() < 0.4 and words:
+            # Reuse an earlier word's letters, shuffled -- guarantees some
+            # real anagram groups instead of (almost certainly) all-distinct.
+            base = rng.choice(words)
+            chars = list(base)
+            rng.shuffle(chars)
+            words.append("".join(chars))
+        else:
+            words.append(gen_string(rng, length, "abcde"))
+    return f"{n}\n" + " ".join(words) + "\n"
+
+
+def _anagrams_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0])
+    words = lines[1].split() if len(lines) > 1 else []
+    return len(words) == n and 1 <= n <= 10000
+
+
+_ANAGRAMS_LARGE_WORDS = [
+    "".join(chr(ord('a') + (i * 7 + j) % 5) for j in range(6)) for i in range(10000)
+]
+_register(ProblemInputSpec(
+    "group-anagrams", "list_of_strings",
+    {"n_min": 1, "n_max": 10000},
+    ["1\nsolo", "4\nab ba abc cba"],
+    _anagrams_random, _anagrams_validate, None,
+    large_cases=[
+        # Intended complexity: O(n * L log L) (sort each word's letters,
+        # group by the sorted tuple). A naive O(n^2 * L) pairwise-compare
+        # would be 10^4 * 10^4 * 6 = 6*10^8 -- plausibly too slow.
+        f"10000\n" + " ".join(_ANAGRAMS_LARGE_WORDS) + "\n",
+        f"10000\n" + " ".join(["zzzzzz"] * 10000) + "\n",
+    ],
+))
+
+
+# ---- longest-substring-no-repeat  --  shape: string -------------------------
+
+def _no_repeat_random(rng: random.Random) -> str:
+    length = rng.choice([0, 1, rng.randint(2, 200)])
+    if length == 0:
+        # A bare "" gives input() zero bytes at all -- EOFError. An
+        # empty LINE ("\n") is what reads back as "" via input().
+        return "\n"
+    return gen_string(rng, length, "ab")
+
+
+def _no_repeat_validate(stdin: str) -> bool:
+    return len(stdin) <= 50001  # +1 tolerates the "\n" stand-in for an empty string
+
+
+_register(ProblemInputSpec(
+    "longest-substring-no-repeat", "string",
+    {"len_min": 0, "len_max": 50000},
+    ["\n", "a"],
+    _no_repeat_random, _no_repeat_validate, None,
+    large_cases=[
+        # Intended complexity: O(n) sliding window. A naive O(n^2)
+        # check-every-substring approach is 2.5*10^9 at n=5*10^4 -- times out.
+        "ab" * 25000,
+        "".join(chr(ord('a') + i % 26) for i in range(50000)),
+    ],
+))
+
+
+# ---- coin-change  --  shape: coins_and_amount (NEW) ------------------------
+
+def _coin_change_random(rng: random.Random) -> str:
+    n = rng.randint(1, 12)
+    coins = rng.sample(range(1, 50), n)
+    amount = rng.randint(1, 200)
+    return f"{n}\n{_fmt_arr(coins)}\n{amount}\n"
+
+
+def _coin_change_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); coins = list(map(int, lines[1].split()))
+    amount = int(lines[2])
+    return len(coins) == n and 1 <= n <= 12 and 1 <= amount <= 10000
+
+
+_register(ProblemInputSpec(
+    "coin-change", "coins_and_amount",
+    {"n_min": 1, "n_max": 12, "amount_min": 1, "amount_max": 10000},
+    ["1\n2\n3", "1\n1\n1", "3\n1 3 4\n6"],
+    _coin_change_random, _coin_change_validate, None,
+    large_cases=[
+        # Intended complexity: O(n * amount) DP (the reference's own
+        # approach, pseudo-polynomial). The problem's n<=12 cap means no
+        # naive-exponential-recursion variant could realistically be worse
+        # here than this DP already is; this just confirms the DP itself
+        # stays fast at the full amount ceiling.
+        "12\n" + _fmt_arr([1, 3, 4, 5, 7, 9, 11, 13, 17, 19, 23, 29]) + "\n10000\n",
+        "12\n" + _fmt_arr([2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24]) + "\n9999\n",
+    ],
+))
+
+
+# ---- product-except-self  --  shape: int_array -----------------------------
+
+def _product_except_self_random(rng: random.Random) -> str:
+    n = rng.choice([2, 3, rng.randint(4, 60)])
+    arr = gen_int_array(rng, n, -5, 5)
+    return f"{n}\n{_fmt_arr(arr)}\n"
+
+
+def _product_except_self_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); arr = list(map(int, lines[1].split()))
+    return len(arr) == n and 2 <= n <= 100000
+
+
+_register(ProblemInputSpec(
+    "product-except-self", "int_array",
+    {"n_min": 2, "n_max": 100000},
+    ["2\n2 3", "3\n1 1 1"],
+    _product_except_self_random, _product_except_self_validate, None,
+    large_cases=[
+        # Intended complexity: O(n) (prefix/suffix product passes). A
+        # naive O(n^2) (recompute each product from scratch) is 10^10 at
+        # n=10^5 -- times out. Mostly-1 values with only a handful of
+        # small perturbations (not every-5th-element alternating +-2,
+        # which compounds to a 40000-digit product and trips Python
+        # 3.11+'s int-to-str conversion limit, confirmed directly) keeps
+        # every printed product small while still exercising the full
+        # n=10^5 loop count the complexity gap is actually about.
+        f"100000\n{_fmt_arr([(2 if i % 5000 == 0 else (-2 if i % 7000 == 0 else 1)) for i in range(100000)])}\n",
+        f"100000\n{_fmt_arr([1] * 100000)}\n",
+    ],
+))
+
+
+# ---- rotate-image  --  shape: matrix ---------------------------------------
+
+def _rotate_image_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 15)])
+    m = gen_matrix(rng, n, n, -9, 9)
+    return f"{n}\n" + "\n".join(_fmt_arr(row) for row in m) + "\n"
+
+
+def _rotate_image_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0])
+    rows = lines[1:1 + n]
+    return len(rows) == n and 1 <= n <= 100 and all(len(r.split()) == n for r in rows)
+
+
+_register(ProblemInputSpec(
+    "rotate-image", "matrix",
+    {"n_min": 1, "n_max": 100},
+    ["1\n5", "2\n1 2\n3 4"],
+    _rotate_image_random, _rotate_image_validate, None,
+    large_cases=[
+        # Intended complexity: O(n^2) -- optimal and required (every one
+        # of the n^2 output cells must be produced), so no asymptotically
+        # slower alternative exists to time out here; this large case
+        # just confirms the reference handles the stated ceiling.
+        f"100\n" + "\n".join(_fmt_arr([((r * 100 + c) % 19) - 9 for c in range(100)]) for r in range(100)) + "\n",
+        f"100\n" + "\n".join(_fmt_arr([1] * 100) for _ in range(100)) + "\n",
+    ],
+))
+
+
+# ---- num-islands  --  shape: binary_grid (NEW) -----------------------------
+
+def _num_islands_random(rng: random.Random) -> str:
+    rows = rng.choice([1, 2, rng.randint(3, 15)])
+    cols = rng.choice([1, 2, rng.randint(3, 15)])
+    grid = gen_matrix(rng, rows, cols, 0, 1)
+    return f"{rows} {cols}\n" + "\n".join(_fmt_arr(row) for row in grid) + "\n"
+
+
+def _num_islands_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    rows, cols = map(int, lines[0].split())
+    grid_lines = lines[1:1 + rows]
+    return (len(grid_lines) == rows and 1 <= rows <= 300 and 1 <= cols <= 300
+            and all(len(r.split()) == cols for r in grid_lines)
+            and all(v in ("0", "1") for r in grid_lines for v in r.split()))
+
+
+_register(ProblemInputSpec(
+    "num-islands", "binary_grid",
+    {"rows_min": 1, "rows_max": 300, "cols_min": 1, "cols_max": 300},
+    ["1 1\n0", "2 4\n1 0 1 0\n0 1 0 1"],
+    _num_islands_random, _num_islands_validate, None,
+    large_cases=[
+        # Intended complexity: O(rows*cols) (visit every cell once).
+        # Deliberately a CHECKERBOARD at the full 300x300 ceiling, not one
+        # giant blob -- the reference's DFS is plain recursion with no
+        # explicit stack, so a single large connected island could recurse
+        # deep enough to risk a genuine C-stack overflow (not just a slow
+        # run); many small islands exercise the full cell count safely.
+        "300 300\n" + "\n".join(_fmt_arr([(r + c) % 2 for c in range(300)]) for r in range(300)) + "\n",
+        "300 300\n" + "\n".join(_fmt_arr([0] * 300) for _ in range(300)) + "\n",
+    ],
+))
+
+
+# ---- search-rotated  --  shape: rotated_sorted_array (NEW) -----------------
+
+def _search_rotated_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    base = sorted(rng.sample(range(-500, 500), n))
+    pivot = rng.randint(0, n - 1)
+    arr = base[pivot:] + base[:pivot]
+    target = rng.choice(arr) if rng.random() < 0.6 else rng.randint(-600, 600)
+    return f"{n}\n{_fmt_arr(arr)}\n{target}\n"
+
+
+def _search_rotated_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); arr = list(map(int, lines[1].split()))
+    int(lines[2])
+    return len(arr) == n and 1 <= n <= 10000 and len(set(arr)) == n
+
+
+_SEARCH_ROTATED_BASE = sorted(range(-5000, 5000))
+_SEARCH_ROTATED_LARGE = _SEARCH_ROTATED_BASE[3000:] + _SEARCH_ROTATED_BASE[:3000]
+_register(ProblemInputSpec(
+    "search-rotated", "rotated_sorted_array",
+    {"n_min": 1, "n_max": 10000},
+    ["1\n1\n0", "5\n5 1 2 3 4\n1"],
+    _search_rotated_random, _search_rotated_validate, None,
+    large_cases=[
+        # Intended complexity: O(log n) binary search. HONEST NOTE: at
+        # this problem's own ceiling (n<=10^4), even the "bad" O(n) linear
+        # scan finishes in microseconds -- there's no input size within
+        # the stated constraints where a slower-but-still-polynomial
+        # approach would time out while O(log n) succeeds. These two
+        # large inputs confirm correctness/timing at the ceiling only,
+        # not a complexity gap.
+        f"10000\n{_fmt_arr(_SEARCH_ROTATED_LARGE)}\n{_SEARCH_ROTATED_LARGE[0]}\n",
+        f"10000\n{_fmt_arr(_SEARCH_ROTATED_LARGE)}\n123456\n",
+    ],
+))
+
+
+# ---- container-water  --  shape: int_array ---------------------------------
+
+def _container_water_random(rng: random.Random) -> str:
+    n = rng.choice([2, 3, rng.randint(4, 60)])
+    arr = gen_int_array(rng, n, 0, 100)
+    return f"{n}\n{_fmt_arr(arr)}\n"
+
+
+def _container_water_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); arr = list(map(int, lines[1].split()))
+    return len(arr) == n and 2 <= n <= 100000
+
+
+_register(ProblemInputSpec(
+    "container-water", "int_array",
+    {"n_min": 2, "n_max": 100000},
+    ["2\n1 1", "5\n1 2 3 4 5"],
+    _container_water_random, _container_water_validate, None,
+    large_cases=[
+        # Intended complexity: O(n) two-pointer. A naive O(n^2) all-pairs
+        # check is 10^10 at n=10^5 -- times out.
+        f"100000\n{_fmt_arr([(i * 13) % 1000 for i in range(100000)])}\n",
+        f"100000\n{_fmt_arr([100000 - i for i in range(100000)])}\n",
+    ],
+))
+
+
+# ---- longest-palindromic  --  shape: string --------------------------------
+
+def _longest_palindromic_random(rng: random.Random) -> str:
+    length = rng.randint(1, 40)
+    core = gen_string(rng, length, "ab")
+    if rng.random() < 0.5:
+        core = core + core[::-1]
+    return core
+
+
+def _longest_palindromic_validate(stdin: str) -> bool:
+    return 1 <= len(stdin) <= 1000
+
+
+_register(ProblemInputSpec(
+    "longest-palindromic", "string",
+    {"len_min": 1, "len_max": 1000},
+    ["a", "ac"],
+    _longest_palindromic_random, _longest_palindromic_validate, None,
+    large_cases=[
+        # Intended complexity: O(n^2) (expand-around-every-center -- the
+        # reference's own approach, and what n<=1000 is specifically
+        # sized for). A naive O(n^3) check-every-substring-for-palindrome
+        # is ~10^9 at n=1000 -- plausibly too slow.
+        "a" * 1000,
+        ("ab" * 500),
+    ],
+))
+
+
+# ---- combination-sum-count  --  shape: coins_and_target_count (NEW) --------
+
+def _combo_sum_count_random(rng: random.Random) -> str:
+    n = rng.randint(1, 6)
+    coins = rng.sample(range(1, 15), n)
+    target = rng.randint(1, 40)
+    return f"{n}\n{_fmt_arr(coins)}\n{target}\n"
+
+
+def _combo_sum_count_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); coins = list(map(int, lines[1].split()))
+    target = int(lines[2])
+    return len(coins) == n and len(set(coins)) == n and 1 <= n <= 30 and 1 <= target <= 500
+
+
+_register(ProblemInputSpec(
+    "combination-sum-count", "coins_and_target_count",
+    {"n_min": 1, "n_max": 30, "target_min": 1, "target_max": 500},
+    ["2\n2 3\n5", "1\n2\n1"],
+    _combo_sum_count_random, _combo_sum_count_validate, None,
+    large_cases=[
+        # Intended complexity: O(n * target) with memoization. The
+        # reference itself is UNMEMOIZED DFS -- its real worst case is
+        # combinatorial (e.g. coins=[1,2,3,4,5], target=500 alone takes
+        # >8s, confirmed directly), not n*target. Picking coins close in
+        # value to the target keeps the branching (and so the reference's
+        # own runtime) bounded while still exercising the full n=30 and
+        # target=500 ceilings: at most 1 of these ~500-valued coins can
+        # ever fit in a 500 target, so the DFS is effectively O(n).
+        "30\n" + _fmt_arr(list(range(471, 501))) + "\n500\n",
+        # Second large case instead maxes out n (30 SMALL coins) but
+        # keeps target modest (60, not 500) so branching stays bounded --
+        # the reverse trade-off from the case above.
+        "30\n" + _fmt_arr(list(range(1, 31))) + "\n60\n",
+    ],
+))
+
+
+# ---- tree-validate-bst  --  shape: tree_level_order ------------------------
+
+def _validate_bst_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    if rng.random() < 0.5:
+        root, _ = _build_random_bst(rng, n)
+        tokens = _serialize_level_order(root)
+    else:
+        tokens = _gen_tree_tokens(rng, n)
+    return " ".join(tokens)
+
+
+_BST_TOKEN_VALIDATE = _tree_validate  # same shape/bounds as plain trees
+
+_VALIDATE_BST_LARGE_VALID = " ".join(_serialize_level_order(_build_random_bst(random.Random("2c-validate-bst-valid"), 1000)[0]))
+_VALIDATE_BST_LARGE_INVALID = " ".join(_gen_tree_tokens(random.Random("2c-validate-bst-invalid"), 1000))
+_register(ProblemInputSpec(
+    "tree-validate-bst", "tree_level_order",
+    {"real_nodes_min": 1, "real_nodes_max": 1000},
+    ["5 N 3", "3 1 5"],
+    _validate_bst_random, _BST_TOKEN_VALIDATE, None,
+    large_cases=[
+        # Intended complexity: O(n) (one bounds-checked recursive walk).
+        # Both large cases are built via randomized-order insertion /
+        # the existing bushy tree generator specifically to keep tree
+        # HEIGHT small -- a degenerate 1000-deep chain would risk
+        # RecursionError against the reference's plain (unlimited-depth)
+        # recursive valid(), since it never raises sys.setrecursionlimit.
+        _VALIDATE_BST_LARGE_VALID,
+        _VALIDATE_BST_LARGE_INVALID,
+    ],
+))
+
+
+# ---- tree-diameter  --  shape: tree_level_order ----------------------------
+
+def _tree_diameter_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    return " ".join(_gen_tree_tokens(rng, n))
+
+
+_DIAMETER_LARGE = " ".join(_gen_tree_tokens(random.Random("2c-diameter-large"), 1000))
+_register(ProblemInputSpec(
+    "tree-diameter", "tree_level_order",
+    {"real_nodes_min": 1, "real_nodes_max": 1000},
+    ["1 2 N N 3", "1 2 3 4 5"],
+    _tree_diameter_random, _tree_validate, None,
+    large_cases=[
+        # Intended complexity: O(n). Same recursion-depth caution as
+        # tree-validate-bst above -- the bushy generator keeps height low.
+        _DIAMETER_LARGE,
+        " ".join(_gen_tree_tokens(random.Random("2c-diameter-large-2"), 1000)),
+    ],
+))
+
+
+# ---- tree-path-sum  --  shape: tree_and_target (NEW) -----------------------
+
+def _tree_path_sum_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    tokens = _gen_tree_tokens(rng, n)
+    if rng.random() < 0.5:
+        # Exactly reconstructing a root-to-leaf sum would mean re-walking
+        # build()'s own parsing here -- instead, sum a random-length
+        # prefix of the real values in BFS token order as a plausible
+        # stand-in target (close enough to exercise real YES cases
+        # without duplicating the tree-walk logic under test).
+        reals = [int(t) for t in tokens if t != "N"]
+        k = rng.randint(1, len(reals))
+        target = sum(reals[:k])
+    else:
+        target = rng.randint(-200, 200)
+    return " ".join(tokens) + f"\n{target}\n"
+
+
+def _tree_path_sum_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    tokens = lines[0].split()
+    int(lines[1])
+    return _tree_validate(lines[0])
+
+
+_PATH_SUM_LARGE_TOKENS = _gen_tree_tokens(random.Random("2c-path-sum-large"), 1000)
+_register(ProblemInputSpec(
+    "tree-path-sum", "tree_and_target",
+    {"real_nodes_min": 1, "real_nodes_max": 1000},
+    ["1 2 3\n5", "1\n1"],
+    _tree_path_sum_random, _tree_path_sum_validate, None,
+    large_cases=[
+        # Intended complexity: O(n). Recursion-depth caution as above.
+        " ".join(_PATH_SUM_LARGE_TOKENS) + f"\n{sum(int(t) for t in _PATH_SUM_LARGE_TOKENS if t != 'N')}\n",
+        " ".join(_PATH_SUM_LARGE_TOKENS) + "\n999999\n",
+    ],
+))
+
+
+# ---- tree-kth-smallest-bst  --  shape: bst_and_k (NEW) ---------------------
+
+def _kth_smallest_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    root, values = _build_random_bst(rng, n)
+    k = rng.randint(1, len(values))
+    return " ".join(_serialize_level_order(root)) + f"\n{k}\n"
+
+
+def _kth_smallest_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    tokens = lines[0].split()
+    real_nodes = sum(1 for t in tokens if t != "N")
+    k = int(lines[1])
+    return _tree_validate(lines[0]) and 1 <= k <= real_nodes
+
+
+_KTH_ROOT, _KTH_VALUES = _build_random_bst(random.Random("2c-kth-large"), 1000)
+_register(ProblemInputSpec(
+    "tree-kth-smallest-bst", "bst_and_k",
+    {"real_nodes_min": 1, "real_nodes_max": 1000},
+    ["5 3 8 1 4 7 9\n1", "1\n1"],
+    _kth_smallest_random, _kth_smallest_validate, None,
+    large_cases=[
+        # Intended complexity: O(h + k) (inorder with early exit once k
+        # values are collected) -- effectively O(n) worst case for large k.
+        " ".join(_serialize_level_order(_KTH_ROOT)) + "\n1\n",
+        " ".join(_serialize_level_order(_KTH_ROOT)) + f"\n{len(_KTH_VALUES)}\n",
+    ],
+))
+
+
+# ---- tree-lca-bst  --  shape: bst_and_pq (NEW) -----------------------------
+
+def _lca_bst_random(rng: random.Random) -> str:
+    n = rng.choice([2, 3, rng.randint(4, 60)])
+    root, values = _build_random_bst(rng, n)
+    p, q = rng.sample(values, 2)
+    return " ".join(_serialize_level_order(root)) + f"\n{p} {q}\n"
+
+
+def _lca_bst_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    p, q = map(int, lines[1].split())
+    return _tree_validate(lines[0]) and p != q
+
+
+_LCA_ROOT, _LCA_VALUES = _build_random_bst(random.Random("2c-lca-large"), 1000)
+_register(ProblemInputSpec(
+    "tree-lca-bst", "bst_and_pq",
+    {"real_nodes_min": 2, "real_nodes_max": 1000},
+    ["5 3 8 1 4 7 9\n1 4", "6 2 8 0 4 7 9\n0 9"],
+    _lca_bst_random, _lca_bst_validate, None,
+    large_cases=[
+        # Intended complexity: O(h) -- the reference's iterative descent,
+        # one comparison per level. O(log n) for the balanced-ish tree
+        # our randomized-insertion builder produces.
+        " ".join(_serialize_level_order(_LCA_ROOT)) + f"\n{_LCA_VALUES[0]} {_LCA_VALUES[1]}\n",
+        " ".join(_serialize_level_order(_LCA_ROOT)) + f"\n{_LCA_VALUES[-1]} {_LCA_VALUES[-2]}\n",
+    ],
+))
+
+
+# ---- tree-sum-root-to-leaf  --  shape: tree_level_order (digit-valued) -----
+
+def _sum_root_to_leaf_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    return " ".join(_gen_tree_tokens(rng, n, lo=0, hi=9))
+
+
+def _sum_root_to_leaf_validate(stdin: str) -> bool:
+    tokens = stdin.split()
+    real_nodes = sum(1 for t in tokens if t != "N")
+    return (1 <= real_nodes <= 1000
+            and all(t == "N" or (t.isdigit() and len(t) == 1) for t in tokens))
+
+
+_SUM_R2L_LARGE = " ".join(_gen_tree_tokens(random.Random("2c-sum-r2l-large"), 1000, lo=0, hi=9))
+_register(ProblemInputSpec(
+    "tree-sum-root-to-leaf", "tree_level_order",
+    {"real_nodes_min": 1, "real_nodes_max": 1000},
+    ["1 2 3", "0"],
+    _sum_root_to_leaf_random, _sum_root_to_leaf_validate, None,
+    large_cases=[
+        # Intended complexity: O(n). Recursion-depth caution as above --
+        # the bushy generator keeps height low despite 1000 nodes.
+        _SUM_R2L_LARGE,
+        " ".join(_gen_tree_tokens(random.Random("2c-sum-r2l-large-2"), 1000, lo=0, hi=9)),
+    ],
+))
+
+
+# ---- tree-right-side-view  --  shape: tree_level_order ---------------------
+
+def _right_side_view_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    return " ".join(_gen_tree_tokens(rng, n))
+
+
+_RIGHT_VIEW_LARGE = " ".join(_gen_tree_tokens(random.Random("2c-right-view-large"), 1000))
+_register(ProblemInputSpec(
+    "tree-right-side-view", "tree_level_order",
+    {"real_nodes_min": 1, "real_nodes_max": 1000},
+    ["1 N 2", "1 2 3 4"],
+    _right_side_view_random, _tree_validate, None,
+    large_cases=[
+        # Intended complexity: O(n). Iterative BFS reference -- no
+        # recursion-depth concern here, but kept at the same bushy shape
+        # as the others for consistency.
+        _RIGHT_VIEW_LARGE,
+        " ".join(_gen_tree_tokens(random.Random("2c-right-view-large-2"), 1000)),
+    ],
+))
+
+
+# ---- greedy-activity-selection  --  shape: two_int_arrays ------------------
+
+def _activity_selection_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    starts = gen_int_array(rng, n, 0, 100)
+    ends = [s + rng.randint(1, 20) for s in starts]
+    return f"{n}\n{_fmt_arr(starts)}\n{_fmt_arr(ends)}\n"
+
+
+def _activity_selection_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); starts = list(map(int, lines[1].split())); ends = list(map(int, lines[2].split()))
+    return (len(starts) == n and len(ends) == n and 1 <= n <= 10000
+            and all(e >= s for s, e in zip(starts, ends)))
+
+
+_ACT_SEL_LARGE_STARTS = [(i * 3) % 10000 for i in range(10000)]
+_ACT_SEL_LARGE_ENDS = [s + 5 for s in _ACT_SEL_LARGE_STARTS]
+_register(ProblemInputSpec(
+    "greedy-activity-selection", "two_int_arrays",
+    {"n_min": 1, "n_max": 10000},
+    ["1\n0\n5", "3\n1 1 1\n2 2 2"],
+    _activity_selection_random, _activity_selection_validate, None,
+    large_cases=[
+        # Intended complexity: O(n log n) (sort by end time). A naive
+        # O(n^2) pairwise overlap-and-select scan is 10^8 at n=10^4 --
+        # plausibly, though not guaranteed, too slow in pure Python.
+        f"10000\n{_fmt_arr(_ACT_SEL_LARGE_STARTS)}\n{_fmt_arr(_ACT_SEL_LARGE_ENDS)}\n",
+        f"10000\n{_fmt_arr([0] * 10000)}\n{_fmt_arr([1] * 10000)}\n",
+    ],
+))
+
+
+# ---- greedy-merge-intervals / greedy-non-overlapping-removals -------------
+# shape: interval_list (NEW) -- n lines of "start end"
+
+def _interval_list_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    lines = [str(n)]
+    for _ in range(n):
+        s = rng.randint(0, 100)
+        e = s + rng.randint(0, 20)
+        lines.append(f"{s} {e}")
+    return "\n".join(lines) + "\n"
+
+
+def _interval_list_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0])
+    ivs = lines[1:1 + n]
+    if len(ivs) != n or not (1 <= n <= 10000):
+        return False
+    for iv in ivs:
+        s, e = map(int, iv.split())
+        if e < s:
+            return False
+    return True
+
+
+def _interval_list_large(seed: str) -> str:
+    rng = random.Random(seed)
+    n = 10000
+    lines = [str(n)]
+    for _ in range(n):
+        s = rng.randint(0, 2000)
+        e = s + rng.randint(0, 10)
+        lines.append(f"{s} {e}")
+    return "\n".join(lines) + "\n"
+
+
+_register(ProblemInputSpec(
+    "greedy-merge-intervals", "interval_list",
+    {"n_min": 1, "n_max": 10000},
+    ["1\n1 1", "2\n1 4\n4 5"],
+    _interval_list_random, _interval_list_validate, None,
+    large_cases=[
+        # Intended complexity: O(n log n) (sort by start, one merge pass).
+        # A naive O(n^2) pairwise merge-and-rescan is 10^8 at n=10^4 --
+        # plausibly too slow. Many overlapping intervals (small range,
+        # large n) maximizes merge work.
+        _interval_list_large("2c-merge-intervals-large-1"),
+        _interval_list_large("2c-merge-intervals-large-2"),
+    ],
+))
+
+_register(ProblemInputSpec(
+    "greedy-non-overlapping-removals", "interval_list",
+    {"n_min": 1, "n_max": 10000},
+    ["1\n1 2", "2\n1 2\n1 2"],
+    _interval_list_random, _interval_list_validate, None,
+    large_cases=[
+        # Same reasoning as greedy-merge-intervals above.
+        _interval_list_large("2c-non-overlap-large-1"),
+        _interval_list_large("2c-non-overlap-large-2"),
+    ],
+))
+
+
+# ---- greedy-jump-game  --  shape: int_array --------------------------------
+
+def _jump_game_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    arr = gen_int_array(rng, n, 0, 3)
+    return f"{n}\n{_fmt_arr(arr)}\n"
+
+
+def _jump_game_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); arr = list(map(int, lines[1].split()))
+    return len(arr) == n and 1 <= n <= 100000 and all(v >= 0 for v in arr)
+
+
+_register(ProblemInputSpec(
+    "greedy-jump-game", "int_array",
+    {"n_min": 1, "n_max": 100000},
+    ["1\n0", "3\n1 0 1"],
+    _jump_game_random, _jump_game_validate, None,
+    large_cases=[
+        # Intended complexity: O(n) (single greedy reach-tracking pass). A
+        # naive exhaustive/DFS-over-jump-choices approach branches up to
+        # ~4 ways per position and would never finish at n=10^5 (an
+        # exponential blowup), while the greedy pass is instant.
+        f"100000\n{_fmt_arr([(i * 5) % 4 for i in range(100000)])}\n",
+        f"100000\n{_fmt_arr([1] * 100000)}\n",
+    ],
+))
+
+
+# =============================================================================
 # Public builder
 # =============================================================================
 
@@ -896,5 +1741,50 @@ def build_test_inputs(problem_id: str, visible_inputs: List[str], target_total: 
         if candidate not in seen:
             out.append(candidate)
             seen.add(candidate)
+
+    return out
+
+
+def build_test_inputs_with_large(problem_id: str, visible_inputs: List[str], target_total: int = 14,
+                                  large_count: int = 2, seed: Optional[str] = None) -> List[str]:
+    """Stage 2c variant: same edge-cases-then-random fill as
+    build_test_inputs, but reserves the LAST `large_count` slots for
+    this problem's declared `large_cases` -- inputs sized specifically
+    to stress its intended complexity (see each registration's own
+    comment for what that complexity is and why). Order is always:
+    visible, then edge, then random, then large."""
+    spec = SPECS[problem_id]
+    if not spec.large_cases or len(spec.large_cases) < large_count:
+        raise ValueError(f"{problem_id}: needs at least {large_count} large_cases, has {spec.large_cases}")
+    rng = random.Random(seed if seed is not None else f"stage2c:{problem_id}")
+    out = list(visible_inputs)
+    seen = set(out)
+    fill_target = target_total - large_count
+
+    for edge in spec.edge_cases:
+        if len(out) >= fill_target:
+            break
+        if edge not in seen:
+            out.append(edge)
+            seen.add(edge)
+
+    attempts = 0
+    while len(out) < fill_target and attempts < fill_target * 50:
+        attempts += 1
+        candidate = spec.random_input(rng)
+        if candidate not in seen:
+            out.append(candidate)
+            seen.add(candidate)
+
+    added_large = 0
+    for large in spec.large_cases:
+        if added_large >= large_count:
+            break
+        if large not in seen:
+            out.append(large)
+            seen.add(large)
+            added_large += 1
+    if added_large < large_count:
+        raise ValueError(f"{problem_id}: large_cases collided with earlier inputs, only added {added_large}")
 
     return out

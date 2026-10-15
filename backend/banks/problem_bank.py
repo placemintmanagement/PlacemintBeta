@@ -146,7 +146,9 @@ words = input().split()
 groups = {tuple(sorted(w)) for w in words}
 print(len(groups))
 """,
-        "test_inputs": ["6\neat tea tan ate nat bat", "1\nsolo", "3\nabc bca cab", "4\nab ba abc cba", "5\naa aa aa bb cc"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "group-anagrams", ["6\neat tea tan ate nat bat", "1\nsolo"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "longest-substring-no-repeat", "title": "Longest Substring Without Repeating Characters", "difficulty": "Medium", "topic": "two_pointer_sliding_window",
@@ -175,7 +177,9 @@ for i, c in enumerate(s):
     best = max(best, i - start + 1)
 print(best)
 """,
-        "test_inputs": ["abcabcbb", "bbbbb", "pwwkew", "dvdf", "abcdefg"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "longest-substring-no-repeat", ["abcabcbb", "bbbbb"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "coin-change", "title": "Coin Change (Min Coins)", "difficulty": "Medium", "topic": "2d_dp",
@@ -195,7 +199,9 @@ for i in range(1, amount + 1):
             dp[i] = min(dp[i], dp[i - c] + 1)
 print(dp[amount] if dp[amount] <= amount else -1)
 """,
-        "test_inputs": ["3\n1 2 5\n11", "1\n2\n3", "1\n1\n0", "3\n1 3 4\n6", "4\n2 5 10 1\n27"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "coin-change", ["3\n1 2 5\n11", "1\n2\n3"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "product-except-self", "title": "Product of Array Except Self", "difficulty": "Medium", "topic": "arrays",
@@ -215,7 +221,9 @@ for i in range(n - 1, -1, -1):
     out[i] *= p; p *= a[i]
 print(' '.join(map(str, out)))
 """,
-        "test_inputs": ["4\n1 2 3 4", "5\n-1 1 0 -3 3", "2\n2 3", "3\n1 1 1", "5\n2 3 4 5 6"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "product-except-self", ["4\n1 2 3 4", "5\n-1 1 0 -3 3"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "rotate-image", "title": "Rotate Matrix 90\u00b0 Clockwise", "difficulty": "Medium", "topic": "arrays",
@@ -229,13 +237,9 @@ m = [list(map(int, input().split())) for _ in range(n)]
 rot = [[m[n - 1 - j][i] for j in range(n)] for i in range(n)]
 for row in rot: print(' '.join(map(str, row)))
 """,
-        "test_inputs": [
-            "3\n1 2 3\n4 5 6\n7 8 9",
-            "2\n1 2\n3 4",
-            "1\n5",
-            "4\n1 2 3 4\n5 6 7 8\n9 10 11 12\n13 14 15 16",
-            "3\n0 0 0\n0 1 0\n0 0 0",
-        ],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "rotate-image", ["3\n1 2 3\n4 5 6\n7 8 9", "2\n1 2\n3 4"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "num-islands", "title": "Number of Islands", "difficulty": "Medium", "topic": "graphs",
@@ -259,13 +263,9 @@ for i in range(r):
             cnt += 1; dfs(i, j)
 print(cnt)
 """,
-        "test_inputs": [
-            "3 3\n1 1 0\n0 1 0\n1 0 1",
-            "1 1\n0",
-            "2 4\n1 0 1 0\n0 1 0 1",
-            "3 3\n1 1 1\n1 1 1\n1 1 1",
-            "4 4\n1 0 0 1\n0 0 0 0\n1 0 1 0\n1 0 1 1",
-        ],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "num-islands", ["3 3\n1 1 0\n0 1 0\n1 0 1", "1 1\n0"], target_total=14),
+        "target_tests": 14,
     },
     # ------------------------------------------------------------------ HARD
     {
@@ -479,7 +479,9 @@ while l < r:
         else: r = m - 1
 print(ans)
 """,
-        "test_inputs": ["7\n4 5 6 7 0 1 2\n0", "7\n4 5 6 7 0 1 2\n3", "1\n1\n0", "5\n5 1 2 3 4\n1", "7\n6 7 0 1 2 4 5\n5"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "search-rotated", ["7\n4 5 6 7 0 1 2\n0", "7\n4 5 6 7 0 1 2\n3"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "container-water", "title": "Container With Most Water", "difficulty": "Medium", "topic": "two_pointer_sliding_window",
@@ -496,7 +498,9 @@ while l < r:
     else: r -= 1
 print(best)
 """,
-        "test_inputs": ["9\n1 8 6 2 5 4 8 3 7", "2\n1 1", "3\n4 3 2", "5\n1 2 3 4 5", "6\n1 2 4 3 5 4"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "container-water", ["9\n1 8 6 2 5 4 8 3 7", "2\n1 1"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "longest-palindromic", "title": "Longest Palindromic Substring Length", "difficulty": "Medium", "topic": "strings",
@@ -512,7 +516,9 @@ for i in range(n):
     best = max(best, expand(i, i), expand(i, i + 1))
 print(best)
 """,
-        "test_inputs": ["babad", "cbbd", "a", "ac", "racecar"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "longest-palindromic", ["babad", "cbbd"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "combination-sum-count", "title": "Combination Sum (Count)", "difficulty": "Medium", "topic": "2d_dp",
@@ -535,7 +541,9 @@ def dfs(i, rem):
 dfs(0, t)
 print(res)
 """,
-        "test_inputs": ["3\n2 3 6\n7", "2\n2 3\n5", "1\n2\n1", "3\n1 2 3\n4", "2\n7 3\n18"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "combination-sum-count", ["3\n2 3 6\n7", "2\n2 3\n5"], target_total=14),
+        "target_tests": 14,
     },
     # ------------------------------------------------------------------ MORE HARD (user's key ask)
     {
@@ -801,7 +809,9 @@ def valid(n, lo, hi):
     return valid(n.l, lo, n.v) and valid(n.r, n.v, hi)
 print('YES' if valid(root, float('-inf'), float('inf')) else 'NO')
 """,
-        "test_inputs": ["2 2", "5 3 8 1 4 7 9", "5 1 4 N N 3 6", "1", "5 4 6 N N 3 7"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "tree-validate-bst", ["2 2", "5 3 8 1 4 7 9"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "tree-diameter", "title": "Diameter of Binary Tree", "topic": "trees",
@@ -839,7 +849,9 @@ def depth(n):
 depth(root)
 print(best)
 """,
-        "test_inputs": ["3 9 20 N N 15 7", "1", "1 2 N N 3", "1 2 3 4 5", "5 3 8 1 4 7 9"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "tree-diameter", ["3 9 20 N N 15 7", "1"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "tree-symmetric", "title": "Symmetric Tree", "topic": "trees",
@@ -977,7 +989,9 @@ def has(n, rem):
     return has(n.l, rem - n.v) or has(n.r, rem - n.v)
 print('YES' if has(root, target) else 'NO')
 """,
-        "test_inputs": ["5 4 8 11 N 13 4 7 2 N N 5 1\n22", "1 2 3\n5", "1\n1", "1\n2", "3 9 20 N N 15 7\n38"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "tree-path-sum", ["5 4 8 11 N 13 4 7 2 N N 5 1\n22", "1 2 3\n5"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "tree-invert", "title": "Invert Binary Tree", "topic": "trees",
@@ -1059,7 +1073,9 @@ def inorder(n):
 inorder(root)
 print(res[k-1])
 """,
-        "test_inputs": ["5 3 8 1 4 7 9\n1", "5 3 8 1 4 7 9\n4", "5 3 8 1 4 7 9\n7", "1\n1", "3 1 4 N 2\n2"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "tree-kth-smallest-bst", ["5 3 8 1 4 7 9\n1", "5 3 8 1 4 7 9\n4"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "tree-lca-bst", "title": "Lowest Common Ancestor in a BST", "topic": "trees",
@@ -1095,7 +1111,9 @@ while node:
     else: break
 print(node.v)
 """,
-        "test_inputs": ["5 3 8 1 4 7 9\n1 4", "5 3 8 1 4 7 9\n7 9", "5 3 8 1 4 7 9\n1 9", "6 2 8 0 4 7 9\n2 4", "6 2 8 0 4 7 9\n0 9"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "tree-lca-bst", ["5 3 8 1 4 7 9\n1 4", "5 3 8 1 4 7 9\n7 9"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "tree-sum-root-to-leaf", "title": "Sum Root to Leaf Numbers", "topic": "trees",
@@ -1135,7 +1153,9 @@ def dfs(n, num):
 dfs(root, 0)
 print(total)
 """,
-        "test_inputs": ["4 9 0 5 1", "1", "1 2 3", "0", "9 8 7"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "tree-sum-root-to-leaf", ["4 9 0 5 1", "1"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "tree-right-side-view", "title": "Binary Tree Right Side View", "topic": "trees",
@@ -1174,7 +1194,9 @@ while level:
     level = nxt
 print(' '.join(map(str, out)))
 """,
-        "test_inputs": ["3 9 20 N N 15 7", "1", "1 N 2", "1 2 3 4", "5 3 8 1 4 7 9"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "tree-right-side-view", ["3 9 20 N N 15 7", "1"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "tree-min-depth", "title": "Minimum Depth of Binary Tree", "topic": "trees",
@@ -1238,7 +1260,9 @@ for s, e in acts:
         last_end = e
 print(count)
 """,
-        "test_inputs": ["4\n1 3 0 5\n2 4 6 7", "1\n0\n5", "3\n1 1 1\n2 2 2", "5\n0 2 4 6 8\n1 3 5 7 9", "3\n1 2 3\n10 3 4"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-activity-selection", ["4\n1 3 0 5\n2 4 6 7", "1\n0\n5"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-merge-intervals", "title": "Merge Overlapping Intervals", "topic": "greedy",
@@ -1259,7 +1283,9 @@ for s, e in ivs:
 for s, e in merged:
     print(s, e)
 """,
-        "test_inputs": ["4\n1 3\n2 6\n8 10\n15 18", "2\n1 4\n4 5", "1\n1 1", "3\n1 4\n0 4\n3 5", "5\n5 7\n1 3\n2 4\n6 8\n10 12"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-merge-intervals", ["4\n1 3\n2 6\n8 10\n15 18", "2\n1 4\n4 5"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-non-overlapping-removals", "title": "Non-overlapping Intervals (Minimum Removals)", "topic": "greedy",
@@ -1279,7 +1305,9 @@ for s, e in ivs:
         last_end = e
 print(n - keep)
 """,
-        "test_inputs": ["4\n1 2\n2 3\n3 4\n1 3", "2\n1 2\n1 2", "3\n1 100000\n11 22\n1 11", "1\n1 2", "6\n1 2\n2 3\n3 4\n4 5\n5 6\n6 7"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-non-overlapping-removals", ["4\n1 2\n2 3\n3 4\n1 3", "2\n1 2\n1 2"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-jump-game", "title": "Jump Game (Can Reach End)", "topic": "greedy",
@@ -1311,7 +1339,9 @@ for i in range(n):
     reach = max(reach, i + a[i])
 print('YES' if ok else 'NO')
 """,
-        "test_inputs": ["5\n2 3 1 1 4", "5\n3 2 1 0 4", "1\n0", "3\n1 0 1", "4\n1 1 1 1"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-jump-game", ["5\n2 3 1 1 4", "5\n3 2 1 0 4"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-jump-game-ii", "title": "Jump Game II (Minimum Jumps)", "topic": "greedy",

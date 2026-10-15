@@ -1,11 +1,13 @@
-"""Stage 2b quality gates (2026-10): a sweep over EVERY problem currently
-opted into `target_tests` -- greedy-min-platforms (Stage 2a) plus the 24
-Easy problems (Stage 2b, seeded-generator-built tests) -- checking:
+"""Quality gates (Stage 2b, extended Stage 2c): a sweep over EVERY
+problem currently opted into `target_tests` -- greedy-min-platforms
+(Stage 2a), the 24 Easy problems (Stage 2b), and the first 21 Medium
+problems (Stage 2c batch 1) -- checking:
 
 1. Every one of its test_inputs is valid under the problem's own
    declared constraints (via problem_input_gen.SPECS[...].validate for
-   the 24 Easy problems; a small inline check for greedy-min-platforms,
-   which predates problem_input_gen.py and isn't part of its registry).
+   every Easy/Medium problem; a small inline check for
+   greedy-min-platforms, which predates problem_input_gen.py and isn't
+   part of its registry).
 2. The reference solution actually runs within the SAME sandbox timeout
    production grading uses (services.code_runner.run_code,
    DEFAULT_TIMEOUT=5s) -- the real grading code path, not just
@@ -14,9 +16,19 @@ Easy problems (Stage 2b, seeded-generator-built tests) -- checking:
    same value, and not confined to only 2 distinct values -- either of
    those would mean the test set can't tell a correct submission from a
    broken one.
-4. Wherever problem_input_gen declares an independent/brute-force
+4. No duplicate inputs within a problem's own test_inputs (the builders
+   already dedup at construction time; this re-checks the stored result
+   rather than trusting that).
+5. Wherever problem_input_gen declares an independent/brute-force
    checker, problem_bank.verify_with_independent_checker is actually run
    against it here (not just assumed to work because it exists).
+6. Uniqueness, wherever the problem allows a direct check for it:
+   two-sum is the only one of the 46 opted-in problems whose correct
+   answer is "a valid X" rather than boolean/count/a single deterministic
+   value/a canonically-unique structure (audited by hand across all 46 --
+   see the Stage 2c commit message for the category breakdown), and it
+   explicitly states its own "exactly one solution" precondition, so its
+   stored tests get an explicit uniqueness re-check here.
 
 No model is used anywhere in this file.
 """
@@ -63,8 +75,15 @@ def test_every_opted_in_problem_has_a_validator_registered():
     assert missing == [], f"no constraint validator registered for: {missing}"
 
 
-def test_exactly_25_problems_are_opted_in():
-    assert len(_opted_in_ids()) == 25, _opted_in_ids()
+def test_exactly_46_problems_are_opted_in():
+    assert len(_opted_in_ids()) == 46, _opted_in_ids()
+
+
+@pytest.mark.parametrize("pid", _opted_in_ids())
+def test_no_duplicate_inputs_within_a_problem(pid):
+    raw = _raw_by_id(pid)
+    tests = raw["test_inputs"]
+    assert len(tests) == len(set(tests)), f"{pid}: duplicate input(s) among {tests!r}"
 
 
 @pytest.mark.parametrize("pid", _opted_in_ids())
@@ -126,6 +145,22 @@ def test_independent_checker_agrees_where_one_exists(pid):
     assert checked == len(raw["test_inputs"])
 
 
+def test_two_sum_stored_tests_each_have_exactly_one_valid_pair():
+    """two-sum promises its own candidate/grader "exactly one solution" --
+    explicit uniqueness re-check over its CURRENT stored test_inputs,
+    independent of validate() (which also enforces this at generation
+    time) so a future direct edit to the stored list can't silently
+    reintroduce an ambiguous input."""
+    raw = _raw_by_id("two-sum")
+    for stdin in raw["test_inputs"]:
+        lines = stdin.split("\n")
+        n = int(lines[0])
+        arr = list(map(int, lines[1].split()))
+        target = int(lines[2])
+        pair_count = sum(1 for a in range(n) for b in range(a + 1, n) if arr[a] + arr[b] == target)
+        assert pair_count == 1, f"two-sum: {stdin!r} has {pair_count} valid pairs, not exactly 1"
+
+
 def test_checker_coverage_report():
     """Not a correctness assertion on its own (the coverage split is a
     judgment call, not a bug if it changes) -- records, for the record,
@@ -135,5 +170,6 @@ def test_checker_coverage_report():
     without_checker = sorted(opted_in - set(WITH_CHECKER_IDS))
     assert set(WITH_CHECKER_IDS) | set(without_checker) == opted_in
     assert set(WITH_CHECKER_IDS) & set(without_checker) == set()
-    print(f"\nindependent checker: {len(WITH_CHECKER_IDS)}/25 problems -- {WITH_CHECKER_IDS}")
-    print(f"no independent checker: {len(without_checker)}/25 problems -- {without_checker}")
+    total = len(opted_in)
+    print(f"\nindependent checker: {len(WITH_CHECKER_IDS)}/{total} problems -- {WITH_CHECKER_IDS}")
+    print(f"no independent checker: {len(without_checker)}/{total} problems -- {without_checker}")

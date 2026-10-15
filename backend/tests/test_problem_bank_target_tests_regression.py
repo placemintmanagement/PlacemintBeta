@@ -64,7 +64,7 @@ def test_every_unopted_problem_is_byte_identical_to_baseline(baseline_problem_ba
           f"({len(opted_in)} opted into target_tests: {sorted(opted_in)})")
 
 
-def test_target_tests_field_is_opt_in_only_on_greedy_min_platforms_and_the_24_easy_problems(live_problem_bank):
+def test_target_tests_field_is_opt_in_only_on_the_expected_46_problems(live_problem_bank):
     EASY_IDS = {
         "two-sum", "reverse-string", "fizzbuzz", "valid-palindrome", "max-subarray-sum",
         "contains-duplicate", "missing-number", "buy-sell-stock", "climb-stairs", "merge-sorted",
@@ -73,13 +73,26 @@ def test_target_tests_field_is_opt_in_only_on_greedy_min_platforms_and_the_24_ea
         "string-longest-common-prefix", "string-isomorphic", "string-word-pattern",
         "string-roman-to-integer", "tp-remove-duplicates-sorted", "arr-majority-element",
     }
+    MEDIUM_BATCH_1_IDS = {
+        "group-anagrams", "longest-substring-no-repeat", "coin-change", "product-except-self",
+        "rotate-image", "num-islands", "search-rotated", "container-water", "longest-palindromic",
+        "combination-sum-count", "tree-validate-bst", "tree-diameter", "tree-path-sum",
+        "tree-kth-smallest-bst", "tree-lca-bst", "tree-sum-root-to-leaf", "tree-right-side-view",
+        "greedy-activity-selection", "greedy-merge-intervals", "greedy-non-overlapping-removals",
+        "greedy-jump-game",
+    }
     assert len(EASY_IDS) == 24
+    assert len(MEDIUM_BATCH_1_IDS) == 21
     opted_in = _opted_in_ids(live_problem_bank)
-    assert opted_in == EASY_IDS | {"greedy-min-platforms"}
-    # Medium/Hard stay untouched this stage, except the one Stage 2a exception.
+    assert opted_in == EASY_IDS | MEDIUM_BATCH_1_IDS | {"greedy-min-platforms"}
+    assert len(opted_in) == 46
+    # Medium/Hard stay untouched this stage beyond Stage 2a's one exception
+    # and Stage 2c batch 1's 21.
     for r in live_problem_bank._RAW:
         if r["id"] in EASY_IDS:
             assert r["difficulty"] == "Easy"
+        elif r["id"] in MEDIUM_BATCH_1_IDS:
+            assert r["difficulty"] == "Medium"
         elif r["id"] != "greedy-min-platforms":
             assert "target_tests" not in r
 
