@@ -2920,7 +2920,7 @@ def _hydrate(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def verify_with_independent_checker(problem_id: str, checker) -> int:
+def verify_with_independent_checker(problem_id: str, checker, exclude: Optional[set] = None) -> int:
     """Author-time correctness cross-check (2026-10, Stage 2a) -- NEVER
     called from the live OA grading path, which only ever runs the
     reference solution. `checker` is an independent implementation (e.g.
@@ -2934,13 +2934,34 @@ def verify_with_independent_checker(problem_id: str, checker) -> int:
     expected_output is always *derived from* the reference solution, not
     checked against anything else. Returns the number of test_inputs
     compared (so a caller can also assert that's nonzero, catching an
-    accidentally-empty test_inputs list)."""
+    accidentally-empty test_inputs list).
+
+    `exclude` (2026-10 follow-up): an optional set/list of exact stdin
+    strings to SKIP here. Exists for the handful of problems whose
+    independent checker is deliberately a naive/slow algorithm (the
+    whole point being a genuinely different, obviously-correct
+    implementation to cross-check against -- see
+    problem_input_gen.py's per-problem checker docstrings) while that
+    problem's large_cases are sized at the FULL constraint ceiling
+    specifically to timeout-differentiate a slow graded submission from
+    the reference. Running the slow checker against that same
+    full-scale input would defeat its own purpose (either the checker
+    times out too, or its large_cases have to be shrunk, which quietly
+    removes the very timeout gap they exist to demonstrate -- both
+    tried and rejected for this reason). Excluding those specific
+    inputs from the CHECKER check only -- never from the reference run,
+    which always executes on every stored input regardless -- keeps
+    checker correctness covered by small-input differential fuzzing
+    instead, where it belongs."""
     raw = next((r for r in _RAW if r["id"] == problem_id), None)
     if raw is None:
         raise ValueError(f"No problem with id {problem_id!r} in the bank")
     ref = raw["reference_solution"]
+    exclude_set = set(exclude) if exclude else set()
     checked = 0
     for stdin in raw["test_inputs"]:
+        if stdin in exclude_set:
+            continue
         ref_out = _run_ref(ref, stdin)
         checker_out = str(checker(stdin)).strip()
         if ref_out != checker_out:

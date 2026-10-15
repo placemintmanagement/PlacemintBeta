@@ -1459,17 +1459,23 @@ _register(ProblemInputSpec(
     _container_water_random, _container_water_validate, _container_water_checker,
     large_cases=[
         # Intended complexity: O(n) two-pointer. A naive O(n^2) all-pairs
-        # check is 10^10 at the full n=10^5 ceiling -- would time out.
-        # HONEST TRADE-OFF (Stage 2c uniqueness/checker follow-up):
-        # reduced from 10^5 to 2000 so the independent checker above
-        # (deliberately the O(n^2) brute force, for a genuine correctness
-        # cross-check) can verify this exact stored case in the quality
-        # gates without itself timing out -- 2000^2 = 4*10^6, fine. This
-        # means these two cases no longer demonstrate the O(n) vs O(n^2)
-        # timeout gap for a GRADED submission the way the original 10^5
-        # size did; they now only confirm correctness at a smaller scale.
-        f"2000\n{_fmt_arr([(i * 13) % 1000 for i in range(2000)])}\n",
-        f"2000\n{_fmt_arr([2000 - i for i in range(2000)])}\n",
+        # check is 10^10 at the full n=10^5 ceiling -- times out, and
+        # test_naive_times_out_reference_does_not_on_large_input (in
+        # test_problem_bank_large_input_complexity.py) proves it directly
+        # against this exact stored input, with the actual sizes/timings
+        # observed. RESTORED to the full n=10^5 ceiling (2026-10 follow-up;
+        # briefly reduced to n=2000 so the O(n^2) independent checker above
+        # could verify it directly, but that traded away the very
+        # timeout-differentiation this large case exists for). These large
+        # inputs now run the REFERENCE SOLUTION ONLY -- see
+        # LARGE_CASES_EXCLUDED_FROM_CHECKER in
+        # test_problem_bank_opted_in_quality_gates.py, which skips exactly
+        # these two stdins when verifying this problem's checker, since the
+        # checker is deliberately the slow O(n^2) approach and was never
+        # meant to run at this scale. Checker correctness is instead fully
+        # covered by the 200-trial differential fuzz on small inputs.
+        f"100000\n{_fmt_arr([(i * 13) % 1000 for i in range(100000)])}\n",
+        f"100000\n{_fmt_arr([100000 - i for i in range(100000)])}\n",
     ],
 ))
 
@@ -2135,7 +2141,7 @@ def _activity_selection_checker(stdin: str) -> str:
     return str(_max_non_overlap_bruteforce(list(zip(starts, ends))))
 
 
-_ACT_SEL_LARGE_STARTS = [(i * 3) % 2000 for i in range(2000)]
+_ACT_SEL_LARGE_STARTS = [(i * 3) % 10000 for i in range(10000)]
 _ACT_SEL_LARGE_ENDS = [s + 5 for s in _ACT_SEL_LARGE_STARTS]
 _register(ProblemInputSpec(
     "greedy-activity-selection", "two_int_arrays",
@@ -2145,16 +2151,23 @@ _register(ProblemInputSpec(
     large_cases=[
         # Intended complexity: O(n log n) (sort by end time). A naive
         # O(n^2) pairwise overlap-and-select scan is 10^8 at the full
-        # n=10^4 ceiling -- plausibly too slow. HONEST TRADE-OFF (Stage
-        # 2c uniqueness/checker follow-up): reduced from 10^4 to 2000 so
-        # the independent checker above (also O(n^2), by design, for a
-        # genuine correctness cross-check) can verify this stored case
-        # without itself timing out -- 2000^2 = 4*10^6, fine. These two
-        # cases no longer demonstrate the O(n log n) vs O(n^2) timeout
-        # gap for a GRADED submission the way the original 10^4 size
-        # did; they now only confirm correctness at a smaller scale.
-        f"2000\n{_fmt_arr(_ACT_SEL_LARGE_STARTS)}\n{_fmt_arr(_ACT_SEL_LARGE_ENDS)}\n",
-        f"2000\n{_fmt_arr([0] * 2000)}\n{_fmt_arr([1] * 2000)}\n",
+        # n=10^4 ceiling -- times out, and
+        # test_naive_times_out_reference_does_not_on_large_input (in
+        # test_problem_bank_large_input_complexity.py) proves it directly
+        # against this exact stored input, with the actual sizes/timings
+        # observed. RESTORED to the full n=10^4 ceiling (2026-10 follow-up;
+        # briefly reduced to n=2000 so the O(n^2) independent checker above
+        # could verify it directly, but that traded away the very
+        # timeout-differentiation this large case exists for). These large
+        # inputs now run the REFERENCE SOLUTION ONLY -- see
+        # LARGE_CASES_EXCLUDED_FROM_CHECKER in
+        # test_problem_bank_opted_in_quality_gates.py, which skips exactly
+        # these two stdins when verifying this problem's checker, since the
+        # checker is deliberately the slow O(n^2) approach and was never
+        # meant to run at this scale. Checker correctness is instead fully
+        # covered by the 200-trial differential fuzz on small inputs.
+        f"10000\n{_fmt_arr(_ACT_SEL_LARGE_STARTS)}\n{_fmt_arr(_ACT_SEL_LARGE_ENDS)}\n",
+        f"10000\n{_fmt_arr([0] * 10000)}\n{_fmt_arr([1] * 10000)}\n",
     ],
 ))
 
@@ -2187,18 +2200,25 @@ def _interval_list_validate(stdin: str) -> bool:
 
 def _interval_list_large(seed: str) -> str:
     rng = random.Random(seed)
-    # HONEST TRADE-OFF (Stage 2c uniqueness/checker follow-up): n
-    # reduced from 10000 to 2000 (range scaled down to match density) so
-    # the O(n^2) independent checkers below (both problems, by design,
-    # for a genuine correctness cross-check) can verify these stored
-    # cases without themselves timing out -- 2000^2 = 4*10^6, fine.
-    # These two cases no longer demonstrate the O(n log n) vs O(n^2)
-    # timeout gap for a GRADED submission the way the original 10^4 size
-    # did; they now only confirm correctness at a smaller scale.
-    n = 2000
+    # RESTORED to the full n=10^4 ceiling (2026-10 follow-up; briefly
+    # reduced to n=2000 so the O(n^2) independent checkers below could
+    # verify it directly, but that traded away the very timeout-
+    # differentiation this large case exists for). These large inputs
+    # now run the REFERENCE SOLUTION ONLY -- see
+    # LARGE_CASES_EXCLUDED_FROM_CHECKER in
+    # test_problem_bank_opted_in_quality_gates.py, which skips exactly
+    # these stdins when verifying greedy-merge-intervals'/greedy-non-
+    # overlapping-removals' checkers, since both checkers are
+    # deliberately the slow O(n^2) approach and were never meant to run
+    # at this scale. Checker correctness is instead fully covered by the
+    # 200-trial differential fuzz on small inputs.
+    # test_naive_times_out_reference_does_not_on_large_input (in
+    # test_problem_bank_large_input_complexity.py) proves the naive-vs-
+    # reference timeout gap directly against this exact stored input.
+    n = 10000
     lines = [str(n)]
     for _ in range(n):
-        s = rng.randint(0, 400)
+        s = rng.randint(0, 2000)
         e = s + rng.randint(0, 10)
         lines.append(f"{s} {e}")
     return "\n".join(lines) + "\n"
@@ -2266,8 +2286,8 @@ _register(ProblemInputSpec(
     large_cases=[
         # Intended complexity: O(n log n) (sort by start, one merge pass).
         # A naive O(n^2) pairwise merge-and-rescan is 10^8 at the full
-        # n=10^4 ceiling -- plausibly too slow. See _interval_list_large
-        # above for the size trade-off made for the new checker.
+        # n=10^4 ceiling -- times out. See _interval_list_large above for
+        # the restoration/checker-exclusion reasoning.
         _interval_list_large("2c-merge-intervals-large-1"),
         _interval_list_large("2c-merge-intervals-large-2"),
     ],

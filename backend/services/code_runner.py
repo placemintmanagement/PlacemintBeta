@@ -14,7 +14,14 @@ worker process.
 
 Each language has one function ``run_<lang>(code, stdin, timeout) -> RunResult``.
 All runners return the same shape so the caller doesn't care which language it is:
-    {"stdout": str, "stderr": str, "exit_code": int, "timed_out": bool, "error": str | None}
+    {"stdout": str, "stderr": str, "exit_code": int, "timed_out": bool, "error": str | None,
+     "category": "ok" | "runtime_error" | "time_limit_exceeded" | "infrastructure_error"}
+"category" (2026-10) distinguishes an infrastructure failure -- the runner
+itself never got the candidate's code running -- from a genuine failure of
+the candidate's own code, so neither run_tests_with_retry() nor
+_grade_coding_section() ever has to guess from timed_out/exit_code alone.
+See the classification helpers below for the exact rule and its known
+false-positive case.
 
 Compile-then-run languages (C++, Java) share a two-step wrapper. Interpreted
 languages (Python, Node) run directly.
@@ -43,7 +50,7 @@ import subprocess
 import tempfile
 import threading
 import uuid
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 try:
     import resource  # POSIX only
@@ -58,6 +65,79 @@ except ImportError:
 RunResult = Dict[str, object]
 
 DEFAULT_TIMEOUT = 5  # seconds per test
+
+# ---- Result classification (2026-10) ----------------------------------------
+# Every RunResult now carries a "category": one of
+#   "ok"                  -- the process exited 0 within the timeout (the
+#                             caller still separately checks stdout to tell
+#                             "passed" from "wrong_answer")
+#   "runtime_error"       -- the process ran and exited non-zero (a crash,
+#                             uncaught exception, compile error, etc.), or
+#                             run_code() rejected the submission outright
+#                             (unsupported language, empty code)
+#   "time_limit_exceeded" -- the process was killed by the wall-clock
+#                             timeout AFTER genuinely consuming CPU time
+#                             commensurate with that timeout -- the
+#                             student's own code ran and used its time
+#   "infrastructure_error" -- the runner itself could not get the
+#                             candidate's code running: a spawn failure, an
+#                             OS error, or (POSIX only) a timeout where the
+#                             killed child consumed almost no CPU time at
+#                             all despite running for the full wall-clock
+#                             timeout -- i.e. it was blocked, not computing
+INFRA_CPU_TIME_FLOOR = 0.5   # seconds -- absolute floor so a short timeout
+                             # doesn't make the ratio check below unreasonably tight
+INFRA_CPU_TIME_RATIO = 0.1   # if the killed child used less than this fraction
+                             # of the wall-clock timeout in actual CPU time, it
+                             # was almost certainly blocked rather than computing
+
+
+def _child_cpu_seconds() -> Optional[float]:
+    """Cumulative CPU time (user+sys) of every child this process has
+    reaped so far. POSIX only -- `resource` doesn't exist on Windows."""
+    if resource is None:
+        return None
+    ru = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return ru.ru_utime + ru.ru_stime
+
+
+def _classify_timeout(cpu_before: Optional[float], timeout: int) -> str:
+    """Distinguish a genuine time_limit_exceeded (the student's own code
+    ran and used its time) from an infrastructure_error (the runner never
+    actually got the child meaningfully running -- e.g. blocked on process
+    creation, antivirus/on-access-scan overhead on the newly-written source
+    file before it could even be exec'd, or some other host-level stall),
+    using how much CPU time the killed child actually consumed, measured
+    via the CHANGE in this process's RUSAGE_CHILDREN across the call
+    (subprocess.run reaps the killed child before raising TimeoutExpired,
+    so its usage is already accounted by the time we get here).
+
+    POSIX only: on Windows (`resource` is None) this always returns
+    "time_limit_exceeded" -- the infra/TLE split for a timeout is strictly
+    an enhancement available where `resource.getrusage` exists, never a
+    requirement; a Windows deployment keeps today's behavior exactly (every
+    timeout is a plain TLE).
+
+    KNOWN FALSE POSITIVE, explicitly accepted: a submission that itself
+    blocks without consuming CPU -- `time.sleep(10)`, or code waiting on
+    stdin/a socket/a lock that never arrives/frees -- produces the exact
+    same near-zero-CPU/full-wall-time signature as a genuine infra stall,
+    and is indistinguishable from one by this measurement alone. Such a
+    submission is classified as infrastructure_error (retried by the
+    caller, then left UNSCORED after retries are exhausted, rather than
+    scored as time_limit_exceeded). This is a deliberate bias toward
+    giving the student the benefit of the doubt on an ambiguous signal,
+    at the cost of not literally recording that particular submission as
+    a TLE -- there is no way to tell the two apart from this process's
+    side alone without deeper per-process CPU-accounting (e.g. cgroups)
+    that this sandbox doesn't have.
+    """
+    cpu_after = _child_cpu_seconds()
+    if cpu_before is None or cpu_after is None:
+        return "time_limit_exceeded"
+    cpu_used = max(0.0, cpu_after - cpu_before)
+    threshold = max(INFRA_CPU_TIME_FLOOR, timeout * INFRA_CPU_TIME_RATIO)
+    return "infrastructure_error" if cpu_used < threshold else "time_limit_exceeded"
 
 # ---- Resource limits (applied via preexec_fn; no-op on Windows) -------------
 MEM_LIMIT_BYTES = 128 * 1024 * 1024          # native run step: python/node/c/cpp
@@ -182,6 +262,7 @@ def _run(cmd: List[str], stdin: str, cwd: str, timeout: int,
          nproc_limit: int = NPROC_LIMIT) -> RunResult:
     preexec = _make_preexec_fn(cpu_seconds, mem_bytes, nproc_limit)
     with _EXEC_LOCK:
+        cpu_before = _child_cpu_seconds()
         try:
             proc = subprocess.run(
                 cmd,
@@ -198,11 +279,19 @@ def _run(cmd: List[str], stdin: str, cwd: str, timeout: int,
                 "exit_code": proc.returncode,
                 "timed_out": False,
                 "error": None,
+                "category": "ok" if proc.returncode == 0 else "runtime_error",
             }
         except subprocess.TimeoutExpired:
-            return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": True, "error": f"Timed out after {timeout}s"}
+            category = _classify_timeout(cpu_before, timeout)
+            return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": True,
+                    "error": f"Timed out after {timeout}s", "category": category}
         except Exception as e:
-            return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False, "error": str(e)[:300]}
+            # Process creation itself failed (spawn failure, OS error, a
+            # missing interpreter, a permissions problem writing the temp
+            # workdir, ...) -- the candidate's code never got a chance to
+            # run at all, so this is never the candidate's fault.
+            return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False,
+                    "error": str(e)[:300], "category": "infrastructure_error"}
 
 
 # ---- Python -----------------------------------------------------------------
@@ -322,14 +411,34 @@ SUPPORTED_LANGUAGES = ["python", "javascript", "c", "cpp", "java"]
 def run_code(language: str, code: str, stdin: str, timeout: int = DEFAULT_TIMEOUT) -> RunResult:
     runner = _RUNNERS.get(language.lower())
     if runner is None:
-        return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False, "error": f"Unsupported language: {language}"}
+        return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False,
+                "error": f"Unsupported language: {language}", "category": "runtime_error"}
     if not code or not code.strip():
-        return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False, "error": "Empty code"}
+        return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False,
+                "error": "Empty code", "category": "runtime_error"}
     return runner(code, stdin, timeout)
 
 
+def _classify_run_result(result: RunResult, got: str, expected: str) -> str:
+    """Maps a RunResult + output comparison to one of the 5 grading
+    statuses: passed, wrong_answer, runtime_error, time_limit_exceeded,
+    infrastructure_error."""
+    category = result.get("category", "ok")
+    if category == "ok":
+        return "passed" if got == expected else "wrong_answer"
+    return category
+
+
 def run_tests(language: str, code: str, tests: List[Dict[str, str]], timeout: int = DEFAULT_TIMEOUT) -> Tuple[int, List[Dict]]:
-    """Run all tests for a submission. Returns (passed_count, details)."""
+    """Run all tests for a submission. Returns (passed_count, details).
+
+    Each detail now also carries "status", one of passed/wrong_answer/
+    runtime_error/time_limit_exceeded/infrastructure_error -- additive,
+    the existing "passed"/"timed_out" booleans and overall behavior for
+    every non-infra outcome are unchanged. This function does NOT retry
+    an infrastructure_error -- see run_tests_with_retry() below, which
+    _grade_coding_section uses specifically so a bare infra hiccup never
+    gets silently recorded as a wrong answer."""
     passed = 0
     details = []
     for i, t in enumerate(tests):
@@ -337,13 +446,15 @@ def run_tests(language: str, code: str, tests: List[Dict[str, str]], timeout: in
         expected = str(t.get("expected_output", "")).strip()
         result = run_code(language, code, stdin, timeout)
         got = (result["stdout"] or "").strip()
-        ok = (not result["timed_out"]) and (result["exit_code"] == 0) and (got == expected)
+        status = _classify_run_result(result, got, expected)
+        ok = status == "passed"
         details.append({
             "index": i,
             "input": stdin,
             "expected": expected,
             "got": got,
             "passed": ok,
+            "status": status,
             "error": result.get("error"),
             "stderr": (result.get("stderr") or "")[:300] if not ok else None,
             "timed_out": result["timed_out"],
@@ -351,3 +462,59 @@ def run_tests(language: str, code: str, tests: List[Dict[str, str]], timeout: in
         if ok:
             passed += 1
     return passed, details
+
+
+def run_tests_with_retry(language: str, code: str, tests: List[Dict[str, str]],
+                          timeout: int = DEFAULT_TIMEOUT, max_retries: int = 2
+                          ) -> Tuple[int, List[Dict], bool]:
+    """Same per-test grading as run_tests(), except a test whose result
+    classifies as "infrastructure_error" -- the runner itself appears to
+    have failed, not the candidate's code -- is re-run up to max_retries
+    more times (so up to 1 + max_retries attempts total; max_retries=2
+    means up to 3 attempts) before its result is accepted as final.
+
+    Returns (passed_count, details, unresolved_infra). unresolved_infra
+    is True if ANY test in this call was still infrastructure_error after
+    exhausting its retries. The caller (_grade_coding_section) uses this
+    to abort the WHOLE section grade -- raising instead of returning a
+    score -- rather than ever storing a score built on an infra failure,
+    or letting the track computation run on a partial result.
+
+    A genuine time_limit_exceeded is never retried here: the student's
+    own code ran and used its time, so re-running it would just burn the
+    same outcome again (and conflate "flaky infra" with "the student's
+    algorithm is slow", which is exactly the distinction this exists to
+    preserve)."""
+    passed = 0
+    details = []
+    unresolved_infra = False
+    for i, t in enumerate(tests):
+        stdin = str(t.get("input", ""))
+        expected = str(t.get("expected_output", "")).strip()
+        attempts = 0
+        result: RunResult = {}
+        while True:
+            attempts += 1
+            result = run_code(language, code, stdin, timeout)
+            if result.get("category") != "infrastructure_error" or attempts > max_retries:
+                break
+        got = (result["stdout"] or "").strip()
+        status = _classify_run_result(result, got, expected)
+        if status == "infrastructure_error":
+            unresolved_infra = True
+        ok = status == "passed"
+        details.append({
+            "index": i,
+            "input": stdin,
+            "expected": expected,
+            "got": got,
+            "passed": ok,
+            "status": status,
+            "attempts": attempts,
+            "error": result.get("error"),
+            "stderr": (result.get("stderr") or "")[:300] if not ok else None,
+            "timed_out": result["timed_out"],
+        })
+        if ok:
+            passed += 1
+    return passed, details, unresolved_infra

@@ -72,7 +72,12 @@ from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.
     check_tcs_static_feasibility as _tcs_check_static_feasibility,
     TCSBankBlockedError as _TCSBankBlockedError,
 )
-from services.code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
+from services.code_runner import (
+    run_code as _lang_run_code,
+    run_tests as _lang_run_tests,
+    run_tests_with_retry as _lang_run_tests_with_retry,
+    SUPPORTED_LANGUAGES,
+)
 from banks.problem_bank import sample_problems as _sample_problems
 from banks import problem_bank
 from banks import debugging_bank
@@ -2370,7 +2375,21 @@ def _template_coding_note(vpass: int, vtotal: int, hpass: int, htotal: int, pct:
 async def _grade_coding_section(section: dict, answers: Dict[str, Any], use_ai_note: bool = True) -> dict:
     """`use_ai_note=False` (TCS, 2026-10 zero-AI-calls pass): skip the
     call_json_gpt narrative-feedback call entirely and use a fixed template
-    built from the same sandbox test results instead -- never a model call."""
+    built from the same sandbox test results instead -- never a model call.
+
+    Infra-failure handling (2026-10): uses run_tests_with_retry, which
+    retries an individual test up to 2 extra times (3 attempts total) when
+    code_runner classifies its result as "infrastructure_error" -- the
+    SANDBOX failed to run the candidate's code at all, not the candidate's
+    code itself being wrong or slow (see code_runner.py's module docstring
+    and _classify_timeout for the exact rule and its known false-positive
+    case). If a test is STILL infrastructure_error after those retries,
+    this function raises instead of returning a score: no partial score is
+    ever stored for this attempt, and -- critically -- submit_section's
+    persist/track-evaluation code (further down, after this call returns)
+    never runs either, since the exception propagates out of the `await`
+    before reaching it. The caller gets a 503 it can retry the whole
+    section submission against."""
     problems = section.get("questions", [])
     per_problem = []
     total_score = 0.0
@@ -2392,8 +2411,19 @@ async def _grade_coding_section(section: dict, answers: Dict[str, Any], use_ai_n
         language = sub.get("language", "python")
         visible = p.get("visible_tests", []) or []
         hidden = p.get("hidden_tests", []) or []
-        vpass, _vdetails = await asyncio.to_thread(_lang_run_tests, language, code, visible)
-        hpass, _hdetails = await asyncio.to_thread(_lang_run_tests, language, code, hidden)
+        vpass, _vdetails, v_infra = await asyncio.to_thread(_lang_run_tests_with_retry, language, code, visible)
+        hpass, _hdetails, h_infra = await asyncio.to_thread(_lang_run_tests_with_retry, language, code, hidden)
+        if v_infra or h_infra:
+            logger.error(
+                "grading infra error persisted after retries for problem %s (lang=%s) -- "
+                "aborting section grade, no score stored for this attempt",
+                pid, language,
+            )
+            raise HTTPException(503, {
+                "code": "grading_infra_error",
+                "message": "We hit an infrastructure problem while grading your code. "
+                            "Nothing was scored for this section -- please resubmit.",
+            })
         vtotal, htotal = len(visible), len(hidden)
         tests_pass = vpass + hpass
         tests_total = vtotal + htotal

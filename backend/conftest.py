@@ -15,6 +15,26 @@ and are exempt from the stub below (so they hit the real client).
 """
 import os
 
+# Stage 2c follow-up (2026-10): give the TEST environment a more generous
+# problem_bank reference-solution-hydration timeout than production's
+# default (banks/problem_bank.py's PM_BANK_REF_TIMEOUT, read once at
+# import time -- so this MUST run before `import server` below, which
+# transitively imports banks.problem_bank and triggers full-bank
+# hydration). setdefault() only takes effect if the variable isn't
+# already set, so an operator's own explicit PM_BANK_REF_TIMEOUT (e.g.
+# CI setting a different value) is never overridden, and production
+# code paths never read this file at all -- services/code_runner.py's
+# actual grading timeout (DEFAULT_TIMEOUT, a hardcoded 5) is completely
+# separate and untouched. This exists because this dev machine's bare,
+# unthrottled `subprocess.run` calls in _run_ref occasionally miss the
+# plain 5s default under load (Windows Defender real-time/IOAV scanning
+# + a cluttered %TEMP% -- confirmed by direct reproduction, not guessed;
+# see that env var's definition for the full writeup) -- 20s gives
+# every individual reference-solution run, even a trivial one, a lot of
+# slack against that without changing what any problem's reference
+# solution is actually allowed to do.
+os.environ.setdefault("PM_BANK_REF_TIMEOUT", "20")
+
 import pytest
 
 import server
