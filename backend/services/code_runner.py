@@ -16,12 +16,20 @@ Each language has one function ``run_<lang>(code, stdin, timeout) -> RunResult``
 All runners return the same shape so the caller doesn't care which language it is:
     {"stdout": str, "stderr": str, "exit_code": int, "timed_out": bool, "error": str | None,
      "category": "ok" | "runtime_error" | "time_limit_exceeded" | "infrastructure_error"}
-"category" (2026-10) distinguishes an infrastructure failure -- the runner
-itself never got the candidate's code running -- from a genuine failure of
-the candidate's own code, so neither run_tests_with_retry() nor
-_grade_coding_section() ever has to guess from timed_out/exit_code alone.
-See the classification helpers below for the exact rule and its known
-false-positive case.
+"category" (2026-10, reworked with a canary check) distinguishes an
+infrastructure failure -- the runner itself never got the candidate's
+code running -- from a genuine failure of the candidate's own code.
+A timed-out run's category of "infrastructure_error" is a SUSPICION,
+not a verdict: run_tests_with_canary_check() below confirms or refutes
+it by running a trivial known-good "canary" program through the same
+runner under the same limits. A failing/stalled canary means a real
+infra problem (grading stops immediately, nothing is scored); a healthy
+canary means the STUDENT's program is what's actually slow, and that
+test is reclassified as a genuine time_limit_exceeded. The canary's own
+pass/fail check needs no CPU-time counters at all, so it's what makes
+this whole scheme work identically on Windows (no `resource` module) as
+on Linux. See the classification helpers below for the exact rule and
+its known ambiguity, resolved by the canary rather than guessed.
 
 Compile-then-run languages (C++, Java) share a two-step wrapper. Interpreted
 languages (Python, Node) run directly.
@@ -49,6 +57,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 
@@ -112,29 +121,34 @@ def _classify_timeout(cpu_before: Optional[float], timeout: int) -> str:
     (subprocess.run reaps the killed child before raising TimeoutExpired,
     so its usage is already accounted by the time we get here).
 
-    POSIX only: on Windows (`resource` is None) this always returns
-    "time_limit_exceeded" -- the infra/TLE split for a timeout is strictly
-    an enhancement available where `resource.getrusage` exists, never a
-    requirement; a Windows deployment keeps today's behavior exactly (every
-    timeout is a plain TLE).
+    This function only ever returns "time_limit_exceeded" when it can
+    PROVE the timeout wasn't an infra problem (comfortable CPU usage).
+    Every other case -- including, critically, a platform with no CPU
+    counters at all -- returns "infrastructure_error" instead, as a
+    SUSPICION for the caller to confirm or refute with a canary run
+    (see run_canary() and run_tests_with_canary_check() below), never as
+    a final verdict on its own.
 
-    KNOWN FALSE POSITIVE, explicitly accepted: a submission that itself
-    blocks without consuming CPU -- `time.sleep(10)`, or code waiting on
-    stdin/a socket/a lock that never arrives/frees -- produces the exact
-    same near-zero-CPU/full-wall-time signature as a genuine infra stall,
-    and is indistinguishable from one by this measurement alone. Such a
-    submission is classified as infrastructure_error (retried by the
-    caller, then left UNSCORED after retries are exhausted, rather than
-    scored as time_limit_exceeded). This is a deliberate bias toward
-    giving the student the benefit of the doubt on an ambiguous signal,
-    at the cost of not literally recording that particular submission as
-    a TLE -- there is no way to tell the two apart from this process's
-    side alone without deeper per-process CPU-accounting (e.g. cgroups)
-    that this sandbox doesn't have.
+    On Windows (`resource` is None), there is no CPU-time signal at all,
+    so EVERY timeout comes back "infrastructure_error" here -- the
+    canary becomes the sole arbiter of TLE-vs-infra on that platform,
+    not an optional enhancement on top of a CPU-time guess that doesn't
+    exist there. This is what makes the canary mechanism load-bearing on
+    Windows, not just a POSIX nicety.
+
+    KNOWN AMBIGUITY, resolved by the canary rather than guessed here: a
+    submission that itself blocks without consuming CPU -- `time.sleep
+    (10)`, or code waiting on stdin/a socket/a lock that never arrives/
+    frees -- produces the exact same near-zero-CPU/full-wall-time
+    signature as a genuine infra stall, and is indistinguishable from
+    one by this measurement alone. Flagging it "infrastructure_error"
+    here is not the final answer: the caller's canary check resolves it
+    -- a healthy canary means the MACHINE is fine, so a result like this
+    is reclassified as a genuine time_limit_exceeded instead.
     """
     cpu_after = _child_cpu_seconds()
     if cpu_before is None or cpu_after is None:
-        return "time_limit_exceeded"
+        return "infrastructure_error"
     cpu_used = max(0.0, cpu_after - cpu_before)
     threshold = max(INFRA_CPU_TIME_FLOOR, timeout * INFRA_CPU_TIME_RATIO)
     return "infrastructure_error" if cpu_used < threshold else "time_limit_exceeded"
@@ -464,44 +478,123 @@ def run_tests(language: str, code: str, tests: List[Dict[str, str]], timeout: in
     return passed, details
 
 
-def run_tests_with_retry(language: str, code: str, tests: List[Dict[str, str]],
-                          timeout: int = DEFAULT_TIMEOUT, max_retries: int = 2
-                          ) -> Tuple[int, List[Dict], bool]:
+# ---- Canary (2026-10 rework) -------------------------------------------
+# A trivial, known-good, fixed-output program per language -- the same
+# runner function a real submission would use, so it goes through the
+# exact same workdir/subprocess/timeout machinery (and, on POSIX, the
+# same resource limits). Its pass/fail check below is deliberately NOT
+# based on CPU-time accounting at all: "did this finish and print
+# exactly the expected sentinel within the timeout" needs nothing POSIX
+# -only, so it works identically on Windows.
+_CANARY_SENTINEL = "CANARY_OK_7f3a9c2b"
+_CANARY_SOURCE_BY_RUNNER = {
+    run_python: f'print("{_CANARY_SENTINEL}")\n',
+    run_javascript: f'console.log("{_CANARY_SENTINEL}");\n',
+    run_c: f'#include <stdio.h>\nint main(){{printf("{_CANARY_SENTINEL}\\n");return 0;}}\n',
+    run_cpp: f'#include <iostream>\nint main(){{std::cout<<"{_CANARY_SENTINEL}"<<std::endl;return 0;}}\n',
+    run_java: f'public class Main {{ public static void main(String[] args) '
+              f'{{ System.out.println("{_CANARY_SENTINEL}"); }} }}\n',
+}
+
+
+def run_canary(language: str, timeout: int = DEFAULT_TIMEOUT) -> bool:
+    """True iff the trivial known-good program for `language` ran to
+    completion and printed exactly its expected sentinel within
+    `timeout` -- i.e. the SANDBOX itself is healthy for this language
+    right now. False means a real infrastructure problem: the exact
+    same runner that just failed/stalled on the candidate's code also
+    fails/stalls on code that is trivially, unconditionally correct."""
+    runner = _RUNNERS.get(language.lower())
+    source = _CANARY_SOURCE_BY_RUNNER.get(runner) if runner else None
+    if runner is None or source is None:
+        return False
+    result = runner(source, "", timeout)
+    return (
+        not result["timed_out"]
+        and result["exit_code"] == 0
+        and (result.get("stdout") or "").strip() == _CANARY_SENTINEL
+    )
+
+
+def run_tests_with_canary_check(language: str, code: str, tests: List[Dict[str, str]],
+                                 timeout: int = DEFAULT_TIMEOUT,
+                                 deadline: Optional[float] = None,
+                                 ) -> Tuple[int, List[Dict], bool]:
     """Same per-test grading as run_tests(), except a test whose result
-    classifies as "infrastructure_error" -- the runner itself appears to
-    have failed, not the candidate's code -- is re-run up to max_retries
-    more times (so up to 1 + max_retries attempts total; max_retries=2
-    means up to 3 attempts) before its result is accepted as final.
+    classifies as "infrastructure_error" (a SUSPICION -- see
+    _classify_timeout's docstring) triggers a canary check instead of
+    blindly retrying the student's test:
+
+      - Canary passes -> the SANDBOX is healthy, so the suspicious
+        result was the student's own program being slow (this is also
+        the only path on Windows, where _classify_timeout can't measure
+        CPU time at all and so is ALWAYS "suspicious" on a timeout).
+        Reclassify the test as a genuine time_limit_exceeded and move on
+        -- no retry of the student's test.
+      - Canary fails -> give the CANARY itself (not the student's test)
+        one more try, in case that was a transient blip:
+          - Second canary attempt passes -> the blip was transient; give
+            the student's ACTUAL test one re-run (at most one) before
+            trusting its result. If that re-run is STILL infrastructure_
+            error, treat it as persistent after all and stop.
+          - Second canary attempt also fails -> a real, persistent
+            infrastructure problem. Stop grading IMMEDIATELY: no more
+            tests in this call are run, and this call's result must
+            never be used to store a score (see unresolved_infra below).
+
+    A genuine time_limit_exceeded (resolved directly by _classify_timeout
+    without any ambiguity, or reclassified via a passing canary above) is
+    never retried: the student's own code ran and used its time, so
+    re-running it would just burn the same outcome again.
+
+    `deadline`, if given, is an absolute time.monotonic() value: if it's
+    already passed when about to start a new test, grading stops here
+    too (treated the same as a persistent infra failure) -- this is the
+    hard per-submission wall-time cap, enforced across every problem in
+    a section by the caller threading the SAME deadline through each of
+    its calls, not just within one call's own tests.
 
     Returns (passed_count, details, unresolved_infra). unresolved_infra
-    is True if ANY test in this call was still infrastructure_error after
-    exhausting its retries. The caller (_grade_coding_section) uses this
-    to abort the WHOLE section grade -- raising instead of returning a
-    score -- rather than ever storing a score built on an infra failure,
-    or letting the track computation run on a partial result.
-
-    A genuine time_limit_exceeded is never retried here: the student's
-    own code ran and used its time, so re-running it would just burn the
-    same outcome again (and conflate "flaky infra" with "the student's
-    algorithm is slow", which is exactly the distinction this exists to
-    preserve)."""
+    is True iff this call stopped early on a persistent infra problem or
+    the deadline -- the caller (_grade_coding_section) uses this to
+    abort the WHOLE section grade, raising instead of ever returning a
+    score built on an infra failure or a partial result."""
     passed = 0
     details = []
     unresolved_infra = False
     for i, t in enumerate(tests):
+        if deadline is not None and time.monotonic() > deadline:
+            details.append({
+                "index": i, "input": str(t.get("input", "")),
+                "expected": str(t.get("expected_output", "")).strip(), "got": "",
+                "passed": False, "status": "infrastructure_error",
+                "error": "grading wall-time cap exceeded", "stderr": None, "timed_out": False,
+            })
+            unresolved_infra = True
+            break
         stdin = str(t.get("input", ""))
         expected = str(t.get("expected_output", "")).strip()
-        attempts = 0
-        result: RunResult = {}
-        while True:
-            attempts += 1
-            result = run_code(language, code, stdin, timeout)
-            if result.get("category") != "infrastructure_error" or attempts > max_retries:
-                break
+        result = run_code(language, code, stdin, timeout)
         got = (result["stdout"] or "").strip()
         status = _classify_run_result(result, got, expected)
         if status == "infrastructure_error":
-            unresolved_infra = True
+            if run_canary(language, timeout):
+                # Sandbox is healthy -- the student's program is what's
+                # actually slow/stuck, not the runner.
+                status = "time_limit_exceeded"
+            elif run_canary(language, timeout):
+                # The canary's OWN first failure was transient (it
+                # recovered on its second try) -- worth one re-run of
+                # the student's actual test before giving up on it.
+                result = run_code(language, code, stdin, timeout)
+                got = (result["stdout"] or "").strip()
+                status = _classify_run_result(result, got, expected)
+                if status == "infrastructure_error":
+                    unresolved_infra = True
+            else:
+                # Canary failed twice in a row -- a real, persistent
+                # infrastructure problem, not the student's fault.
+                unresolved_infra = True
         ok = status == "passed"
         details.append({
             "index": i,
@@ -510,11 +603,12 @@ def run_tests_with_retry(language: str, code: str, tests: List[Dict[str, str]],
             "got": got,
             "passed": ok,
             "status": status,
-            "attempts": attempts,
             "error": result.get("error"),
             "stderr": (result.get("stderr") or "")[:300] if not ok else None,
             "timed_out": result["timed_out"],
         })
         if ok:
             passed += 1
+        if unresolved_infra:
+            break  # stop grading immediately -- never grind through the rest
     return passed, details, unresolved_infra

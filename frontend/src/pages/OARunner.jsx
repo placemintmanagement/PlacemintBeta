@@ -317,6 +317,20 @@ export default function OARunner() {
       return;
     }
     const detail = err.response?.data?.detail;
+    // A 503 grading_infra_error (coding sections -- see server.py's
+    // _grade_coding_section) means a real problem on OUR side, never
+    // anything the candidate did: the backend guarantees nothing was
+    // scored and the attempt's own state (status, current_section_index,
+    // section_results, any timer) is completely untouched, so the exact
+    // same submission can just be sent again. Show our own clear wording
+    // rather than forwarding the backend's message, and deliberately
+    // touch nothing else here -- `answers` state (and so the editor's
+    // content) is untouched by this whole catch block, so it survives
+    // for free; no explicit "preserve the code" step is needed.
+    if (err.response?.status === 503 && detail?.code === "grading_infra_error") {
+      toast.error("We couldn't grade your code just now. Nothing was lost. Please submit again.");
+      return;
+    }
     toast.error((detail && detail.message) || detail || "Submit failed");
   };
 

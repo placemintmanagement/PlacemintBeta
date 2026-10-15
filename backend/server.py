@@ -18,6 +18,7 @@ import hmac
 import hashlib
 import logging
 import json
+import time
 import subprocess
 import tempfile
 import bcrypt
@@ -75,7 +76,8 @@ from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.
 from services.code_runner import (
     run_code as _lang_run_code,
     run_tests as _lang_run_tests,
-    run_tests_with_retry as _lang_run_tests_with_retry,
+    run_tests_with_canary_check as _lang_run_tests_with_canary_check,
+    DEFAULT_TIMEOUT as _CODE_RUNNER_DEFAULT_TIMEOUT,
     SUPPORTED_LANGUAGES,
 )
 from banks.problem_bank import sample_problems as _sample_problems
@@ -2372,28 +2374,54 @@ def _template_coding_note(vpass: int, vtotal: int, hpass: int, htotal: int, pct:
     }
 
 
+_MAX_GRADING_WALL_SECONDS = 180  # hard cap, whole submission, every problem combined --
+                                  # see _grade_coding_section's docstring for how this
+                                  # was sized relative to the canary scheme's own
+                                  # worst-case-per-test cost
+
+
 async def _grade_coding_section(section: dict, answers: Dict[str, Any], use_ai_note: bool = True) -> dict:
     """`use_ai_note=False` (TCS, 2026-10 zero-AI-calls pass): skip the
     call_json_gpt narrative-feedback call entirely and use a fixed template
     built from the same sandbox test results instead -- never a model call.
 
-    Infra-failure handling (2026-10): uses run_tests_with_retry, which
-    retries an individual test up to 2 extra times (3 attempts total) when
-    code_runner classifies its result as "infrastructure_error" -- the
-    SANDBOX failed to run the candidate's code at all, not the candidate's
-    code itself being wrong or slow (see code_runner.py's module docstring
-    and _classify_timeout for the exact rule and its known false-positive
-    case). If a test is STILL infrastructure_error after those retries,
-    this function raises instead of returning a score: no partial score is
-    ever stored for this attempt, and -- critically -- submit_section's
-    persist/track-evaluation code (further down, after this call returns)
-    never runs either, since the exception propagates out of the `await`
-    before reaching it. The caller gets a 503 it can retry the whole
-    section submission against."""
+    Infra-failure handling (2026-10, reworked with a canary -- a student
+    must never be locked out of submitting by this): uses
+    run_tests_with_canary_check, which -- instead of blindly re-running a
+    suspicious test up to 3 times -- runs a trivial known-good "canary"
+    program through the SAME runner under the SAME limits whenever a
+    result looks like an infrastructure_error (see code_runner.py's
+    module docstring and _classify_timeout for the exact rule). A
+    failing/stalled canary means the SANDBOX is genuinely broken: grading
+    stops immediately and this function raises instead of returning a
+    score, so no partial score is ever stored, and -- critically --
+    submit_section's persist/track-evaluation code (further down, after
+    this call returns) never runs either, since the exception propagates
+    out of the `await` before reaching it. A healthy canary means the
+    STUDENT's program is what's actually slow, and that test is simply
+    graded as a genuine time_limit_exceeded -- normal grading continues.
+    The caller gets a 503 it can retry the whole section submission
+    against; see test_grading_infra_resubmission.py for direct proof
+    that a 503 here leaves the attempt's state (status, current_section_
+    index, section_results, answers -- i.e. every bit of state a timer or
+    the section-order check reads) completely untouched, so the exact
+    same submission can always be sent again afterward.
+
+    _MAX_GRADING_WALL_SECONDS (180s) is a hard backstop on top of the
+    canary scheme, shared across EVERY problem in this section (the same
+    `deadline` is threaded into each call below) -- the canary bounds the
+    cost of any ONE suspicious test (at most 2 canary calls + 1 test
+    re-run, each up to `timeout`), but a section with several problems,
+    each with several genuinely-slow-student tests, could still add up;
+    180s comfortably covers two 14-test Medium problems' worth of a
+    student program that blocks on every test (~75s each, see the
+    Stage 2c follow-up commit message for the derivation) with headroom,
+    while still giving up well before a wait would feel unbounded."""
     problems = section.get("questions", [])
     per_problem = []
     total_score = 0.0
     graded_count = 0
+    deadline = time.monotonic() + _MAX_GRADING_WALL_SECONDS
     for p in problems:
         # Skip problems whose AI-generated tests couldn't be validated \u2013 we
         # can't fairly grade against untrusted expected outputs.
@@ -2411,12 +2439,16 @@ async def _grade_coding_section(section: dict, answers: Dict[str, Any], use_ai_n
         language = sub.get("language", "python")
         visible = p.get("visible_tests", []) or []
         hidden = p.get("hidden_tests", []) or []
-        vpass, _vdetails, v_infra = await asyncio.to_thread(_lang_run_tests_with_retry, language, code, visible)
-        hpass, _hdetails, h_infra = await asyncio.to_thread(_lang_run_tests_with_retry, language, code, hidden)
+        vpass, _vdetails, v_infra = await asyncio.to_thread(
+            _lang_run_tests_with_canary_check, language, code, visible,
+            _CODE_RUNNER_DEFAULT_TIMEOUT, deadline)
+        hpass, _hdetails, h_infra = await asyncio.to_thread(
+            _lang_run_tests_with_canary_check, language, code, hidden,
+            _CODE_RUNNER_DEFAULT_TIMEOUT, deadline)
         if v_infra or h_infra:
             logger.error(
-                "grading infra error persisted after retries for problem %s (lang=%s) -- "
-                "aborting section grade, no score stored for this attempt",
+                "grading infra error (canary-confirmed or wall-time cap) for problem %s "
+                "(lang=%s) -- aborting section grade, no score stored for this attempt",
                 pid, language,
             )
             raise HTTPException(503, {
