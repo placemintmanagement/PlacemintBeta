@@ -18,6 +18,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from banks import problem_input_gen
+
 _RAW: List[Dict[str, Any]] = [
     # ------------------------------------------------------------------ EASY
     {
@@ -46,7 +48,9 @@ for i, v in enumerate(a):
         print(seen[t - v], i); break
     seen[v] = i
 """,
-        "test_inputs": ["4\n2 7 11 15\n9", "3\n3 2 4\n6", "2\n3 3\n6", "5\n-1 -2 -3 -4 -5\n-8", "5\n1 5 3 8 2\n10"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "two-sum", ["4\n2 7 11 15\n9", "3\n3 2 4\n6"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "reverse-string", "title": "Reverse String", "difficulty": "Easy", "topic": "strings",
@@ -55,7 +59,9 @@ for i, v in enumerate(a):
         "constraints": "1 \u2264 |s| \u2264 10^5",
         "reference_solution": "print(input()[::-1])\n",
         "buggy_solution": "print(input()[::-2])\n",
-        "test_inputs": ["hello", "a", "racecar", "Placemint", "12345"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "reverse-string", ["hello", "a"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "fizzbuzz", "title": "Fizz Buzz", "difficulty": "Easy",
@@ -83,7 +89,9 @@ for i in range(1, n):
     elif i % 3 == 0: print('Buzz')
     else: print(i)
 """,
-        "test_inputs": ["5", "15", "1", "20", "30"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "fizzbuzz", ["5", "15"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "valid-palindrome", "title": "Valid Palindrome", "difficulty": "Easy", "topic": "two_pointer_sliding_window",
@@ -94,7 +102,9 @@ for i in range(1, n):
 """s = ''.join(c.lower() for c in input() if c.isalnum())
 print('YES' if s == s[::-1] else 'NO')
 """,
-        "test_inputs": ["A man, a plan, a canal: Panama", "race a car", "abba", "hello", " "],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "valid-palindrome", ["A man, a plan, a canal: Panama", "race a car"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "max-subarray-sum", "title": "Maximum Subarray Sum (Kadane)", "difficulty": "Easy", "topic": "arrays",
@@ -119,7 +129,9 @@ for x in a[1:]:
     best = max(best, cur)
 print(best)
 """,
-        "test_inputs": ["9\n-2 1 -3 4 -1 2 1 -5 4", "1\n1", "5\n-1 -2 -3 -4 -5", "5\n5 4 -1 7 8", "3\n0 0 0"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "max-subarray-sum", ["9\n-2 1 -3 4 -1 2 1 -5 4", "1\n1"], target_total=10),
+        "target_tests": 10,
     },
     # ------------------------------------------------------------------ MEDIUM
     {
@@ -348,7 +360,9 @@ print('YES' if len(set(a)) != len(a) else 'NO')
 a = input().split()
 print('NO' if len(set(a)) != len(a) else 'YES')
 """,
-        "test_inputs": ["4\n1 2 3 1", "4\n1 2 3 4", "10\n1 1 1 3 3 4 3 2 4 2", "1\n5", "5\n7 7 7 7 7"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "contains-duplicate", ["4\n1 2 3 1", "4\n1 2 3 4"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "missing-number", "title": "Missing Number", "difficulty": "Easy", "topic": "arrays",
@@ -360,7 +374,9 @@ print('NO' if len(set(a)) != len(a) else 'YES')
 a = list(map(int, input().split()))
 print(n * (n + 1) // 2 - sum(a))
 """,
-        "test_inputs": ["3\n3 0 1", "2\n0 1", "9\n9 6 4 2 3 5 7 0 1", "1\n0", "5\n0 1 2 3 4"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "missing-number", ["3\n3 0 1", "2\n0 1"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "buy-sell-stock", "title": "Best Time to Buy and Sell Stock", "difficulty": "Easy", "topic": "greedy",
@@ -383,7 +399,9 @@ for x in a:
     best = max(best, x - lo); lo = min(lo, x)
 print(best)
 """,
-        "test_inputs": ["6\n7 1 5 3 6 4", "5\n7 6 4 3 1", "1\n5", "5\n1 2 3 4 5", "5\n5 4 3 2 1"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "buy-sell-stock", ["6\n7 1 5 3 6 4", "5\n7 6 4 3 1"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "climb-stairs", "title": "Climbing Stairs", "difficulty": "Easy", "topic": "2d_dp",
@@ -396,7 +414,9 @@ a, b = 1, 1
 for _ in range(n): a, b = b, a + b
 print(a)
 """,
-        "test_inputs": ["2", "3", "5", "10", "45"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "climb-stairs", ["2", "3"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "merge-sorted", "title": "Merge Two Sorted Arrays", "difficulty": "Easy", "topic": "two_pointer_sliding_window",
@@ -417,7 +437,9 @@ while i < n and j < m:
 out += a[i:]; out += b[j:]
 print(' '.join(map(str, out)))
 """,
-        "test_inputs": ["3\n1 3 5\n3\n2 4 6", "0\n3\n1 2 3", "3\n1 2 3\n0", "5\n1 1 1 1 1\n5\n2 2 2 2 2", "2\n-3 -1\n3\n-2 0 2"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "merge-sorted", ["3\n1 3 5\n3\n2 4 6", "0\n3\n1 2 3"], target_total=10),
+        "target_tests": 10,
     },
     # ------------------------------------------------------------------ MORE MEDIUM
     {
@@ -682,7 +704,9 @@ while level:
         if n.r: nxt.append(n.r)
     level = nxt
 """,
-        "test_inputs": ["3 9 20 N N 15 7", "1", "1 2 3 N N N N", "5 3 8 1 4 7 9", "1 N 2 N 3"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "tree-level-order", ["3 9 20 N N 15 7", "1"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "tree-max-depth", "title": "Maximum Depth of Binary Tree", "topic": "trees",
@@ -715,7 +739,9 @@ def depth(n):
     return 1 + max(depth(n.l), depth(n.r))
 print(depth(root))
 """,
-        "test_inputs": ["3 9 20 N N 15 7", "1", "1 N 2 N 3", "5 3 8 1 4 7 9", "1 2 N N 3"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "tree-max-depth", ["3 9 20 N N 15 7", "1"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "tree-validate-bst", "title": "Validate Binary Search Tree", "topic": "trees",
@@ -873,7 +899,9 @@ def mirror(a, b):
     return a.v == b.v and mirror(a.l, b.l) and mirror(a.r, b.r)
 print('YES' if root is None or mirror(root.l, root.r) else 'NO')
 """,
-        "test_inputs": ["1 2 2 3 4 4 3", "1 2 2 N 3 N 3", "1", "3 9 20 N N 15 7", "1 2 2 N N N N"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "tree-symmetric", ["1 2 2 3 4 4 3", "1 2 2 N 3 N 3"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "tree-balanced", "title": "Balanced Binary Tree", "topic": "trees",
@@ -911,7 +939,9 @@ def h(n):
 h(root)
 print('YES' if ok else 'NO')
 """,
-        "test_inputs": ["3 9 20 N N 15 7", "1 2 N 3 N 4", "1", "5 3 8 1 4 7 9", "1 2 2 3 3 N N 4 4"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "tree-balanced", ["3 9 20 N N 15 7", "1 2 N 3 N 4"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "tree-path-sum", "title": "Path Sum", "topic": "trees",
@@ -989,7 +1019,9 @@ while level:
         if n.r: nxt.append(n.r)
     level = nxt
 """,
-        "test_inputs": ["4 2 7 1 3 6 9", "1", "1 2 N", "3 9 20 N N 15 7", "1 2 3 4 N N 5"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "tree-invert", ["4 2 7 1 3 6 9", "1"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "tree-kth-smallest-bst", "title": "Kth Smallest Element in a BST", "topic": "trees",
@@ -1182,7 +1214,9 @@ def mindepth(n):
         if node.r: q.append((node.r, d + 1))
 print(mindepth(root))
 """,
-        "test_inputs": ["2 N 3 N 4 N 5", "1", "3 9 20 N N 15 7", "1 2", "5 3 8 1 4 7 9"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "tree-min-depth", ["2 N 3 N 4 N 5", "1"], target_total=10),
+        "target_tests": 10,
     },
     # ------------------------------------------------------------------ GREEDY (net-new, 2026-09)
     {
@@ -1362,7 +1396,9 @@ while i < n and j < m:
         j += 1
 print(count)
 """,
-        "test_inputs": ["2\n1 2\n3\n1 2 3", "3\n1 2 3\n3\n1 1 1", "1\n5\n1\n3", "4\n1 1 1 1\n2\n1 1", "3\n3 2 1\n3\n1 2 3"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "greedy-assign-cookies", ["2\n1 2\n3\n1 2 3", "3\n1 2 3\n3\n1 1 1"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "greedy-boats-save-people", "title": "Boats to Save People", "topic": "greedy",
@@ -1818,7 +1854,9 @@ print('YES' if sorted(a) == sorted(b) else 'NO')
 b = input()
 print('YES' if set(a) == set(b) else 'NO')
 """,
-        "test_inputs": ["aabb\nab", "anagram\nnagaram", "rat\ncar", "\n\n", "aabbcc\nabcabc"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "string-valid-anagram", ["aabb\nab", "anagram\nnagaram"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "string-compression", "title": "String Compression (Run-Length Encoding)", "topic": "strings",
@@ -1863,7 +1901,9 @@ for w in words[1:]:
         break
 print(pre)
 """,
-        "test_inputs": ["3\nflower\nflow\nflight", "3\ndog\nracecar\ncar", "1\nsingle", "2\nab\nab", "2\nabc\nabd"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "string-longest-common-prefix", ["3\nflower\nflow\nflight", "3\ndog\nracecar\ncar"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "string-isomorphic", "title": "Isomorphic Strings", "topic": "strings",
@@ -1887,7 +1927,9 @@ else:
         m1[a] = b; m2[b] = a
     print('YES' if ok else 'NO')
 """,
-        "test_inputs": ["egg\nadd", "foo\nbar", "paper\ntitle", "ab\naa", "\n\n"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "string-isomorphic", ["egg\nadd", "foo\nbar"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "string-word-pattern", "title": "Word Pattern", "topic": "strings",
@@ -1911,7 +1953,9 @@ else:
         m1[a] = b; m2[b] = a
     print('YES' if ok else 'NO')
 """,
-        "test_inputs": ["abba\ndog cat cat dog", "abba\ndog cat cat fish", "aaaa\ndog cat cat dog", "abba\ndog dog dog dog", "a\ndog"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "string-word-pattern", ["abba\ndog cat cat dog", "abba\ndog cat cat fish"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "string-roman-to-integer", "title": "Roman Numeral to Integer", "topic": "strings",
@@ -1933,7 +1977,9 @@ for ch in reversed(s):
         prev = v
 print(total)
 """,
-        "test_inputs": ["III", "LVIII", "MCMXCIV", "IV", "IX"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "string-roman-to-integer", ["III", "LVIII"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "string-integer-to-roman", "title": "Integer to Roman Numeral", "topic": "strings",
@@ -2601,7 +2647,9 @@ else:
     print(k)
     print(' '.join(map(str, a[:k])))
 """,
-        "test_inputs": ["5\n1 1 2 2 3", "8\n0 0 1 1 1 2 2 3", "1\n5", "3\n1 1 1", "0\n\n"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "tp-remove-duplicates-sorted", ["5\n1 1 2 2 3", "8\n0 0 1 1 1 2 2 3"], target_total=10),
+        "target_tests": 10,
     },
     {
         "id": "tp-sort-colors", "title": "Sort Colors (Dutch National Flag)", "topic": "two_pointer_sliding_window",
@@ -2759,7 +2807,9 @@ for x in a:
     count += 1 if x == candidate else 0
 print(candidate)
 """,
-        "test_inputs": ["6\n5 6 6 6 6 5", "7\n2 2 1 1 1 2 2", "3\n3 2 3", "1\n5", "6\n6 5 5 6 6 6"],
+        "test_inputs": problem_input_gen.build_test_inputs(
+            "arr-majority-element", ["6\n5 6 6 6 6 5", "7\n2 2 1 1 1 2 2"], target_total=10),
+        "target_tests": 10,
     },
 ]
 
