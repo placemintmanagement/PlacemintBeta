@@ -2351,6 +2351,1579 @@ _register(ProblemInputSpec(
 
 
 # =============================================================================
+# Stage 2c batch 2 (2026-10): the next 21 Medium problems, by order in
+# problem_bank.py, after batch 1's 21 (greedy-min-platforms, Stage 2a's own
+# exception, is already opted in separately and is skipped here).
+#
+# New shapes this batch (reusing gen_int_array/gen_string/gen_int/_fmt_arr
+# and batch 1's _interval_list_random/_interval_list_validate/
+# _max_non_overlap_bruteforce wherever the underlying structure already
+# matches, rather than inventing a new generator for something that already
+# exists):
+#   edge_list                undirected or directed graph: "n m" header line,
+#                             then m "u v" edge lines (0-indexed)
+#   edge_list_separate_nm     same, but n and m are on their OWN lines before
+#                             the edges (graph-course-schedule's own format)
+#   edge_list_with_query      edge_list + one trailing "src dst" query line
+#   weighted_edge_list        directed, weighted, 1-indexed nodes, with its
+#                             own n / m / edges / source-node line layout
+#                             (graph-network-delay-time)
+#   dag_edge_list             edge_list restricted to a draw that is
+#                             acyclic BY CONSTRUCTION (a random permutation
+#                             stands in for a topological order; every edge
+#                             only goes from an earlier position to a later
+#                             one), not by rejection sampling
+#   rotting_grid              rows/cols grid of 0/1/2 values
+#   array_with_limit          int array + one trailing single-int limit
+#   single_string             reuses gen_string directly
+#   two_strings               a pair of strings, one per line
+#   digit_strings_pair        a pair of decimal-digit-only strings
+#   string_and_rows           a string + a trailing row-count integer
+#   single_int                reuses gen_int directly
+# =============================================================================
+
+def _gen_simple_edges(rng: random.Random, n: int, m_target: int, directed: bool) -> List[Tuple[int, int]]:
+    """n distinct nodes, up to m_target distinct simple edges (no self
+    loops, no duplicates/parallel edges -- or their reverse, for an
+    undirected graph)."""
+    edges: List[Tuple[int, int]] = []
+    seen = set()
+    max_m = n * (n - 1) if directed else n * (n - 1) // 2
+    m = min(m_target, max_m)
+    attempts = 0
+    while len(edges) < m and attempts < m * 20 + 50 and n >= 2:
+        attempts += 1
+        u, v = rng.sample(range(n), 2)
+        key = (u, v) if directed else tuple(sorted((u, v)))
+        if key in seen:
+            continue
+        seen.add(key)
+        edges.append((u, v))
+    return edges
+
+
+def _gen_dag_edges(rng: random.Random, n: int, m_target: int) -> List[Tuple[int, int]]:
+    """A uniformly random permutation stands in for a topological order;
+    every edge only goes from an earlier position in it to a later one,
+    so the graph is acyclic by construction -- no rejection sampling
+    needed."""
+    order = list(range(n))
+    rng.shuffle(order)
+    pos = {node: i for i, node in enumerate(order)}
+    edges: List[Tuple[int, int]] = []
+    seen = set()
+    max_m = n * (n - 1) // 2
+    m = min(m_target, max_m)
+    attempts = 0
+    while len(edges) < m and attempts < m * 20 + 50 and n >= 2:
+        attempts += 1
+        a, b = rng.sample(range(n), 2)
+        u, v = (a, b) if pos[a] < pos[b] else (b, a)
+        if (u, v) in seen:
+            continue
+        seen.add((u, v))
+        edges.append((u, v))
+    return edges
+
+
+def _fmt_edge_list(n: int, edges: List[Tuple[int, int]]) -> str:
+    lines = [f"{n} {len(edges)}"]
+    lines.extend(f"{u} {v}" for u, v in edges)
+    return "\n".join(lines) + "\n"
+
+
+def _edge_list_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n, m = map(int, lines[0].split())
+    edge_lines = lines[1:1 + m]
+    if len(edge_lines) != m or not (1 <= n <= 10000) or not (0 <= m <= 10000):
+        return False
+    for line in edge_lines:
+        u, v = map(int, line.split())
+        if not (0 <= u < n and 0 <= v < n) or u == v:
+            return False
+    return True
+
+
+def _directed_has_cycle(n: int, adj: List[List[int]]) -> bool:
+    """Shared by graph-cycle-directed and graph-course-schedule's
+    checkers: DFS-based 3-color (white/gray/black) cycle detection,
+    genuinely different from the reference's Kahn's-algorithm indegree/
+    BFS processed-count check in both problems. Iterative (explicit
+    stack), not recursive, so it has no recursion-depth concern at any
+    graph size."""
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = [WHITE] * n
+    has_cycle = False
+    for start in range(n):
+        if color[start] != WHITE:
+            continue
+        color[start] = GRAY
+        stack = [(start, iter(adj[start]))]
+        while stack:
+            node, it = stack[-1]
+            advanced = False
+            for nxt in it:
+                if color[nxt] == GRAY:
+                    has_cycle = True
+                elif color[nxt] == WHITE:
+                    color[nxt] = GRAY
+                    stack.append((nxt, iter(adj[nxt])))
+                    advanced = True
+                    break
+            if not advanced:
+                color[node] = BLACK
+                stack.pop()
+    return has_cycle
+
+
+# ---- greedy-jump-game-ii  --  shape: int_array -----------------------------
+
+def _jump_game_ii_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 60)])
+    # The last index must always be reachable (the problem guarantees
+    # this) -- build so every position can reach at least the next one.
+    a = [0] * n
+    for i in range(n - 1):
+        a[i] = rng.randint(1, max(1, n - 1 - i))
+    return f"{n}\n{_fmt_arr(a)}\n"
+
+
+def _jump_game_ii_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); a = list(map(int, lines[1].split()))
+    if not (len(a) == n and 1 <= n <= 100000 and all(v >= 0 for v in a)):
+        return False
+    reach = 0
+    for i in range(n):
+        if i > reach:
+            return False
+        reach = max(reach, i + a[i])
+    return True
+
+
+def _jump_game_ii_checker(stdin: str) -> str:
+    """Independent of the reference's forward greedy range-expansion: a
+    backward DP (dp[i] = minimum jumps from i to the last index), O(n^2)
+    worst case -- a genuinely different technique (DP vs greedy),
+    deliberately not the fast one."""
+    lines = stdin.split("\n")
+    n = int(lines[0]); a = list(map(int, lines[1].split()))
+    dp = [0] * n
+    for i in range(n - 2, -1, -1):
+        reach = min(i + a[i], n - 1)
+        best = None
+        for j in range(i + 1, reach + 1):
+            if best is None or dp[j] + 1 < best:
+                best = dp[j] + 1
+        dp[i] = best if best is not None else 10 ** 9
+    return str(dp[0])
+
+
+_JUMP_II_LARGE_1 = f"100000\n{_fmt_arr([100000] * 99999 + [0])}\n"
+_JUMP_II_LARGE_2 = f"100000\n{_fmt_arr([(100000 - i) for i in range(99999)] + [0])}\n"
+_register(ProblemInputSpec(
+    "greedy-jump-game-ii", "int_array",
+    {"n_min": 1, "n_max": 100000},
+    ["1\n0", "2\n1 1"],
+    _jump_game_ii_random, _jump_game_ii_validate, _jump_game_ii_checker,
+    large_cases=[
+        # Intended complexity: O(n) (forward greedy range expansion). The
+        # backward-DP checker above is O(n^2) -- 10^10 at this ceiling --
+        # and is excluded from the checker-agreement quality gate for
+        # exactly these 2 inputs (see LARGE_CASES_EXCLUDED_FROM_CHECKER);
+        # checker correctness stays covered by the 200-trial small-input
+        # fuzz. Both use a huge per-step jump range so the DP's own inner
+        # scan is as wide as possible at every step -- see
+        # test_problem_bank_batch2_large_input_complexity.py for the
+        # naive-vs-reference proof and actual timings.
+        _JUMP_II_LARGE_1,
+        _JUMP_II_LARGE_2,
+    ],
+))
+
+
+# ---- greedy-gas-station  --  shape: two_int_arrays -------------------------
+
+def _gas_station_unique_start(gas: List[int], cost: List[int]) -> Tuple[int, int]:
+    """O(n): the classic prefix-sum characterization -- the valid
+    starting index/indices are exactly the argmin(s) of the cumulative
+    (gas[i]-cost[i]) prefix sum P[0..n-1] (P[0]=0). Returns (the first
+    argmin, how many indices tie for the minimum) -- ties>1 means more
+    than one valid start exists."""
+    n = len(gas)
+    prefix = 0
+    best = 0
+    best_idx = 0
+    ties = 1
+    for k in range(1, n):
+        prefix += gas[k - 1] - cost[k - 1]
+        if prefix < best:
+            best = prefix
+            best_idx = k
+            ties = 1
+        elif prefix == best:
+            ties += 1
+    return best_idx, ties
+
+
+def _gas_station_random(rng: random.Random) -> str:
+    # The problem's own precondition is "exactly one starting index
+    # exists" -- sum(gas) >= sum(cost) alone does NOT guarantee that (a
+    # perfectly balanced circuit, or one with a repeated minimum prefix
+    # sum, can have several equally-valid starts; confirmed directly: 2
+    # of this problem's own original 5 stored tests already had more
+    # than one -- see the Stage 2c batch 2 commit message). Rejection-
+    # sample until the draw genuinely has exactly one.
+    for _ in range(500):
+        n = rng.choice([1, 2, rng.randint(3, 40)])
+        gas = gen_int_array(rng, n, 0, 20)
+        cost = gen_int_array(rng, n, 0, 20)
+        total_diff = sum(gas) - sum(cost)
+        if total_diff < 0:
+            gas[0] += -total_diff  # enforce the problem's own sum(gas) >= sum(cost)
+        _, ties = _gas_station_unique_start(gas, cost)
+        if ties == 1:
+            return f"{n}\n{_fmt_arr(gas)}\n{_fmt_arr(cost)}\n"
+    raise RuntimeError("greedy-gas-station: could not draw a unique-start input in 500 attempts")
+
+
+def _gas_station_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); gas = list(map(int, lines[1].split())); cost = list(map(int, lines[2].split()))
+    if not (len(gas) == n and len(cost) == n and 1 <= n <= 10000 and sum(gas) >= sum(cost)):
+        return False
+    _, ties = _gas_station_unique_start(gas, cost)
+    return ties == 1
+
+
+def _gas_station_checker(stdin: str) -> str:
+    """Independent of the reference's single-pass tank-reset greedy: a
+    brute-force O(n^2) simulate-the-full-circuit-from-every-candidate-
+    start scan."""
+    lines = stdin.split("\n")
+    n = int(lines[0]); gas = list(map(int, lines[1].split())); cost = list(map(int, lines[2].split()))
+    for s in range(n):
+        tank = 0
+        ok = True
+        for k in range(n):
+            i = (s + k) % n
+            tank += gas[i] - cost[i]
+            if tank < 0:
+                ok = False
+                break
+        if ok:
+            return str(s)
+    raise AssertionError("greedy-gas-station checker: no valid start found (should be impossible)")
+
+
+def _gas_station_large(n: int) -> str:
+    # Deterministic construction, not rejection sampling (brute-force
+    # uniqueness-checking the result is fine at O(n), but we want this
+    # callable at n=10^4 without any retry risk). The one big shortfall
+    # (diff[n-2] = -(n-1)) sits second-to-last, making the UNIQUE valid
+    # start index n-1 -- the LAST candidate a brute-force simulate-
+    # from-every-start loop tries (candidates are tried in increasing
+    # order: 0, 1, 2, ..., n-1). Each wrong candidate s < n-2 only
+    # reaches the shortfall after (n-2-s) steps of accumulating +1, so
+    # it fails late (near a full circuit), costing genuine O(n) per
+    # candidate -- confirmed directly: two earlier versions (shortfall
+    # at the very end, then shortfall at the very start) both put the
+    # UNIQUE valid start at an index reached after only 1-2 candidates,
+    # so the loop exited almost immediately regardless of how slow each
+    # individual candidate-check was, finishing in ~0.1s instead of the
+    # intended O(n) vs O(n^2) gap. Putting the shortfall right before
+    # the end means EVERY one of the n-1 wrong candidates must be tried
+    # (and each costs close to O(n)) before the loop ever reaches the
+    # one valid start. Sum(gas) == sum(cost) exactly either way.
+    dip = n - 2
+    gas = [2] * n
+    cost = [1] * n
+    gas[dip] = 1
+    cost[dip] = n
+    return f"{n}\n{_fmt_arr(gas)}\n{_fmt_arr(cost)}\n"
+
+
+_register(ProblemInputSpec(
+    "greedy-gas-station", "two_int_arrays",
+    {"n_min": 1, "n_max": 10000},
+    ["5\n1 2 3 4 5\n3 4 5 1 2", "2\n5 1\n4 2"],
+    _gas_station_random, _gas_station_validate, _gas_station_checker,
+    large_cases=[
+        # Intended complexity: O(n) single pass. The checker's brute
+        # force is O(n^2) -- 10^8 at this ceiling -- and is excluded
+        # from the checker-agreement quality gate for exactly these 2
+        # inputs (see LARGE_CASES_EXCLUDED_FROM_CHECKER); checker
+        # correctness stays covered by the 200-trial small-input fuzz.
+        # See test_problem_bank_batch2_large_input_complexity.py for
+        # the naive-vs-reference proof and actual timings.
+        _gas_station_large(10000),
+        _gas_station_large(9999),
+    ],
+))
+
+
+# ---- greedy-boats-save-people  --  shape: array_with_limit (NEW) ----------
+
+def _boats_random(rng: random.Random) -> str:
+    # Capped at a small n (not the stated 5*10^4) -- its independent
+    # checker below is an exhaustive bitmask DP (2^n), feeding both the
+    # stored-test fill and the 200-trial fuzz; the large_cases further
+    # down separately exercise the real 5*10^4 ceiling against the
+    # reference only.
+    n = rng.choice([1, 2, rng.randint(3, 12)])
+    limit = rng.randint(1, 20)
+    w = [rng.randint(1, limit) for _ in range(n)]
+    return f"{n}\n{_fmt_arr(w)}\n{limit}\n"
+
+
+def _boats_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); w = list(map(int, lines[1].split())); limit = int(lines[2])
+    return len(w) == n and 1 <= n <= 50000 and all(1 <= x <= limit for x in w)
+
+
+def _boats_checker(stdin: str) -> str:
+    """Independent of the reference's sort-then-two-pointer: an
+    exhaustive bitmask DP over all pairings of unassigned people (does
+    pairing i with j ever help?) -- O(2^n * n), capped to small n by
+    the generator above. A general subset-matching search, not
+    dependent on the two-pointer's own sortedness insight."""
+    from functools import lru_cache
+    lines = stdin.split("\n")
+    n = int(lines[0]); w = list(map(int, lines[1].split())); limit = int(lines[2])
+
+    @lru_cache(maxsize=None)
+    def solve(mask):
+        if mask == 0:
+            return 0
+        i = (mask & -mask).bit_length() - 1
+        rest = mask & ~(1 << i)
+        best = solve(rest)
+        m = rest
+        while m:
+            j = (m & -m).bit_length() - 1
+            m &= ~(1 << j)
+            if w[i] + w[j] <= limit:
+                best = max(best, 1 + solve(rest & ~(1 << j)))
+        return best
+
+    max_pairs = solve((1 << n) - 1)
+    solve.cache_clear()
+    return str(n - max_pairs)
+
+
+def _boats_large(n: int) -> str:
+    w = [((i % 50) + 1) for i in range(n)]
+    return f"{n}\n{_fmt_arr(w)}\n51\n"
+
+
+_register(ProblemInputSpec(
+    "greedy-boats-save-people", "array_with_limit",
+    {"n_min": 1, "n_max": 50000},
+    ["4\n1 2 2 3\n3", "1\n5\n5"],
+    _boats_random, _boats_validate, _boats_checker,
+    large_cases=[
+        # Intended complexity: O(n log n) (sort, two pointers). The
+        # exhaustive bitmask checker above is excluded entirely from the
+        # checker-agreement quality gate for these 2 inputs -- it's
+        # already capped to tiny n by the generator and was never meant
+        # to run at this scale; checker correctness stays covered by the
+        # 200-trial small-input fuzz. See
+        # test_problem_bank_batch2_large_input_complexity.py for a naive
+        # O(n^2) re-implementation of the SAME greedy idea (using
+        # repeated list max/min/remove -- each O(n) -- inside an O(n)
+        # outer loop) that times out here while the reference doesn't.
+        _boats_large(50000),
+        _boats_large(49999),
+    ],
+))
+
+
+# ---- greedy-min-arrows-balloons  --  shape: interval_list (reused) --------
+
+def _min_arrows_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0])
+    ivs = lines[1:1 + n]
+    if len(ivs) != n or not (1 <= n <= 100000):
+        return False
+    for iv in ivs:
+        s, e = map(int, iv.split())
+        if e < s:
+            return False
+    return True
+
+
+def _max_non_overlap_bruteforce_strict(intervals: List[Tuple[int, int]]) -> int:
+    """Same O(n^2) DP shape as batch 1's _max_non_overlap_bruteforce,
+    but with a STRICTLY different compatibility rule, deliberately not
+    reused as-is: confirmed directly (a 200-trial fuzz disagreement,
+    reference=11 vs this-reused-as-is=13 on a 50-balloon input) that
+    activity-selection's own "touching endpoints don't overlap" rule
+    does NOT apply to the balloon-arrow problem. There, an arrow at x
+    bursts a balloon whose interval endpoint EQUALS x too (the
+    problem's own stated rule) -- so two balloons that only touch at a
+    single point (one's end == the other's start) DO share a point and
+    CAN be hit by the same arrow; they are only counted as needing
+    SEPARATE arrows when one ends STRICTLY before the other starts.
+    Swapping batch 1's `<=` for a strict `<` here is the entire fix."""
+    ivs = sorted(intervals, key=lambda x: x[1])
+    n = len(ivs)
+    dp = [0] * n
+    for i in range(n):
+        best = 1
+        for j in range(i):
+            if ivs[j][1] < ivs[i][0]:  # strict -- see docstring above
+                best = max(best, dp[j] + 1)
+        dp[i] = best
+    return max(dp) if dp else 0
+
+
+def _min_arrows_checker(stdin: str) -> str:
+    """Min arrows to burst every balloon equals the MAXIMUM number of
+    pairwise non-overlapping balloons (classic interval-point-cover /
+    interval-scheduling LP duality -- confirmed directly with a
+    counterexample against the weaker "connected components of the
+    overlap graph" guess, which is wrong here: a bridging interval can
+    connect two balloons that share no common point at all), using the
+    STRICT non-overlap rule this problem actually needs -- see
+    _max_non_overlap_bruteforce_strict's own docstring for why batch
+    1's non-strict version was wrong here and how that was confirmed."""
+    lines = stdin.split("\n")
+    n = int(lines[0])
+    ivs = [tuple(map(int, lines[1 + i].split())) for i in range(n)]
+    return str(_max_non_overlap_bruteforce_strict(ivs))
+
+
+def _min_arrows_large(seed: str, n: int = 100000) -> str:
+    rng = random.Random(seed)
+    lines = [str(n)]
+    for _ in range(n):
+        s = rng.randint(0, 4000)
+        e = s + rng.randint(0, 10)
+        lines.append(f"{s} {e}")
+    return "\n".join(lines) + "\n"
+
+
+_register(ProblemInputSpec(
+    "greedy-min-arrows-balloons", "interval_list",
+    {"n_min": 1, "n_max": 100000},
+    ["4\n10 16\n2 8\n1 6\n7 12", "1\n1 1"],
+    _interval_list_random, _min_arrows_validate, _min_arrows_checker,
+    large_cases=[
+        # Intended complexity: O(n log n) (sort by end, sweep). The
+        # reused O(n^2) DP checker is excluded from the checker-
+        # agreement quality gate for these 2 inputs (10^10 at this
+        # ceiling) -- see LARGE_CASES_EXCLUDED_FROM_CHECKER. See
+        # test_problem_bank_batch2_large_input_complexity.py for a naive
+        # O(n^2) pairwise-rescan re-implementation that times out here.
+        _min_arrows_large("2c-batch2-arrows-large-1"),
+        _min_arrows_large("2c-batch2-arrows-large-2", n=99999),
+    ],
+))
+
+
+# ---- greedy-two-city-scheduling  --  shape: two_int_arrays -----------------
+
+def _two_city_random(rng: random.Random) -> str:
+    # Capped small (checker is an exhaustive C(2n, n) combinatorial
+    # search) -- large_cases separately exercise the real n<=500
+    # ceiling against the reference only.
+    n = rng.choice([1, 2, rng.randint(3, 8)])
+    costA = gen_int_array(rng, 2 * n, 1, 100)
+    costB = gen_int_array(rng, 2 * n, 1, 100)
+    return f"{n}\n{_fmt_arr(costA)}\n{_fmt_arr(costB)}\n"
+
+
+def _two_city_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); costA = list(map(int, lines[1].split())); costB = list(map(int, lines[2].split()))
+    return len(costA) == 2 * n and len(costB) == 2 * n and 1 <= n <= 500
+
+
+def _two_city_checker(stdin: str) -> str:
+    """Independent of the reference's sort-by-cost-difference greedy:
+    an exhaustive search over every way to choose which n of the 2n
+    people go to city A (itertools.combinations), capped to small n by
+    the generator above."""
+    from itertools import combinations
+    lines = stdin.split("\n")
+    n = int(lines[0]); costA = list(map(int, lines[1].split())); costB = list(map(int, lines[2].split()))
+    total = 2 * n
+    best = None
+    for a_group in combinations(range(total), n):
+        a_set = set(a_group)
+        cost = sum(costA[i] if i in a_set else costB[i] for i in range(total))
+        if best is None or cost < best:
+            best = cost
+    return str(best)
+
+
+def _two_city_large(n: int) -> str:
+    rng = random.Random(f"2c-batch2-two-city-large-{n}")
+    costA = gen_int_array(rng, 2 * n, 1, 1000)
+    costB = gen_int_array(rng, 2 * n, 1, 1000)
+    return f"{n}\n{_fmt_arr(costA)}\n{_fmt_arr(costB)}\n"
+
+
+_register(ProblemInputSpec(
+    "greedy-two-city-scheduling", "two_int_arrays",
+    {"n_min": 1, "n_max": 500},
+    ["2\n10 30 400 30\n20 200 50 20", "1\n10 20\n30 40"],
+    _two_city_random, _two_city_validate, _two_city_checker,
+    large_cases=[
+        # Intended complexity: O(n log n) (sort by cost difference). The
+        # exhaustive checker above is excluded entirely from the
+        # checker-agreement quality gate for these 2 inputs -- C(1000,
+        # 500) is astronomical, it was never meant to run at this scale;
+        # checker correctness stays covered by the 200-trial small-input
+        # fuzz. See test_problem_bank_batch2_large_input_complexity.py
+        # for a naive unmemoized recursive exhaustive A/B search (2^(2n)
+        # branches, no pruning) that never finishes here.
+        _two_city_large(500),
+        _two_city_large(499),
+    ],
+))
+
+
+# ---- graph-connected-components  --  shape: edge_list ----------------------
+
+def _conn_components_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 30)])
+    m_target = rng.randint(0, min(30, n * (n - 1) // 2)) if n > 1 else 0
+    edges = _gen_simple_edges(rng, n, m_target, directed=False)
+    return _fmt_edge_list(n, edges)
+
+
+def _conn_components_checker(stdin: str) -> str:
+    """Independent of the reference's iterative stack-based DFS:
+    union-find instead."""
+    lines = stdin.split("\n")
+    n, m = map(int, lines[0].split())
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(1, 1 + m):
+        u, v = map(int, lines[i].split())
+        ru, rv = find(u), find(v)
+        if ru != rv:
+            parent[ru] = rv
+    return str(len({find(i) for i in range(n)}))
+
+
+_CONN_LARGE_CHAIN = _fmt_edge_list(10000, [(i, i + 1) for i in range(9999)])
+_CONN_LARGE_SCATTERED = _fmt_edge_list(10000, [(2 * i, 2 * i + 1) for i in range(5000)])
+_register(ProblemInputSpec(
+    "graph-connected-components", "edge_list",
+    {"n_min": 1, "n_max": 10000, "m_min": 0, "m_max": 10000},
+    ["5 3\n0 1\n1 2\n3 4", "4 0"],
+    _conn_components_random, _edge_list_validate, _conn_components_checker,
+    large_cases=[
+        # Intended complexity: O(n + m) (one DFS/union-find pass). The
+        # checker is also O(n+m) and fast at full scale -- not excluded.
+        # See test_problem_bank_batch2_large_input_complexity.py for a
+        # naive O(n*m) re-scan-the-whole-edge-list-per-node approach
+        # (instead of pre-building an adjacency list) that times out here.
+        _CONN_LARGE_CHAIN,
+        _CONN_LARGE_SCATTERED,
+    ],
+))
+
+
+# ---- graph-cycle-undirected  --  shape: edge_list --------------------------
+
+def _cycle_undirected_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 30)])
+    want_cycle = rng.random() < 0.5
+    if want_cycle and n >= 3:
+        ring = [(i, (i + 1) % n) for i in range(n)]
+        extra = _gen_simple_edges(rng, n, rng.randint(0, 5), directed=False)
+        edges = list(dict.fromkeys(tuple(sorted(e)) for e in ring + extra))
+    else:
+        nodes = list(range(n))
+        rng.shuffle(nodes)
+        edges = []
+        for i in range(1, n):
+            if rng.random() < 0.8:
+                parent = nodes[rng.randint(0, i - 1)]
+                edges.append((parent, nodes[i]))
+    return _fmt_edge_list(n, edges)
+
+
+def _cycle_undirected_checker(stdin: str) -> str:
+    """Independent of the reference's union-find: BFS/DFS with explicit
+    parent-tracking (seeing an already-visited neighbor that ISN'T your
+    immediate parent means a cycle) -- iterative (explicit stack), not
+    recursive, so there's no recursion-depth concern at any graph size."""
+    lines = stdin.split("\n")
+    n, m = map(int, lines[0].split())
+    adj = [[] for _ in range(n)]
+    for i in range(1, 1 + m):
+        u, v = map(int, lines[i].split())
+        adj[u].append(v); adj[v].append(u)
+    seen = [False] * n
+    has_cycle = False
+    for start in range(n):
+        if seen[start]:
+            continue
+        seen[start] = True
+        stack = [(start, -1)]
+        while stack:
+            u, parent = stack.pop()
+            for v in adj[u]:
+                if v == parent:
+                    continue
+                if seen[v]:
+                    has_cycle = True
+                    continue
+                seen[v] = True
+                stack.append((v, u))
+    return "YES" if has_cycle else "NO"
+
+
+_CYCLE_U_LARGE_RING = _fmt_edge_list(10000, [(i, (i + 1) % 10000) for i in range(10000)])
+_CYCLE_U_LARGE_TREE = _fmt_edge_list(10000, [(i // 2, i) for i in range(1, 10000)])
+_register(ProblemInputSpec(
+    "graph-cycle-undirected", "edge_list",
+    {"n_min": 1, "n_max": 10000, "m_min": 0, "m_max": 10000},
+    ["4 3\n0 1\n1 2\n2 3", "1 0"],
+    _cycle_undirected_random, _edge_list_validate, _cycle_undirected_checker,
+    large_cases=[
+        # Intended complexity: O(n + m). The checker is also O(n+m) and
+        # fast at full scale -- not excluded. See
+        # test_problem_bank_batch2_large_input_complexity.py for a naive
+        # O(n*m) edge-list-rescan approach that times out here. One ring
+        # (has a cycle) and one binary tree (acyclic) at the full n=10^4
+        # ceiling -- both deliberately shallow/bushy where relevant so
+        # neither this checker nor the reference risks deep recursion
+        # (both are iterative here regardless, so it's a non-issue, but
+        # kept consistent with the rest of the bank's convention).
+        _CYCLE_U_LARGE_RING,
+        _CYCLE_U_LARGE_TREE,
+    ],
+))
+
+
+# ---- graph-cycle-directed  --  shape: edge_list (directed) -----------------
+
+def _cycle_directed_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 30)])
+    want_cycle = rng.random() < 0.5
+    if want_cycle and n >= 2:
+        ring = [(i, (i + 1) % n) for i in range(n)]
+        extra = _gen_simple_edges(rng, n, rng.randint(0, 5), directed=True)
+        edges = list(dict.fromkeys(ring + extra))
+    else:
+        edges = _gen_dag_edges(rng, n, rng.randint(0, min(20, n * (n - 1) // 2)))
+    return _fmt_edge_list(n, edges)
+
+
+def _cycle_directed_checker(stdin: str) -> str:
+    """Independent of the reference's Kahn's-algorithm indegree/BFS
+    processed-count check -- see _directed_has_cycle's own docstring."""
+    lines = stdin.split("\n")
+    n, m = map(int, lines[0].split())
+    adj = [[] for _ in range(n)]
+    for i in range(1, 1 + m):
+        u, v = map(int, lines[i].split())
+        adj[u].append(v)
+    return "YES" if _directed_has_cycle(n, adj) else "NO"
+
+
+def _chain_with_late_back_edge(n: int) -> List[Tuple[int, int]]:
+    """A long chain 0->1->...->(n-2) PLUS one extra edge (n-2)->(n-1)
+    AND (n-1)->(n-2) (a 2-cycle at the very end) -- Kahn's algorithm
+    must pop its way through almost the WHOLE chain (n-2 pops, each an
+    O(m) rescan for a naive submission) before the cycle's extra
+    indegree is ever discovered, unlike a pure ring, where EVERY node
+    already has indegree >=1 and the queue starts completely empty --
+    confirmed directly that a pure ring makes even an O(n*m) naive
+    submission finish in ~0.1s, since there's nothing to pop at all."""
+    edges = [(i, i + 1) for i in range(n - 2)]
+    edges.append((n - 2, n - 1))
+    edges.append((n - 1, n - 2))
+    return edges
+
+
+_CYCLE_D_LARGE_RING = _fmt_edge_list(10000, _chain_with_late_back_edge(10000))
+_CYCLE_D_LARGE_DAG = _fmt_edge_list(10000, [(i, i + 1) for i in range(9999)])
+_register(ProblemInputSpec(
+    "graph-cycle-directed", "edge_list",
+    {"n_min": 1, "n_max": 10000, "m_min": 0, "m_max": 10000},
+    ["3 3\n0 1\n1 2\n2 0", "4 3\n0 1\n1 2\n2 3"],
+    _cycle_directed_random, _edge_list_validate, _cycle_directed_checker,
+    large_cases=[
+        # Intended complexity: O(n + m) (Kahn's algorithm). The checker
+        # is also O(n+m) and fast at full scale -- not excluded. See
+        # test_problem_bank_batch2_large_input_complexity.py for a naive
+        # O(n*m) edge-list-rescan approach that times out here (on BOTH
+        # of these -- see _chain_with_late_back_edge's own docstring for
+        # why the cyclic one is a long chain with a cycle at the far end,
+        # not a pure ring).
+        _CYCLE_D_LARGE_RING,
+        _CYCLE_D_LARGE_DAG,
+    ],
+))
+
+
+# ---- graph-course-schedule  --  shape: edge_list_separate_nm (NEW) --------
+
+def _course_schedule_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 30)])
+    want_cycle = rng.random() < 0.5
+    if want_cycle and n >= 2:
+        ring = [(i, (i + 1) % n) for i in range(n)]
+        extra = _gen_simple_edges(rng, n, rng.randint(0, 5), directed=True)
+        edges = list(dict.fromkeys(ring + extra))
+    else:
+        edges = _gen_dag_edges(rng, n, rng.randint(0, min(20, n * (n - 1) // 2)))
+    lines = [str(n), str(len(edges))]
+    lines.extend(f"{a} {b}" for a, b in edges)
+    return "\n".join(lines) + "\n"
+
+
+def _course_schedule_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); m = int(lines[1])
+    edge_lines = lines[2:2 + m]
+    if len(edge_lines) != m or not (1 <= n <= 10000) or not (0 <= m <= 10000):
+        return False
+    for line in edge_lines:
+        a, b = map(int, line.split())
+        if not (0 <= a < n and 0 <= b < n):
+            return False
+    return True
+
+
+def _course_schedule_checker(stdin: str) -> str:
+    """Independent of the reference's Kahn's-algorithm indegree/BFS
+    processed-count check: a schedule is feasible iff the prerequisite
+    graph has no cycle -- see _directed_has_cycle."""
+    lines = stdin.split("\n")
+    n = int(lines[0]); m = int(lines[1])
+    adj = [[] for _ in range(n)]
+    for i in range(2, 2 + m):
+        a, b = map(int, lines[i].split())
+        adj[b].append(a)
+    return "NO" if _directed_has_cycle(n, adj) else "YES"
+
+
+def _course_schedule_large(n: int, cyclic: bool) -> str:
+    if cyclic:
+        # Processing-graph edges (the reference/checker both build
+        # adj[b]->a from each "a b" input pair) should form a long
+        # chain with a 2-cycle only at the very end -- NOT a pure ring,
+        # which gives every node indegree>=1 and an empty initial Kahn's
+        # queue, finishing in O(1) regardless of algorithm (confirmed
+        # directly -- same issue as graph-cycle-directed's own large
+        # case). To get processing-graph edges 0->1->...->(n-2), plus a
+        # 2-cycle between the last two nodes, each input pair is
+        # written "a b" = "(i+1) i" so adj[i].append(i+1), i.e. edge
+        # i->(i+1).
+        edges = [(i + 1, i) for i in range(n - 2)]
+        edges.append((n - 2, n - 1))
+        edges.append((n - 1, n - 2))
+    else:
+        edges = [(i, i + 1) for i in range(n - 1)]
+    lines = [str(n), str(len(edges))]
+    lines.extend(f"{a} {b}" for a, b in edges)
+    return "\n".join(lines) + "\n"
+
+
+_register(ProblemInputSpec(
+    "graph-course-schedule", "edge_list_separate_nm",
+    {"n_min": 1, "n_max": 10000, "m_min": 0, "m_max": 10000},
+    ["2\n1\n1 0", "2\n2\n1 0\n0 1"],
+    _course_schedule_random, _course_schedule_validate, _course_schedule_checker,
+    large_cases=[
+        # Intended complexity: O(n + m) (Kahn's algorithm). The checker
+        # is also O(n+m) and fast at full scale -- not excluded. See
+        # test_problem_bank_batch2_large_input_complexity.py for a naive
+        # O(n*m) edge-list-rescan approach that times out here.
+        _course_schedule_large(10000, cyclic=True),
+        _course_schedule_large(9999, cyclic=False),
+    ],
+))
+
+
+# ---- graph-topo-sort-lexo  --  shape: dag_edge_list (NEW) ------------------
+
+def _topo_lexo_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 30)])
+    edges = _gen_dag_edges(rng, n, rng.randint(0, min(20, n * (n - 1) // 2)))
+    return _fmt_edge_list(n, edges)
+
+
+def _topo_lexo_checker(stdin: str) -> str:
+    """The lexicographically-smallest topological order has no
+    fundamentally different correct algorithm -- picking the smallest
+    available (indegree-0) node at each step is provably necessary, not
+    just one valid heuristic among several. Independent of the
+    reference's HEAP-based selection, though: a plain O(n) linear scan
+    for the smallest available node each round instead -- O(n^2)
+    overall, deliberately the slower implementation of the same
+    necessarily-correct greedy rule."""
+    lines = stdin.split("\n")
+    n, m = map(int, lines[0].split())
+    adj = [[] for _ in range(n)]
+    indeg = [0] * n
+    for i in range(1, 1 + m):
+        u, v = map(int, lines[i].split())
+        adj[u].append(v); indeg[v] += 1
+    remaining = {i for i in range(n) if indeg[i] == 0}
+    order = []
+    while remaining:
+        u = min(remaining)
+        remaining.discard(u)
+        order.append(u)
+        for v in adj[u]:
+            indeg[v] -= 1
+            if indeg[v] == 0:
+                remaining.add(v)
+    return " ".join(map(str, order))
+
+
+_TOPO_LARGE_NO_EDGES = _fmt_edge_list(10000, [])
+_TOPO_LARGE_WIDE = _fmt_edge_list(10000, [(0, i) for i in range(1, 10000)])
+_register(ProblemInputSpec(
+    "graph-topo-sort-lexo", "dag_edge_list",
+    {"n_min": 1, "n_max": 10000, "m_min": 0, "m_max": 10000},
+    ["4 3\n0 1\n0 2\n1 3", "3 2\n0 1\n0 2"],
+    _topo_lexo_random, _edge_list_validate, _topo_lexo_checker,
+    large_cases=[
+        # Intended complexity: O((n+m) log n) (heap-based Kahn's). The
+        # O(n^2) linear-scan checker above is excluded from the checker
+        # -agreement quality gate for exactly these 2 inputs (10^8 at
+        # this ceiling -- plausibly too slow for a routine check); see
+        # LARGE_CASES_EXCLUDED_FROM_CHECKER. Checker correctness stays
+        # covered by the 200-trial small-input fuzz. A plain CHAIN is
+        # deliberately NOT used here (confirmed directly): with every
+        # node depending on exactly one predecessor, the naive linear
+        # scan's "remaining" set never holds more than 1 element, so
+        # min() is O(1) throughout and the naive finishes in ~0.1s --
+        # these two large cases instead keep "remaining" as large as
+        # possible (no dependencies at all, and a star from node 0,
+        # which frees all 9999 other nodes simultaneously after one
+        # pop) so the O(n^2) gap actually shows up.
+        _TOPO_LARGE_NO_EDGES,
+        _TOPO_LARGE_WIDE,
+    ],
+))
+
+
+# ---- graph-bipartite-check  --  shape: edge_list ---------------------------
+
+def _bipartite_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 30)])
+    m_target = rng.randint(0, min(30, n * (n - 1) // 2)) if n > 1 else 0
+    edges = _gen_simple_edges(rng, n, m_target, directed=False)
+    return _fmt_edge_list(n, edges)
+
+
+def _bipartite_checker(stdin: str) -> str:
+    """Independent of the reference's BFS 2-coloring: a STACK-based
+    (not queue-based) 2-coloring traversal instead -- a different
+    traversal order, same correctness argument."""
+    lines = stdin.split("\n")
+    n, m = map(int, lines[0].split())
+    adj = [[] for _ in range(n)]
+    for i in range(1, 1 + m):
+        u, v = map(int, lines[i].split())
+        adj[u].append(v); adj[v].append(u)
+    color = [-1] * n
+    ok = True
+    for start in range(n):
+        if color[start] != -1:
+            continue
+        color[start] = 0
+        stack = [start]
+        while stack:
+            u = stack.pop()
+            for v in adj[u]:
+                if color[v] == -1:
+                    color[v] = 1 - color[u]
+                    stack.append(v)
+                elif color[v] == color[u]:
+                    ok = False
+    return "YES" if ok else "NO"
+
+
+_BIPARTITE_LARGE_YES = _fmt_edge_list(10000, [(i, i + 1) for i in range(9999)])
+_BIPARTITE_LARGE_NO = _fmt_edge_list(9999, [(i, (i + 1) % 9999) for i in range(9999)])
+_register(ProblemInputSpec(
+    "graph-bipartite-check", "edge_list",
+    {"n_min": 1, "n_max": 10000, "m_min": 0, "m_max": 10000},
+    ["4 4\n0 1\n1 2\n2 3\n3 0", "3 3\n0 1\n1 2\n2 0"],
+    _bipartite_random, _edge_list_validate, _bipartite_checker,
+    large_cases=[
+        # Intended complexity: O(n + m). The checker is also O(n+m) and
+        # fast at full scale -- not excluded. See
+        # test_problem_bank_batch2_large_input_complexity.py for a naive
+        # O(n*m) edge-list-rescan approach that times out here. A path
+        # (bipartite: YES) and an odd-length cycle of 9999 nodes
+        # (NOT bipartite: NO) at the full ceiling.
+        _BIPARTITE_LARGE_YES,
+        _BIPARTITE_LARGE_NO,
+    ],
+))
+
+
+# ---- graph-bfs-shortest-path  --  shape: edge_list_with_query (NEW) -------
+
+def _bfs_shortest_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 30)])
+    m_target = rng.randint(0, min(30, n * (n - 1) // 2)) if n > 1 else 0
+    edges = _gen_simple_edges(rng, n, m_target, directed=False)
+    src = rng.randint(0, n - 1)
+    dst = rng.randint(0, n - 1)
+    return _fmt_edge_list(n, edges) + f"{src} {dst}\n"
+
+
+def _bfs_shortest_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n, m = map(int, lines[0].split())
+    edge_lines = lines[1:1 + m]
+    if len(edge_lines) != m or not (1 <= n <= 10000) or not (0 <= m <= 10000):
+        return False
+    for line in edge_lines:
+        u, v = map(int, line.split())
+        if not (0 <= u < n and 0 <= v < n) or u == v:
+            return False
+    src, dst = map(int, lines[1 + m].split())
+    return 0 <= src < n and 0 <= dst < n
+
+
+def _bfs_shortest_checker(stdin: str) -> str:
+    """Independent of the reference's plain BFS (FIFO queue): Dijkstra's
+    algorithm via a priority queue, treating every edge as weight 1 --
+    the same shortest-path result, a completely different traversal
+    mechanism (heap-ordered relaxation vs a FIFO queue)."""
+    import heapq
+    lines = stdin.split("\n")
+    n, m = map(int, lines[0].split())
+    adj = [[] for _ in range(n)]
+    for i in range(1, 1 + m):
+        u, v = map(int, lines[i].split())
+        adj[u].append(v); adj[v].append(u)
+    src, dst = map(int, lines[1 + m].split())
+    best = {src: 0}
+    dist_found = {}
+    pq = [(0, src)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if u in dist_found:
+            continue
+        dist_found[u] = d
+        for v in adj[u]:
+            nd = d + 1
+            if nd < best.get(v, float("inf")):
+                best[v] = nd
+                heapq.heappush(pq, (nd, v))
+    return str(dist_found.get(dst, -1))
+
+
+_BFS_LARGE_CHAIN = _fmt_edge_list(10000, [(i, i + 1) for i in range(9999)]) + "0 9999\n"
+# Deliberately NOT "many small disjoint pairs" (confirmed directly: with
+# src and dst both in the SAME 2-node pair, or in separate tiny
+# components, BFS visits only 1-2 nodes total before concluding either
+# way, finishing in ~0.1s regardless of algorithm). Instead: one big
+# chain covering almost every node (so BFS must actually visit nearly
+# all of them, each needing an O(m) edge-list rescan for a naive
+# submission) plus 2 nodes in a SEPARATE tiny component holding the
+# destination, genuinely unreachable only after exploring the whole
+# big component first.
+_BFS_LARGE_UNREACHABLE = _fmt_edge_list(10000, [(i, i + 1) for i in range(9997)] + [(9998, 9999)]) + "0 9999\n"
+_register(ProblemInputSpec(
+    "graph-bfs-shortest-path", "edge_list_with_query",
+    {"n_min": 1, "n_max": 10000, "m_min": 0, "m_max": 10000},
+    ["5 4\n0 1\n1 2\n2 3\n3 4\n0 4", "4 2\n0 1\n2 3\n0 3"],
+    _bfs_shortest_random, _bfs_shortest_validate, _bfs_shortest_checker,
+    large_cases=[
+        # Intended complexity: O(n + m) (plain BFS). The checker is
+        # O((n+m) log n) and fast at full scale -- not excluded. See
+        # test_problem_bank_batch2_large_input_complexity.py for a naive
+        # O(n*m) edge-list-rescan approach that times out here.
+        _BFS_LARGE_CHAIN,
+        _BFS_LARGE_UNREACHABLE,
+    ],
+))
+
+
+# ---- graph-network-delay-time  --  shape: weighted_edge_list (NEW) --------
+
+def _network_delay_random(rng: random.Random) -> str:
+    n = rng.choice([1, 2, rng.randint(3, 20)])
+    edges = []
+    seen = set()
+    m_target = rng.randint(0, min(30, n * (n - 1))) if n > 1 else 0
+    attempts = 0
+    while len(edges) < m_target and attempts < m_target * 20 + 50 and n >= 2:
+        attempts += 1
+        u, v = rng.sample(range(1, n + 1), 2)
+        if (u, v) in seen:
+            continue
+        seen.add((u, v))
+        edges.append((u, v, rng.randint(1, 100)))
+    k = rng.randint(1, n)
+    lines = [str(n), str(len(edges))]
+    lines.extend(f"{u} {v} {w}" for u, v, w in edges)
+    lines.append(str(k))
+    return "\n".join(lines) + "\n"
+
+
+def _network_delay_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    n = int(lines[0]); m = int(lines[1])
+    edge_lines = lines[2:2 + m]
+    if len(edge_lines) != m or not (1 <= n <= 100) or not (0 <= m <= n * (n - 1)):
+        return False
+    for line in edge_lines:
+        u, v, w = map(int, line.split())
+        if not (1 <= u <= n and 1 <= v <= n):
+            return False
+    k = int(lines[2 + m])
+    return 1 <= k <= n
+
+
+def _network_delay_checker(stdin: str) -> str:
+    """Independent of the reference's Dijkstra (heap): Bellman-Ford --
+    relax every edge repeatedly for up to n-1 rounds, O(V*E), a
+    completely different shortest-path algorithm."""
+    lines = stdin.split("\n")
+    n = int(lines[0]); m = int(lines[1])
+    edges = []
+    for i in range(2, 2 + m):
+        u, v, w = map(int, lines[i].split())
+        edges.append((u, v, w))
+    k = int(lines[2 + m])
+    INF = float("inf")
+    dist = [INF] * (n + 1)
+    dist[k] = 0
+    for _ in range(max(0, n - 1)):
+        changed = False
+        for u, v, w in edges:
+            if dist[u] + w < dist[v]:
+                dist[v] = dist[u] + w
+                changed = True
+        if not changed:
+            break
+    mx = max(dist[1:n + 1]) if n >= 1 else 0
+    return str(mx if mx != INF else -1)
+
+
+def _network_delay_large(n: int, k: int) -> str:
+    # n<=100 is this problem's own (deliberately small) ceiling -- dense
+    # complete graph at that ceiling is the largest input it allows.
+    edges = [(u, v, ((u * 7 + v * 13) % 50) + 1) for u in range(1, n + 1) for v in range(1, n + 1) if u != v]
+    lines = [str(n), str(len(edges))]
+    lines.extend(f"{u} {v} {w}" for u, v, w in edges)
+    lines.append(str(k))
+    return "\n".join(lines) + "\n"
+
+
+_register(ProblemInputSpec(
+    "graph-network-delay-time", "weighted_edge_list",
+    {"n_min": 1, "n_max": 100},
+    ["4\n4\n2 1 1\n2 3 1\n3 4 1\n1 4 3\n2", "2\n1\n1 2 1\n2"],
+    _network_delay_random, _network_delay_validate, _network_delay_checker,
+    large_cases=[
+        # HONEST NOTE: this problem's own ceiling is n<=100, deliberately
+        # small (a dense graph already has up to n*(n-1)~10^4 edges at
+        # that size). Both the reference's O((V+E) log V) Dijkstra and
+        # the checker's O(V*E) Bellman-Ford finish near-instantly at
+        # this scale -- there is no input within the stated constraints
+        # where one times out and the other doesn't. These two large
+        # cases (both at the full n=100 ceiling, one dense complete
+        # graph) confirm correctness/timing at the ceiling only, not a
+        # genuine complexity gap -- see
+        # test_problem_bank_batch2_large_input_complexity.py, which
+        # documents this explicitly rather than fabricating a naive
+        # solution that would also finish instantly.
+        _network_delay_large(100, 1),
+        _network_delay_large(99, 50),
+    ],
+))
+
+
+# ---- graph-rotten-oranges  --  shape: rotting_grid (NEW) -------------------
+
+def _rotten_random(rng: random.Random) -> str:
+    rows = rng.choice([1, 2, rng.randint(3, 15)])
+    cols = rng.choice([1, 2, rng.randint(3, 15)])
+    grid = [[rng.choices([0, 1, 2], weights=[1, 3, 1])[0] for _ in range(cols)] for _ in range(rows)]
+    return f"{rows} {cols}\n" + "\n".join(_fmt_arr(row) for row in grid) + "\n"
+
+
+def _rotten_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    rows, cols = map(int, lines[0].split())
+    grid_lines = lines[1:1 + rows]
+    return (len(grid_lines) == rows and 1 <= rows <= 300 and 1 <= cols <= 300
+            and all(len(r.split()) == cols for r in grid_lines)
+            and all(v in ("0", "1", "2") for r in grid_lines for v in r.split()))
+
+
+def _rotten_checker(stdin: str) -> str:
+    """Independent of the reference's multi-source BFS queue: brute-
+    force minute-by-minute simulation -- repeatedly rescan the WHOLE
+    grid and rot every fresh orange adjacent to a rotten one, stopping
+    once a full pass makes no change. O((rows*cols)*(rows+cols)) worst
+    case -- deliberately the slow, obviously-correct simulation instead
+    of a queue that only ever visits each cell once."""
+    lines = stdin.split("\n")
+    rows, cols = map(int, lines[0].split())
+    g = [list(map(int, lines[1 + i].split())) for i in range(rows)]
+    minutes = 0
+    while True:
+        to_rot = []
+        for i in range(rows):
+            for j in range(cols):
+                if g[i][j] == 1:
+                    for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        ni, nj = i + di, j + dj
+                        if 0 <= ni < rows and 0 <= nj < cols and g[ni][nj] == 2:
+                            to_rot.append((i, j))
+                            break
+        if not to_rot:
+            break
+        for i, j in to_rot:
+            g[i][j] = 2
+        minutes += 1
+    fresh_left = any(g[i][j] == 1 for i in range(rows) for j in range(cols))
+    return str(-1 if fresh_left else minutes)
+
+
+_ROTTEN_LARGE_CHECKER = "300 300\n" + "\n".join(_fmt_arr([(2 if (r == 0 and c == 0) else 1) for c in range(300)]) for r in range(300)) + "\n"
+# Deliberately NOT a checkerboard with no rotten seed at all (confirmed
+# directly: with no "2" anywhere, the very first simulation pass finds
+# nothing adjacent to rot, so it terminates after 0 minutes in ~0.1s,
+# regardless of algorithm -- a degenerate case, not a slow one).
+# Instead: the SAME single-corner rotten seed as the case above (so
+# rotting genuinely spreads through nearly the whole 300x300 grid over
+# ~600 minutes of real simulation work first), but with one single
+# cell in the opposite corner walled off by 0s on both of its interior
+# neighbors, so it's fresh forever -- unreachability is only concluded
+# AFTER all that spreading, not instantly.
+def _rotten_large_unreachable_pocket() -> str:
+    rows, cols = 300, 300
+    g = [[1] * cols for _ in range(rows)]
+    g[0][0] = 2
+    g[rows - 1][cols - 2] = 0
+    g[rows - 2][cols - 1] = 0
+    return f"{rows} {cols}\n" + "\n".join(_fmt_arr(row) for row in g) + "\n"
+
+
+_ROTTEN_LARGE_UNREACHABLE = _rotten_large_unreachable_pocket()
+_register(ProblemInputSpec(
+    "graph-rotten-oranges", "rotting_grid",
+    {"rows_min": 1, "rows_max": 300, "cols_min": 1, "cols_max": 300},
+    ["3 3\n2 1 1\n1 1 0\n0 1 1", "1 1\n0"],
+    _rotten_random, _rotten_validate, _rotten_checker,
+    large_cases=[
+        # Intended complexity: O(rows*cols) (multi-source BFS, each cell
+        # visited once). The brute-force rescan checker above is O((rows
+        # *cols)*(rows+cols)) -- ~5*10^7 at this ceiling, plausibly too
+        # slow for a routine check -- excluded from the checker-
+        # agreement quality gate for exactly these 2 inputs; see
+        # LARGE_CASES_EXCLUDED_FROM_CHECKER. Checker correctness stays
+        # covered by the 200-trial small-input fuzz. See
+        # test_problem_bank_batch2_large_input_complexity.py for a naive
+        # full-grid-rescan-per-minute re-implementation of this SAME
+        # checker idea that times out at this scale (confirming the
+        # exclusion was the right call, not just a guess).
+        _ROTTEN_LARGE_CHECKER,
+        _ROTTEN_LARGE_UNREACHABLE,
+    ],
+))
+
+
+# ---- string-compression  --  shape: single_string --------------------------
+
+def _compression_random(rng: random.Random) -> str:
+    length = rng.choice([0, 1, rng.randint(2, 60)])
+    if length == 0:
+        return "\n"
+    return gen_string(rng, length, "abc")
+
+
+def _compression_validate(stdin: str) -> bool:
+    return len(stdin) <= 100001
+
+
+def _compression_checker(stdin: str) -> str:
+    """Independent of the reference's manual index-scanning loop:
+    itertools.groupby instead."""
+    import itertools
+    s = stdin.split("\n")[0]
+    if not s:
+        return ""
+    return "".join(f"{ch}{sum(1 for _ in g)}" for ch, g in itertools.groupby(s))
+
+
+_register(ProblemInputSpec(
+    "string-compression", "single_string",
+    {"len_min": 0, "len_max": 100000},
+    ["\n", "a"],
+    _compression_random, _compression_validate, _compression_checker,
+    large_cases=[
+        # HONEST NOTE: run-length encoding is O(n) by its very nature --
+        # there's no slower-vs-faster algorithmic choice to time-
+        # differentiate here (even the most naive correct approach is a
+        # single linear scan). These two confirm the reference handles
+        # the full n=10^5 ceiling: one all-distinct-characters case (no
+        # compression at all) and one single-run case (maximally
+        # compressed) -- not a complexity gap demonstration.
+        "".join(chr(ord('a') + i % 26) for i in range(100000)),
+        "a" * 100000,
+    ],
+))
+
+
+# ---- string-integer-to-roman  --  shape: single_int ------------------------
+
+_ROMAN_THOUSANDS = ["", "M", "MM", "MMM"]
+_ROMAN_HUNDREDS = ["", "C", "CC", "CCC", "CD", "D", "DC", "DCC", "DCCC", "CM"]
+_ROMAN_TENS = ["", "X", "XX", "XXX", "XL", "L", "LX", "LXX", "LXXX", "XC"]
+_ROMAN_ONES = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"]
+
+
+def _int_to_roman_random(rng: random.Random) -> str:
+    return str(gen_int(rng, 1, 3999))
+
+
+def _int_to_roman_validate(stdin: str) -> bool:
+    n = int(stdin.split("\n")[0])
+    return 1 <= n <= 3999
+
+
+def _int_to_roman_checker(stdin: str) -> str:
+    """Independent of the reference's greedy subtract-the-largest-
+    symbol-value loop: direct positional lookup tables (thousands/
+    hundreds/tens/ones digit -> symbol group) instead."""
+    n = int(stdin.split("\n")[0])
+    return (_ROMAN_THOUSANDS[n // 1000] + _ROMAN_HUNDREDS[(n // 100) % 10]
+            + _ROMAN_TENS[(n // 10) % 10] + _ROMAN_ONES[n % 10])
+
+
+_register(ProblemInputSpec(
+    "string-integer-to-roman", "single_int",
+    {"n_min": 1, "n_max": 3999},
+    ["3", "58"],
+    _int_to_roman_random, _int_to_roman_validate, _int_to_roman_checker,
+    large_cases=[
+        # HONEST NOTE: n<=3999 is this problem's own small, fixed
+        # ceiling (the largest standard Roman numeral) -- both the
+        # reference's greedy loop and the checker's lookup tables are
+        # O(1)-ish regardless of n. No complexity gap exists to
+        # demonstrate; these two just confirm correctness at the two
+        # boundary-shaped values (near the ceiling, and a value that
+        # exercises every subtractive-pair symbol).
+        "3999",
+        "3888",
+    ],
+))
+
+
+# ---- string-count-and-say  --  shape: single_int ---------------------------
+
+def _count_and_say_random(rng: random.Random) -> str:
+    # Capped at 28, not the stated 30 -- 29 and 30 are reserved
+    # exclusively for the 2 large_cases below (this problem's value
+    # space is small enough that the random fill could otherwise draw
+    # one of them directly, colliding with the reserved large slot).
+    return str(gen_int(rng, 1, 28))
+
+
+def _count_and_say_validate(stdin: str) -> bool:
+    n = int(stdin.split("\n")[0])
+    return 1 <= n <= 30
+
+
+def _count_and_say_checker(stdin: str) -> str:
+    """Independent of the reference's manual index-scanning run
+    detector: a regex (`(.)\\1*`) to find each maximal run instead."""
+    import re
+    n = int(stdin.split("\n")[0])
+    s = "1"
+    for _ in range(n - 1):
+        s = "".join(f"{len(m.group(0))}{m.group(1)}" for m in re.finditer(r"(.)\1*", s))
+    return s
+
+
+_register(ProblemInputSpec(
+    "string-count-and-say", "single_int",
+    {"n_min": 1, "n_max": 30},
+    ["1", "2"],
+    _count_and_say_random, _count_and_say_validate, _count_and_say_checker,
+    large_cases=[
+        # HONEST NOTE: n<=30 is this problem's own small, fixed ceiling
+        # -- deliberately so, because the sequence's own string length
+        # grows exponentially (~1.303^n, Conway's constant) regardless
+        # of implementation; there is no smarter algorithm than direct
+        # simulation, so no naive-vs-reference timing gap exists to
+        # demonstrate. This is just the ceiling itself.
+        "30",
+        "29",
+    ],
+))
+
+
+# ---- string-multiply-strings  --  shape: digit_strings_pair (NEW) ---------
+
+def _multiply_strings_random(rng: random.Random) -> str:
+    def digit_string(length):
+        if length == 1:
+            return str(rng.randint(0, 9))
+        first = str(rng.randint(1, 9))
+        rest = "".join(str(rng.randint(0, 9)) for _ in range(length - 1))
+        return first + rest
+
+    la = rng.choice([1, 2, rng.randint(3, 20)])
+    lb = rng.choice([1, 2, rng.randint(3, 20)])
+    return f"{digit_string(la)}\n{digit_string(lb)}\n"
+
+
+def _multiply_strings_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    a, b = lines[0], lines[1]
+    return (1 <= len(a) <= 200 and 1 <= len(b) <= 200
+            and a.isdigit() and b.isdigit()
+            and (a == "0" or a[0] != "0") and (b == "0" or b[0] != "0"))
+
+
+def _multiply_strings_checker(stdin: str) -> str:
+    """Independent of the reference's manual digit-by-digit convolution
+    with carrying: Python's own arbitrary-precision integer
+    multiplication instead -- a completely different (and, deliberately,
+    much faster, not slower) implementation path, using the very
+    operation the problem asks contestants not to rely on directly for
+    this specific verification purpose."""
+    lines = stdin.split("\n")
+    a, b = lines[0], lines[1]
+    return str(int(a) * int(b))
+
+
+_register(ProblemInputSpec(
+    "string-multiply-strings", "digit_strings_pair",
+    {"len_min": 1, "len_max": 200},
+    ["2\n3", "123\n456"],
+    _multiply_strings_random, _multiply_strings_validate, _multiply_strings_checker,
+    large_cases=[
+        # HONEST NOTE: |a|,|b|<=200 is this problem's own small ceiling
+        # -- the reference's O(|a|*|b|) convolution is at most 4*10^4
+        # operations there, instant either way. No naive-vs-reference
+        # timing gap exists to demonstrate; these two just confirm
+        # correctness at the full-length ceiling (all-9s, the worst case
+        # for carry propagation, and a value ending in zeros).
+        "9" * 200 + "\n" + "9" * 200,
+        ("1" + "0" * 199) + "\n" + ("1" + "0" * 199),
+    ],
+))
+
+
+# ---- string-zigzag-conversion  --  shape: string_and_rows (NEW) -----------
+
+def _zigzag_random(rng: random.Random) -> str:
+    length = rng.choice([1, 2, rng.randint(3, 60)])
+    s = gen_string(rng, length, "ABCDE")
+    rows = rng.randint(1, max(1, length))
+    return f"{s}\n{rows}\n"
+
+
+def _zigzag_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    s = lines[0]; rows = int(lines[1])
+    return 1 <= len(s) <= 1000 and 1 <= rows <= 1000
+
+
+def _zigzag_checker(stdin: str) -> str:
+    """Independent of the reference's direction-pointer row-walk
+    simulation: a closed-form modular computation of each character's
+    target row, using the zigzag's fixed cycle length (2*rows-2)."""
+    lines = stdin.split("\n")
+    s = lines[0]; rows = int(lines[1])
+    if rows == 1 or rows >= len(s):
+        return s
+    cycle = 2 * rows - 2
+    buckets = [[] for _ in range(rows)]
+    for i, ch in enumerate(s):
+        pos = i % cycle
+        r = pos if pos < rows else cycle - pos
+        buckets[r].append(ch)
+    return "".join("".join(b) for b in buckets)
+
+
+_register(ProblemInputSpec(
+    "string-zigzag-conversion", "string_and_rows",
+    {"len_min": 1, "len_max": 1000, "rows_min": 1, "rows_max": 1000},
+    ["PAYPALISHIRING\n3", "PAYPALISHIRING\n4"],
+    _zigzag_random, _zigzag_validate, _zigzag_checker,
+    large_cases=[
+        # HONEST NOTE: both the reference's pointer-walk and the
+        # checker's modular formula are O(n) regardless of rows -- no
+        # naive-vs-reference timing gap exists to demonstrate at this
+        # problem's own n,rows<=1000 ceiling. These two confirm
+        # correctness at the full-length ceiling instead (a modest row
+        # count that actually zigzags, and rows deliberately close to
+        # len(s) so almost every row holds very few characters).
+        "".join(chr(ord('A') + i % 26) for i in range(1000)) + "\n17\n",
+        "".join(chr(ord('A') + i % 26) for i in range(1000)) + "\n999\n",
+    ],
+))
+
+
+# ---- dp-longest-common-subsequence  --  shape: two_strings -----------------
+
+def _lcs_random(rng: random.Random) -> str:
+    la = rng.choice([0, 1, rng.randint(2, 30)])
+    lb = rng.choice([0, 1, rng.randint(2, 30)])
+    a = gen_string(rng, la, "ab") if la else ""
+    b = gen_string(rng, lb, "ab") if lb else ""
+    return f"{a}\n{b}\n"
+
+
+def _lcs_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    a = lines[0] if len(lines) > 0 else ""
+    b = lines[1] if len(lines) > 1 else ""
+    return len(a) <= 1000 and len(b) <= 1000
+
+
+def _lcs_checker(stdin: str) -> str:
+    """Independent of the reference's bottom-up DP table: a top-down
+    memoized recursion instead -- same asymptotic complexity, a
+    genuinely different implementation technique (recursion + cache vs
+    iterative table-filling). Recursion limit is raised defensively
+    (depth can reach len(a)+len(b) <= 2000). Uses a plain dict for
+    memoization, NOT functools.lru_cache -- confirmed directly that
+    lru_cache's own per-call overhead is enough to trip CPython's
+    C-stack-based recursion guard at this depth even with
+    sys.setrecursionlimit raised well above it (the guard isn't purely
+    the logical Python frame count), while an equivalent plain-dict-
+    memoized recursion at the identical depth does not."""
+    import sys
+    sys.setrecursionlimit(5000)
+    lines = stdin.split("\n")
+    a = lines[0] if len(lines) > 0 else ""
+    b = lines[1] if len(lines) > 1 else ""
+    memo = {}
+
+    def solve(i, j):
+        if i == 0 or j == 0:
+            return 0
+        key = (i, j)
+        if key in memo:
+            return memo[key]
+        if a[i - 1] == b[j - 1]:
+            r = 1 + solve(i - 1, j - 1)
+        else:
+            r = max(solve(i - 1, j), solve(i, j - 1))
+        memo[key] = r
+        return r
+
+    result = solve(len(a), len(b))
+    return str(result)
+
+
+_register(ProblemInputSpec(
+    "dp-longest-common-subsequence", "two_strings",
+    {"len_min": 0, "len_max": 1000},
+    ["abcde\nace", "abc\nabc"],
+    _lcs_random, _lcs_validate, _lcs_checker,
+    large_cases=[
+        # Intended complexity: O(n*m) DP. A naive unmemoized recursive
+        # re-implementation of the SAME recurrence is O(2^(n+m)) -- see
+        # test_problem_bank_batch2_large_input_complexity.py -- and times
+        # out at this ceiling while both the reference and this
+        # memoized checker (same O(n*m), just a different technique,
+        # fast enough to stay IN the checker-agreement quality gate at
+        # full scale) finish instantly. Both strings in EACH pair use
+        # COMPLETELY DISJOINT alphabets (not just "mismatched at the
+        # same diagonal position") -- confirmed directly that this is
+        # necessary, not just sufficient: two attempts with same-
+        # alphabet patterns mismatched only at the i==j diagonal (an
+        # alternating "ab"/"ba" pair, and a block-split variant) still
+        # let the unmemoized recursion find an OFF-diagonal character
+        # match at roughly half of all (i,j) pairs it explores purely
+        # by chance (since solve(i,j) explores many i!=j pairs too),
+        # each one a free single-path shortcut with no further
+        # branching -- both finished in well under 0.1s instead of
+        # timing out. With NO character in common at all between the
+        # two strings, a[i-1]==b[j-1] is never true anywhere, so every
+        # single call is forced into the full max(solve(i-1,j),
+        # solve(i,j-1)) branch, with no shortcut possible.
+        "a" * 1000 + "\n" + "b" * 1000,
+        "p" * 999 + "\n" + "q" * 999,
+    ],
+))
+
+
+# ---- dp-longest-common-substring  --  shape: two_strings -------------------
+
+def _lc_substring_random(rng: random.Random) -> str:
+    la = rng.choice([0, 1, rng.randint(2, 25)])
+    lb = rng.choice([0, 1, rng.randint(2, 25)])
+    a = gen_string(rng, la, "ab") if la else ""
+    b = gen_string(rng, lb, "ab") if lb else ""
+    return f"{a}\n{b}\n"
+
+
+def _lc_substring_validate(stdin: str) -> bool:
+    lines = stdin.split("\n")
+    a = lines[0] if len(lines) > 0 else ""
+    b = lines[1] if len(lines) > 1 else ""
+    return len(a) <= 1000 and len(b) <= 1000
+
+
+def _lc_substring_checker(stdin: str) -> str:
+    """Independent of the reference's DP table: brute-force every
+    (i, j) starting-alignment pair and extend a match as far as it goes
+    -- O(n*m*min(n,m)) worst case, capped to small lengths by the
+    generator above so it's usable in the 200-trial fuzz; deliberately
+    the slow, obviously-correct approach."""
+    lines = stdin.split("\n")
+    a = lines[0] if len(lines) > 0 else ""
+    b = lines[1] if len(lines) > 1 else ""
+    n, m = len(a), len(b)
+    best = 0
+    for i in range(n):
+        for j in range(m):
+            k = 0
+            while i + k < n and j + k < m and a[i + k] == b[j + k]:
+                k += 1
+            if k > best:
+                best = k
+    return str(best)
+
+
+_register(ProblemInputSpec(
+    "dp-longest-common-substring", "two_strings",
+    {"len_min": 0, "len_max": 1000},
+    ["abcdxyz\nxyzabcd", "zxabcdezy\nyzabcdezy"],
+    _lc_substring_random, _lc_substring_validate, _lc_substring_checker,
+    large_cases=[
+        # Intended complexity: O(n*m) DP. The brute-force-every-
+        # alignment checker above is O(n*m*min(n,m)) -- ~10^9 at this
+        # ceiling with many repeated characters -- excluded from the
+        # checker-agreement quality gate for exactly these 2 inputs; see
+        # LARGE_CASES_EXCLUDED_FROM_CHECKER. Checker correctness stays
+        # covered by the 200-trial small-input fuzz. See
+        # test_problem_bank_batch2_large_input_complexity.py for a
+        # naive O(n*m*min(n,m)) re-implementation of this SAME checker
+        # idea that times out at this scale.
+        "a" * 1000 + "\n" + "a" * 1000,
+        ("ab" * 500) + "\n" + ("ab" * 500),
+    ],
+))
+
+
+# =============================================================================
 # Public builder
 # =============================================================================
 

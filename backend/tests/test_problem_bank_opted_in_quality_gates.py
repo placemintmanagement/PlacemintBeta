@@ -1,7 +1,7 @@
 """Quality gates (Stage 2b, extended Stage 2c): a sweep over EVERY
 problem currently opted into `target_tests` -- greedy-min-platforms
-(Stage 2a), the 24 Easy problems (Stage 2b), and the first 21 Medium
-problems (Stage 2c batch 1) -- checking:
+(Stage 2a), the 24 Easy problems (Stage 2b), and the first 42 Medium
+problems across batches 1 and 2 (Stage 2c) -- checking:
 
 1. Every one of its test_inputs is valid under the problem's own
    declared constraints (via problem_input_gen.SPECS[...].validate for
@@ -22,23 +22,30 @@ problems (Stage 2c batch 1) -- checking:
 5. Wherever problem_input_gen declares an independent/brute-force
    checker, problem_bank.verify_with_independent_checker is actually run
    against it here (not just assumed to work because it exists) -- for
-   4 problems whose checker is deliberately the naive/slow algorithm
-   (container-water, greedy-merge-intervals, greedy-activity-selection,
-   greedy-non-overlapping-removals), their large_cases are excluded
-   from JUST this check (see LARGE_CASES_EXCLUDED_FROM_CHECKER below),
-   since those large inputs are sized at the full constraint ceiling to
-   timeout-differentiate a naive GRADED submission from the reference,
-   and running the equally-naive checker against them would defeat that
-   purpose. The reference solution still always runs on every stored
-   input regardless; checker correctness for these 4 is instead fully
-   covered by the 200-trial differential fuzz on small inputs.
+   problems whose checker is deliberately the naive/slow algorithm (4
+   from batch 1: container-water, greedy-merge-intervals, greedy-
+   activity-selection, greedy-non-overlapping-removals; 8 more from
+   batch 2: greedy-jump-game-ii, greedy-gas-station, greedy-boats-save-
+   people, greedy-min-arrows-balloons, greedy-two-city-scheduling,
+   graph-topo-sort-lexo, graph-rotten-oranges, dp-longest-common-
+   substring -- see each checker's docstring in problem_input_gen.py),
+   their large_cases are excluded from JUST this check (see
+   LARGE_CASES_EXCLUDED_FROM_CHECKER below), since those large inputs
+   are sized at the full constraint ceiling to timeout-differentiate a
+   naive GRADED submission from the reference, and running the equally
+   -naive (or, for some batch-2 checkers, combinatorially/exponentially
+   worse) checker against them would defeat that purpose or simply
+   never finish. The reference solution still always runs on every
+   stored input regardless; checker correctness for these 12 is instead
+   fully covered by the 200-trial differential fuzz on small inputs.
 6. Uniqueness, wherever the problem allows a direct check for it:
-   two-sum is the only one of the 46 opted-in problems whose correct
-   answer is "a valid X" rather than boolean/count/a single deterministic
-   value/a canonically-unique structure (audited by hand across all 46 --
-   see the Stage 2c commit message for the category breakdown), and it
-   explicitly states its own "exactly one solution" precondition, so its
-   stored tests get an explicit uniqueness re-check here.
+   two-sum (batch 1) and greedy-gas-station (batch 2) are the only two
+   of the opted-in problems whose correct answer is "a valid X" rather
+   than boolean/count/a single deterministic value/a canonically-unique
+   structure (audited by hand across every opted-in problem -- see each
+   stage's commit message for the category breakdown), and both
+   explicitly state their own "exactly one X exists" precondition, so
+   their stored tests get an explicit uniqueness re-check here.
 
 No model is used anywhere in this file.
 """
@@ -71,25 +78,34 @@ CHECKERS = {pid: spec.checker for pid, spec in problem_input_gen.SPECS.items() i
 # not duplicated here, but counted in the coverage report below.
 WITH_CHECKER_IDS = sorted(set(CHECKERS) | {"greedy-min-platforms"})
 
-# 2026-10 follow-up: these 4 problems' independent checkers are
-# deliberately the naive/slow algorithm (container-water: O(n^2) brute
-# force; greedy-merge-intervals: O(n^2) union-find over pairwise
-# overlaps; greedy-activity-selection and greedy-non-overlapping-
-# removals: an O(n^2) DP cross-check -- see each checker's docstring in
-# problem_input_gen.py), while their large_cases are sized at the FULL
-# constraint ceiling specifically so a naive submission times out and
-# the reference doesn't (proven directly in
-# test_problem_bank_large_input_complexity.py). Running the slow checker
-# against that same full-scale input would defeat the large case's own
-# purpose, so it's excluded from JUST the checker-agreement check below
-# -- never from the reference-solution run, which always executes on
-# every stored input regardless of this exclusion. Checker correctness
-# for these 4 is instead fully covered by the 200-trial differential
-# fuzz on small random inputs, same as every other checkered problem.
+# 2026-10 follow-up (batch 1) + Stage 2c batch 2: these problems'
+# independent checkers are deliberately the naive/slow (or, for a few,
+# combinatorially/exponentially worse) algorithm -- see each checker's
+# docstring in problem_input_gen.py -- while their large_cases are sized
+# at the FULL constraint ceiling specifically so a naive submission
+# times out and the reference doesn't (proven directly in
+# test_problem_bank_large_input_complexity.py and
+# test_problem_bank_batch2_large_input_complexity.py). Running the slow
+# checker against that same full-scale input would defeat the large
+# case's own purpose, or in several batch-2 cases simply never finish
+# (an exhaustive bitmask/combinatorial search has no hope of completing
+# at n=500-50000), so it's excluded from JUST the checker-agreement
+# check below -- never from the reference-solution run, which always
+# executes on every stored input regardless of this exclusion. Checker
+# correctness for all of these is instead fully covered by the
+# 200-trial differential fuzz on small random inputs, same as every
+# other checkered problem.
 LARGE_CASES_EXCLUDED_FROM_CHECKER = {
     pid: set(problem_input_gen.SPECS[pid].large_cases or [])
-    for pid in ("container-water", "greedy-activity-selection",
-                "greedy-merge-intervals", "greedy-non-overlapping-removals")
+    for pid in (
+        # batch 1
+        "container-water", "greedy-activity-selection",
+        "greedy-merge-intervals", "greedy-non-overlapping-removals",
+        # batch 2
+        "greedy-jump-game-ii", "greedy-gas-station", "greedy-boats-save-people",
+        "greedy-min-arrows-balloons", "greedy-two-city-scheduling",
+        "graph-topo-sort-lexo", "graph-rotten-oranges", "dp-longest-common-substring",
+    )
 }
 
 
@@ -106,8 +122,8 @@ def test_every_opted_in_problem_has_a_validator_registered():
     assert missing == [], f"no constraint validator registered for: {missing}"
 
 
-def test_exactly_46_problems_are_opted_in():
-    assert len(_opted_in_ids()) == 46, _opted_in_ids()
+def test_exactly_67_problems_are_opted_in():
+    assert len(_opted_in_ids()) == 67, _opted_in_ids()
 
 
 @pytest.mark.parametrize("pid", _opted_in_ids())
@@ -194,13 +210,42 @@ def test_two_sum_stored_tests_each_have_exactly_one_valid_pair():
         assert pair_count == 1, f"two-sum: {stdin!r} has {pair_count} valid pairs, not exactly 1"
 
 
+def test_gas_station_stored_tests_each_have_exactly_one_valid_start():
+    """greedy-gas-station promises its own "exactly one starting index
+    exists" -- explicit uniqueness re-check over its CURRENT stored
+    test_inputs, independent of validate() (which also enforces this at
+    generation time) so a future direct edit to the stored list can't
+    silently reintroduce an input with more than one valid start. Uses
+    the classic O(n) prefix-sum argmin/tie-count characterization
+    directly (not problem_input_gen's own helper) so this check doesn't
+    depend on that module's internals staying the same."""
+    raw = _raw_by_id("greedy-gas-station")
+    for stdin in raw["test_inputs"]:
+        lines = stdin.split("\n")
+        gas = list(map(int, lines[1].split()))
+        cost = list(map(int, lines[2].split()))
+        n = len(gas)
+        prefix = 0
+        best = 0
+        ties = 1
+        for k in range(1, n):
+            prefix += gas[k - 1] - cost[k - 1]
+            if prefix < best:
+                best = prefix
+                ties = 1
+            elif prefix == best:
+                ties += 1
+        assert ties == 1, f"greedy-gas-station: {stdin!r} has {ties} valid starts, not exactly 1"
+
+
 def test_checker_coverage_report():
     """Not a correctness assertion on its own (the coverage split is a
     judgment call, not a bug if it changes) -- records, for the record,
     which opted-in problems have an independent checker and which
-    don't, and sanity-checks the two groups partition all 46 opted-in
-    problems (37 with a checker after the Stage 2c uniqueness/checker
-    follow-up added one to each of the 21 Medium batch-1 problems)."""
+    don't, and sanity-checks the two groups partition all 67 opted-in
+    problems (58 with a checker: 37 after batch 1 + the uniqueness/
+    checker follow-up, plus one to each of the 21 Medium batch-2
+    problems)."""
     opted_in = set(_opted_in_ids())
     without_checker = sorted(opted_in - set(WITH_CHECKER_IDS))
     assert set(WITH_CHECKER_IDS) | set(without_checker) == opted_in

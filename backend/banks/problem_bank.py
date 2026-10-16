@@ -1362,7 +1362,9 @@ for i in range(n - 1):
         cur_end = farthest
 print(jumps)
 """,
-        "test_inputs": ["5\n2 3 1 1 4", "1\n0", "4\n1 1 1 1", "3\n2 1 1", "2\n1 1"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-jump-game-ii", ["5\n2 3 1 1 4", "1\n0"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-gas-station", "title": "Gas Station", "topic": "greedy",
@@ -1383,7 +1385,9 @@ for i in range(n):
         tank = 0
 print(start)
 """,
-        "test_inputs": ["5\n1 2 3 4 5\n3 4 5 1 2", "2\n5 1\n4 2", "1\n5\n5", "4\n4 5 2 6\n3 3 5 5", "3\n3 4 4\n3 4 3"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-gas-station", ["5\n1 2 3 4 5\n3 4 5 1 2", "2\n5 1\n4 2"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-candy-distribution", "title": "Candy Distribution", "topic": "greedy",
@@ -1450,7 +1454,9 @@ while i <= j:
     boats += 1
 print(boats)
 """,
-        "test_inputs": ["4\n1 2 2 3\n3", "4\n3 2 2 1\n3", "1\n5\n5", "3\n2 2 2\n4", "6\n1 2 3 4 5 6\n7"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-boats-save-people", ["4\n1 2 2 3\n3", "4\n3 2 2 1\n3"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-min-arrows-balloons", "title": "Minimum Arrows to Burst Balloons", "topic": "greedy",
@@ -1470,7 +1476,9 @@ for s, e in ivs:
         end = e
 print(arrows)
 """,
-        "test_inputs": ["4\n10 16\n2 8\n1 6\n7 12", "4\n1 2\n3 4\n5 6\n7 8", "4\n1 2\n2 3\n3 4\n4 5", "1\n1 1", "3\n1 10\n2 3\n4 5"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-min-arrows-balloons", ["4\n10 16\n2 8\n1 6\n7 12", "4\n1 2\n3 4\n5 6\n7 8"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-two-city-scheduling", "title": "Two City Scheduling", "topic": "greedy",
@@ -1491,7 +1499,9 @@ for idx, i in enumerate(order):
         total += costB[i]
 print(total)
 """,
-        "test_inputs": ["2\n10 30 400 30\n20 200 50 20", "1\n10 20\n30 40", "3\n1 2 3 4 5 6\n6 5 4 3 2 1", "1\n5 5\n5 5", "2\n100 50 50 100\n50 100 100 50"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "greedy-two-city-scheduling", ["2\n10 30 400 30\n20 200 50 20", "1\n10 20\n30 40"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "greedy-min-platforms", "title": "Minimum Platforms Needed", "topic": "greedy",
@@ -1559,7 +1569,9 @@ for i in range(n):
                     seen[y] = True; stack.append(y)
 print(count)
 """,
-        "test_inputs": ["5 3\n0 1\n1 2\n3 4", "4 0", "1 0", "6 5\n0 1\n0 2\n2 3\n3 4\n4 5", "5 2\n0 1\n2 3"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-connected-components", ["5 3\n0 1\n1 2\n3 4", "4 0"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-cycle-undirected", "title": "Detect Cycle in an Undirected Graph", "topic": "graphs",
@@ -1600,7 +1612,9 @@ for _ in range(m):
     parent[ru] = rv
 print('YES' if cycle else 'NO')
 """,
-        "test_inputs": ["4 3\n0 1\n1 2\n2 3", "4 4\n0 1\n1 2\n2 3\n3 0", "1 0", "3 3\n0 1\n1 2\n0 2", "5 4\n0 1\n1 2\n3 4\n1 3"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-cycle-undirected", ["4 3\n0 1\n1 2\n2 3", "4 4\n0 1\n1 2\n2 3\n3 0"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-cycle-directed", "title": "Detect Cycle in a Directed Graph", "topic": "graphs",
@@ -1626,7 +1640,9 @@ while q:
             q.append(v)
 print('YES' if processed < n else 'NO')
 """,
-        "test_inputs": ["3 3\n0 1\n1 2\n2 0", "4 3\n0 1\n1 2\n2 3", "1 0", "2 2\n0 1\n1 0", "5 4\n0 1\n0 2\n1 3\n2 4"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-cycle-directed", ["3 3\n0 1\n1 2\n2 0", "4 3\n0 1\n1 2\n2 3"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-course-schedule", "title": "Course Schedule (Can Finish All Courses)", "topic": "graphs",
@@ -1653,7 +1669,9 @@ while q:
             q.append(v)
 print('YES' if processed == n else 'NO')
 """,
-        "test_inputs": ["2\n1\n1 0", "2\n2\n1 0\n0 1", "1\n0", "4\n3\n1 0\n2 0\n3 1", "3\n3\n1 0\n2 1\n0 2"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-course-schedule", ["2\n1\n1 0", "2\n2\n1 0\n0 1"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-topo-sort-lexo", "title": "Topological Sort (Lexicographically Smallest)", "topic": "graphs",
@@ -1681,7 +1699,9 @@ while heap:
             heapq.heappush(heap, v)
 print(' '.join(map(str, order)))
 """,
-        "test_inputs": ["4 3\n0 1\n0 2\n1 3", "3 2\n0 1\n0 2", "1 0", "5 4\n4 0\n4 1\n0 2\n1 3", "6 0"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-topo-sort-lexo", ["4 3\n0 1\n0 2\n1 3", "3 2\n0 1\n0 2"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-bipartite-check", "title": "Is Graph Bipartite", "topic": "graphs",
@@ -1712,7 +1732,9 @@ for i in range(n):
                     ok = False
 print('YES' if ok else 'NO')
 """,
-        "test_inputs": ["4 4\n0 1\n1 2\n2 3\n3 0", "3 3\n0 1\n1 2\n2 0", "1 0", "4 2\n0 1\n2 3", "5 5\n0 1\n1 2\n2 3\n3 4\n4 0"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-bipartite-check", ["4 4\n0 1\n1 2\n2 3\n3 0", "3 3\n0 1\n1 2\n2 0"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-bfs-shortest-path", "title": "Shortest Path in an Unweighted Graph", "topic": "graphs",
@@ -1739,7 +1761,9 @@ while q:
             q.append(v)
 print(dist[dst])
 """,
-        "test_inputs": ["5 4\n0 1\n1 2\n2 3\n3 4\n0 4", "4 2\n0 1\n2 3\n0 3", "1 0\n0 0", "6 6\n0 1\n1 2\n2 3\n0 4\n4 5\n5 3\n0 3", "3 2\n0 1\n1 2\n2 0"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-bfs-shortest-path", ["5 4\n0 1\n1 2\n2 3\n3 4\n0 4", "4 2\n0 1\n2 3\n0 3"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-dijkstra", "title": "Dijkstra's Shortest Path", "topic": "graphs",
@@ -1801,7 +1825,9 @@ while pq:
 mx = max(dist[1:])
 print(mx if mx != float('inf') else -1)
 """,
-        "test_inputs": ["4\n4\n2 1 1\n2 3 1\n3 4 1\n1 4 3\n2", "2\n1\n1 2 1\n2", "1\n0\n1", "3\n2\n1 2 1\n2 3 2\n1", "4\n3\n1 2 1\n1 3 2\n1 4 1\n1"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-network-delay-time", ["4\n4\n2 1 1\n2 3 1\n3 4 1\n1 4 3\n2", "2\n1\n1 2 1\n2"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-rotten-oranges", "title": "Rotten Oranges (Minimum Time to Rot All)", "topic": "graphs",
@@ -1833,7 +1859,9 @@ while q:
             q.append((ni, nj, t + 1))
 print(mins if fresh == 0 else -1)
 """,
-        "test_inputs": ["3 3\n2 1 1\n1 1 0\n0 1 1", "3 3\n2 1 1\n0 1 1\n1 0 1", "1 1\n0", "2 2\n2 1\n1 1", "1 4\n1 2 1 1"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "graph-rotten-oranges", ["3 3\n2 1 1\n1 1 0\n0 1 1", "3 3\n2 1 1\n0 1 1\n1 0 1"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "graph-mst-kruskal", "title": "Minimum Spanning Tree Weight (Kruskal)", "topic": "graphs",
@@ -1910,7 +1938,9 @@ else:
         i = j
     print(''.join(out))
 """,
-        "test_inputs": ["aaabbc", "abc", "aaaa", "\n", "aabbbba"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "string-compression", ["aaabbc", "abc"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "string-longest-common-prefix", "title": "Longest Common Prefix", "topic": "strings",
@@ -2028,7 +2058,9 @@ for v, sym in vals:
         n -= v
 print(''.join(out))
 """,
-        "test_inputs": ["3", "58", "1994", "4", "9"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "string-integer-to-roman", ["3", "58"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "string-count-and-say", "title": "Count and Say", "topic": "strings",
@@ -2051,7 +2083,9 @@ for _ in range(n - 1):
     s = ''.join(out)
 print(s)
 """,
-        "test_inputs": ["1", "2", "3", "4", "5"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "string-count-and-say", ["1", "2"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "string-multiply-strings", "title": "Multiply Strings", "topic": "strings",
@@ -2077,7 +2111,9 @@ else:
     s = ''.join(map(str, res)).lstrip('0')
     print(s if s else '0')
 """,
-        "test_inputs": ["2\n3", "123\n456", "999\n999", "0\n123", "1\n1"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "string-multiply-strings", ["2\n3", "123\n456"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "string-zigzag-conversion", "title": "Zigzag Conversion", "topic": "strings",
@@ -2102,7 +2138,9 @@ else:
         r += d
     print(''.join(buckets))
 """,
-        "test_inputs": ["PAYPALISHIRING\n3", "PAYPALISHIRING\n4", "A\n1", "AB\n1", "ABCDE\n2"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "string-zigzag-conversion", ["PAYPALISHIRING\n3", "PAYPALISHIRING\n4"], target_total=14),
+        "target_tests": 14,
     },
     # ------------------------------------------------------------------ 2D_DP (net-new, 2026-09)
     {
@@ -2124,7 +2162,9 @@ for i in range(1, n + 1):
             dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
 print(dp[n][m])
 """,
-        "test_inputs": ["abcde\nace", "abc\nabc", "abc\ndef", "\nabc", "AGGTAB\nGXTXAYB"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "dp-longest-common-subsequence", ["abcde\nace", "abc\nabc"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "dp-longest-common-substring", "title": "Longest Common Substring", "topic": "2d_dp",
@@ -2145,7 +2185,9 @@ for i in range(1, n + 1):
             best = max(best, dp[i][j])
 print(best)
 """,
-        "test_inputs": ["abcdxyz\nxyzabcd", "zxabcdezy\nyzabcdezy", "abc\nabc", "abc\ndef", "\nabc"],
+        "test_inputs": problem_input_gen.build_test_inputs_with_large(
+            "dp-longest-common-substring", ["abcdxyz\nxyzabcd", "zxabcdezy\nyzabcdezy"], target_total=14),
+        "target_tests": 14,
     },
     {
         "id": "dp-01-knapsack", "title": "0/1 Knapsack", "topic": "2d_dp",

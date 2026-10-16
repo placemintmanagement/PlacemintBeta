@@ -64,7 +64,7 @@ def test_every_unopted_problem_is_byte_identical_to_baseline(baseline_problem_ba
           f"({len(opted_in)} opted into target_tests: {sorted(opted_in)})")
 
 
-def test_target_tests_field_is_opt_in_only_on_the_expected_46_problems(live_problem_bank):
+def test_target_tests_field_is_opt_in_only_on_the_expected_67_problems(live_problem_bank):
     EASY_IDS = {
         "two-sum", "reverse-string", "fizzbuzz", "valid-palindrome", "max-subarray-sum",
         "contains-duplicate", "missing-number", "buy-sell-stock", "climb-stairs", "merge-sorted",
@@ -81,17 +81,28 @@ def test_target_tests_field_is_opt_in_only_on_the_expected_46_problems(live_prob
         "greedy-activity-selection", "greedy-merge-intervals", "greedy-non-overlapping-removals",
         "greedy-jump-game",
     }
+    MEDIUM_BATCH_2_IDS = {
+        "greedy-jump-game-ii", "greedy-gas-station", "greedy-boats-save-people",
+        "greedy-min-arrows-balloons", "greedy-two-city-scheduling",
+        "graph-connected-components", "graph-cycle-undirected", "graph-cycle-directed",
+        "graph-course-schedule", "graph-topo-sort-lexo", "graph-bipartite-check",
+        "graph-bfs-shortest-path", "graph-network-delay-time", "graph-rotten-oranges",
+        "string-compression", "string-integer-to-roman", "string-count-and-say",
+        "string-multiply-strings", "string-zigzag-conversion",
+        "dp-longest-common-subsequence", "dp-longest-common-substring",
+    }
     assert len(EASY_IDS) == 24
     assert len(MEDIUM_BATCH_1_IDS) == 21
+    assert len(MEDIUM_BATCH_2_IDS) == 21
     opted_in = _opted_in_ids(live_problem_bank)
-    assert opted_in == EASY_IDS | MEDIUM_BATCH_1_IDS | {"greedy-min-platforms"}
-    assert len(opted_in) == 46
+    assert opted_in == EASY_IDS | MEDIUM_BATCH_1_IDS | MEDIUM_BATCH_2_IDS | {"greedy-min-platforms"}
+    assert len(opted_in) == 67
     # Medium/Hard stay untouched this stage beyond Stage 2a's one exception
-    # and Stage 2c batch 1's 21.
+    # and Stage 2c batches 1 and 2's 21 each.
     for r in live_problem_bank._RAW:
         if r["id"] in EASY_IDS:
             assert r["difficulty"] == "Easy"
-        elif r["id"] in MEDIUM_BATCH_1_IDS:
+        elif r["id"] in MEDIUM_BATCH_1_IDS or r["id"] in MEDIUM_BATCH_2_IDS:
             assert r["difficulty"] == "Medium"
         elif r["id"] != "greedy-min-platforms":
             assert "target_tests" not in r
