@@ -64,6 +64,16 @@ _STATIC_BANK_ONLY_COMPANY_IDS = {
     c["id"] for c in COMPANIES
     if c.get("sections") and all(s.get("source") == "static_bank_only" for s in c["sections"])
 }
+
+# Companies with no interview phase at all (today: only TCS NQT). Checked at
+# the very top of /interview/start for BOTH start paths (attempt_id and
+# company_id) so a TCS attempt_id can no longer reach the generic interview
+# planner either -- before this (2026-10) nothing actually blocked that, it
+# just happened to never be exercised. Deliberately a separate set from
+# _STATIC_BANK_ONLY_COMPANY_IDS above: that one is about where OA questions
+# come from, this one is about whether a POST-OA interview exists; they
+# coincide for TCS today but are not the same concept.
+_NO_INTERVIEW_COMPANY_IDS = {"tcs-nqt"}
 from services import capgemini_tiers
 from services import tcs_tiers
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_recruitment_process import (
@@ -1870,6 +1880,22 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
         if not resume_doc:
             raise HTTPException(404, "Resume not found")
 
+    # Double-start guard (2026-10): OA and interview are independent rounds
+    # that can each be retaken any number of times, but not started TWICE
+    # at once -- a completed attempt never blocks a fresh one, only an
+    # already-"in_progress" one does. 409 with the existing attempt's id,
+    # matching this codebase's existing convention for "this already
+    # exists" conflicts (e.g. section_already_submitted below).
+    existing_attempt = await db.oa_attempts.find_one(
+        {"user_id": user["user_id"], "company_id": company["id"], "status": "in_progress"}, {"_id": 0},
+    )
+    if existing_attempt:
+        raise HTTPException(409, {
+            "code": "oa_already_in_progress",
+            "message": "An OA attempt for this company is already in progress.",
+            "attempt_id": existing_attempt["attempt_id"],
+        })
+
     # TCS static-bank feasibility pre-check (2026-10, zero-AI-calls pass):
     # BEFORE creating the attempt or charging a run, confirm the static bank
     # can actually fill one attempt's draw -- recycling means this never
@@ -3516,14 +3542,133 @@ async def deck_delete(card_id: str, user: Dict[str, Any] = Depends(require_user)
 # =============================================================================
 
 class StartInterviewIn(BaseModel):
-    attempt_id: str
+    attempt_id: Optional[str] = None
+    company_id: Optional[str] = None
+    use_designated: Optional[bool] = None
+    tier: Optional[str] = None
+
+
+# ---- OA/interview independence helpers (2026-10) ---------------------------
+# A user may now start an interview either from a specific OA attempt
+# (existing behaviour, untouched for current clients) or straight from a
+# company_id -- picking either the best tier an OA already cleared, or an
+# explicit tier -- with no OA attempt at all. These three helpers are shared
+# by both paths.
+
+_BEST_TIER_DISPATCH: Dict[str, Dict[str, Any]] = {
+    "capgemini": {"field": "capgemini_tier", "order": list(capgemini_tiers.TIER_ORDER), "none_values": set()},
+    "tcs-nqt": {
+        "field": "tcs_tier",
+        "order": [t for t in tcs_tiers.TIER_ORDER if t != tcs_tiers.NOT_QUALIFIED],
+        "none_values": {tcs_tiers.NOT_QUALIFIED},
+    },
+}
+
+
+async def best_cleared_tier(user_id: str, company_id: str) -> Optional[str]:
+    """The highest tier this user has EVER cleared for this company, across
+    every OA attempt (OA can be retaken any number of times, in any order,
+    independent of the interview) -- one helper with per-company dispatch,
+    so a future tier-routed company only adds a row to _BEST_TIER_DISPATCH
+    above. Returns None if the company has no tier concept at all (every
+    company besides Capgemini and TCS today), the user has no attempts for
+    it, or no attempt ever cleared a tier. TCS's own "not_qualified" tier
+    counts as no tier cleared, same as a missing/null capgemini_tier --
+    both are listed in `none_values` rather than ever appearing in `order`."""
+    cfg = _BEST_TIER_DISPATCH.get(company_id)
+    if not cfg:
+        return None
+    attempts = await db.oa_attempts.find(
+        {"user_id": user_id, "company_id": company_id}, {cfg["field"]: 1, "_id": 0},
+    ).to_list(1000)
+    cleared = {(a.get(cfg["field"]) or {}).get("tier") for a in attempts} - cfg["none_values"] - {None}
+    return next((tier for tier in cfg["order"] if tier in cleared), None)
+
+
+def _valid_interview_tiers(company_id: str) -> List[str]:
+    """Tier NAMES an explicit tier= may name for this company's interview --
+    empty for a company whose interview isn't tier-routed at all (every
+    company besides Capgemini today, including TCS, which has no interview
+    phase to route in the first place). Derived from is_spark/is_dave/
+    is_commit (so a tier core.py marks "not_designed" is correctly excluded
+    from this list too), never duplicated as a separate hardcoded list."""
+    if company_id != "capgemini":
+        return []
+    return [
+        t for t in capgemini_tiers.TIER_ORDER
+        if capgemini_interview.is_spark(t) or capgemini_interview.is_dave(t) or capgemini_commit.is_commit(t)
+    ]
+
+
+def _tier_start_fn(company_id: str, tier: Optional[str]):
+    """The Spark/Dave/Commit start function for this company+tier, or None
+    for a non-tier-routed company (generic interview) or an unrecognized/
+    not-yet-designed tier (also generic, or -- for the company_id start
+    path -- already rejected earlier as unknown_tier/no_designated_tier)."""
+    if company_id != "capgemini" or not tier:
+        return None
+    if capgemini_interview.is_spark(tier):
+        return _start_spark_interview
+    if capgemini_interview.is_dave(tier):
+        return _start_dave_interview
+    if capgemini_commit.is_commit(tier):
+        return _start_commit_interview
+    return None
+
+
+async def _latest_resume_for_company(user_id: str, company_id: str) -> Optional[dict]:
+    """The user's own most-recently-analyzed resume for this company --
+    ownership-scoped by user_id AND company_id, same philosophy as
+    /oa/start's (resume_id, user_id, company_id) lookup. A resume can be
+    re-analyzed for the same company any number of times; this picks
+    whichever analysis is newest."""
+    docs = await db.resumes.find({"user_id": user_id, "company_id": company_id}, {"_id": 0}).to_list(100)
+    if not docs:
+        return None
+    return max(docs, key=lambda d: d.get("created_at") or "")
+
+
+async def _existing_in_progress_interview(user_id: str, company_id: str) -> Optional[dict]:
+    """Double-start guard. A single top-level `status` field, kept in sync
+    with each tier's own state machine by _spark_persist/_dave_persist/
+    _commit_persist (and set directly by the generic flow), covers every
+    interview shape -- so one plain query is enough regardless of which
+    flow is running."""
+    return await db.interviews.find_one(
+        {"user_id": user_id, "company_id": company_id, "status": "in_progress"}, {"_id": 0},
+    )
 
 
 @api.post("/interview/start")
 async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends(require_user)):
-    attempt = await db.oa_attempts.find_one({"attempt_id": body.attempt_id, "user_id": user["user_id"]}, {"_id": 0})
-    if not attempt:
-        raise HTTPException(404, "Attempt not found")
+    attempt: Optional[dict] = None
+    attempt_id_to_store: Optional[str] = None
+    company: Optional[dict] = None
+
+    if body.attempt_id:
+        attempt = await db.oa_attempts.find_one({"attempt_id": body.attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+        if not attempt:
+            raise HTTPException(404, "Attempt not found")
+        company_id = attempt.get("company_id")
+        attempt_id_to_store = body.attempt_id
+    else:
+        if not body.company_id or bool(body.use_designated) == bool(body.tier):
+            raise HTTPException(400, {
+                "code": "invalid_start_body",
+                "message": "Provide either attempt_id, or company_id with exactly one of use_designated or tier.",
+            })
+        company = get_company(body.company_id)
+        if not company:
+            raise HTTPException(404, "Company not found")
+        company_id = company["id"]
+
+    # Company without an interview phase at all (today: TCS) -- checked
+    # before any entitlement/guard work, for both start paths.
+    if company_id in _NO_INTERVIEW_COMPANY_IDS:
+        raise HTTPException(400, {
+            "code": "interview_not_available",
+            "message": "This company does not have an interview phase yet.",
+        })
 
     # Free-tier lock: after the contest window ends, Free plan gets OA-only.
     if entitlements.free_is_oa_only(user):
@@ -3532,28 +3677,83 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
             "message": "The Interview + Report phases are unlocked on paid plans. Upgrade to continue.",
         })
 
-    resume_projects: List[dict] = []
-    if attempt.get("resume_id"):
-        # Ownership check (2026-10): scope by user_id too, not just
-        # resume_id -- a mismatch behaves exactly like "no resume at all"
-        # (the existing graceful path below), never leaking whether a
-        # resume with that id exists for someone else.
-        resume = await db.resumes.find_one(
-            {"resume_id": attempt["resume_id"], "user_id": user["user_id"]}, {"_id": 0}
-        )
-        if resume:
-            resume_projects = resume.get("analysis", {}).get("extracted_projects", []) or []
+    # Double-start guard: OA and interview can each be taken any number of
+    # times, in any order, but never started twice at once. A completed/
+    # timed-out interview never blocks a fresh one.
+    existing_interview = await _existing_in_progress_interview(user["user_id"], company_id)
+    if existing_interview:
+        raise HTTPException(409, {
+            "code": "interview_already_in_progress",
+            "message": "An interview for this company is already in progress.",
+            "interview_id": existing_interview["interview_id"],
+        })
+
+    if attempt is not None:
+        resume_projects: List[dict] = []
+        if attempt.get("resume_id"):
+            # Ownership check (2026-10): scope by user_id too, not just
+            # resume_id -- a mismatch behaves exactly like "no resume at all"
+            # (the existing graceful path below), never leaking whether a
+            # resume with that id exists for someone else.
+            resume = await db.resumes.find_one(
+                {"resume_id": attempt["resume_id"], "user_id": user["user_id"]}, {"_id": 0}
+            )
+            if resume:
+                resume_projects = resume.get("analysis", {}).get("extracted_projects", []) or []
+        # The server-side tier already computed on the attempt by the OA
+        # picks the flow -- never re-derived from, or overridable by, the
+        # client. null and every non-tier-routed company keep the generic
+        # plan below.
+        tier: Optional[str] = (attempt.get("capgemini_tier") or {}).get("tier")
+        tier_source = "oa_designated"
+    else:
+        # company_id path: a resume is REQUIRED (no attempt to fall back
+        # to). This is a new gate for this NEW path only -- the attempt_id
+        # path above keeps its existing graceful "no resume -> empty
+        # resume_projects" behaviour unchanged for current clients.
+        resume_doc = await _latest_resume_for_company(user["user_id"], company_id)
+        if not resume_doc:
+            raise HTTPException(400, {
+                "code": "resume_required",
+                "message": "Analyze a resume for this company before starting an interview.",
+            })
+        resume_projects = resume_doc.get("analysis", {}).get("extracted_projects", []) or []
+        if body.use_designated:
+            tier = await best_cleared_tier(user["user_id"], company_id)
+            if not tier or tier not in _valid_interview_tiers(company_id):
+                raise HTTPException(400, {
+                    "code": "no_designated_tier",
+                    "message": "No cleared OA tier was found for this company.",
+                })
+            tier_source = "oa_designated"
+        else:
+            tier = body.tier
+            if tier not in _valid_interview_tiers(company_id):
+                raise HTTPException(400, {
+                    "code": "unknown_tier",
+                    "message": f"'{tier}' is not a valid tier for this company.",
+                })
+            tier_source = "chosen"
+        # A minimal attempt-shaped dict: the three Spark/Dave/Commit start
+        # functions only ever read user_id/company_name/resume_id off it --
+        # see 1b's audit. There is no real OA attempt behind this interview
+        # at all, so attempt_id_to_store stays None.
+        attempt = {"user_id": user["user_id"], "company_name": company["name"], "resume_id": resume_doc["resume_id"]}
 
     # Capgemini Spark (text, 35 min) / Dave (text, 55 min) / Commit (text,
-    # 75 min): the server-side tier on the attempt picks the flow. null and
-    # every other company keep the plan below.
-    if capgemini_interview.is_spark((attempt.get("capgemini_tier") or {}).get("tier")):
-        return _capgemini_tag_view(await _start_spark_interview(attempt, body.attempt_id, resume_projects, user))
-    if capgemini_interview.is_dave((attempt.get("capgemini_tier") or {}).get("tier")):
-        return _capgemini_tag_view(await _start_dave_interview(attempt, body.attempt_id, resume_projects, user))
-    if capgemini_commit.is_commit((attempt.get("capgemini_tier") or {}).get("tier")):
-        return _capgemini_tag_view(await _start_commit_interview(attempt, body.attempt_id, resume_projects, user))
+    # 75 min) -- the tier resolved above (from the attempt's own OA-computed
+    # tier, from best_cleared_tier, or chosen explicitly) picks the flow.
+    start_fn = _tier_start_fn(company_id, tier)
+    if start_fn is not None:
+        result = await start_fn(attempt, attempt_id_to_store, resume_projects, user,
+                                 tier=tier, tier_source=tier_source, company_id=company_id)
+        return _capgemini_tag_view(result)
 
+    # Generic interview plan -- every non-tier-routed company. Only reachable
+    # via the attempt_id path: _valid_interview_tiers/_tier_start_fn return
+    # nothing for a company with no tier-routed interview, so the company_id
+    # path always raises unknown_tier/no_designated_tier before reaching here.
+    #
     # If the source company defines an interview_difficulty (e.g. "Core
     # Assessment (Default)" wants medium-skew DSA), pass that hint through
     # so the interviewer LLM raises the DSA bar for this company.
@@ -3601,7 +3801,8 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
     interview = {
         "interview_id": interview_id,
         "user_id": user["user_id"],
-        "attempt_id": body.attempt_id,
+        "attempt_id": attempt_id_to_store,
+        "company_id": company_id,
         "company_name": attempt["company_name"],
         "resume_id": attempt.get("resume_id"),
         "questions": questions,
@@ -3613,6 +3814,33 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
     await db.interviews.insert_one(interview)
     interview.pop("_id", None)
     return interview
+
+
+# Registered BEFORE /interview/{interview_id} -- route matching is order-
+# sensitive, and a path param would otherwise swallow the literal "list"
+# segment as an interview_id.
+@api.get("/interview/list")
+async def list_my_interviews(user: Dict[str, Any] = Depends(require_user)):
+    docs = await db.interviews.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(200)
+    docs = sorted(docs, key=lambda d: d.get("created_at") or "", reverse=True)
+    interviews = [{
+        "interview_id": d["interview_id"],
+        "company_id": d.get("company_id"),
+        "tier": d.get("tier"),
+        "tier_source": d.get("tier_source"),
+        "status": d.get("status"),
+        "created_at": d.get("created_at"),
+    } for d in docs]
+
+    companies_info = []
+    for c in COMPANIES:
+        companies_info.append({
+            "company_id": c["id"],
+            "interview_available": c["id"] not in _NO_INTERVIEW_COMPANY_IDS,
+            "designated_tier": await best_cleared_tier(user["user_id"], c["id"]),
+        })
+
+    return {"interviews": interviews, "companies": companies_info}
 
 
 @api.get("/interview/{interview_id}")
@@ -3997,6 +4225,19 @@ async def _handle_dsa_hint_message(interview: dict, tier: str, answer: str, curr
     return view
 
 
+async def _invalidate_cached_report(interview: dict) -> None:
+    """The interview has ended: any report cached for it was built without
+    it, so drop it -- the next report call regenerates with the interview
+    included. Invalidates by interview_id always, and ADDITIONALLY by
+    attempt_id when one exists (an interview started via company_id has
+    none -- `attempt_id: None` is deliberately never queried on its own,
+    since that would also match every OTHER no-OA interview's stale
+    None-valued attempt_id)."""
+    await db.reports.delete_many({"interview_id": interview["interview_id"], "user_id": interview["user_id"]})
+    if interview.get("attempt_id"):
+        await db.reports.delete_many({"attempt_id": interview["attempt_id"], "user_id": interview["user_id"]})
+
+
 async def _spark_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
     # Optimistic guard: a double-submitted answer cannot advance the stage twice.
     res = await db.interviews.update_one(
@@ -4006,9 +4247,7 @@ async def _spark_persist(interview: dict, expected_turn_count: int, changes: dic
     if res.matched_count == 0:
         raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
     if changes.get("status") in ("completed", "timed_out"):
-        # The interview has ended: any report cached for this attempt was built
-        # without it, so drop it. The next report call regenerates with the interview.
-        await db.reports.delete_many({"attempt_id": interview["attempt_id"], "user_id": interview["user_id"]})
+        await _invalidate_cached_report(interview)
 
 
 async def _spark_finish(interview: dict, now: float, timed_out: bool) -> None:
@@ -4050,16 +4289,20 @@ async def _spark_refresh(interview: dict) -> dict:
     return capgemini_interview.client_view(interview, now_utc().timestamp())
 
 
-async def _start_spark_interview(attempt: dict, attempt_id: str, resume_projects: List[dict],
-                                 user: Dict[str, Any]) -> dict:
+async def _start_spark_interview(attempt: dict, attempt_id: Optional[str], resume_projects: List[dict],
+                                 user: Dict[str, Any], *, tier: str = "spark", tier_source: str = "oa_designated",
+                                 company_id: str = "capgemini") -> dict:
     now = now_utc().timestamp()
     chosen = capgemini_interview.pick_project(resume_projects)
     interview = {
         "interview_id": new_id("intv"),
         "user_id": attempt["user_id"],
         "attempt_id": attempt_id,
+        "company_id": company_id,
         "company_name": attempt["company_name"],
         "resume_id": attempt.get("resume_id"),
+        "tier": tier,
+        "tier_source": tier_source,
         # Account name, validated (no email, no placeholder), used only for the
         # closing message. Never sent to a model.
         "candidate_name": capgemini_interview.usable_account_name(user.get("name"), user.get("email")),
@@ -4364,7 +4607,7 @@ async def _dave_persist(interview: dict, expected_turn_count: int, changes: dict
     if res.matched_count == 0:
         raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
     if changes.get("status") in ("completed", "timed_out"):
-        await db.reports.delete_many({"attempt_id": interview["attempt_id"], "user_id": interview["user_id"]})
+        await _invalidate_cached_report(interview)
 
 
 async def _dave_finish(interview: dict, now: float, timed_out: bool) -> None:
@@ -4403,16 +4646,20 @@ async def _dave_refresh(interview: dict) -> dict:
     return capgemini_interview.dave_client_view(interview, now_utc().timestamp())
 
 
-async def _start_dave_interview(attempt: dict, attempt_id: str, resume_projects: List[dict],
-                                user: Dict[str, Any]) -> dict:
+async def _start_dave_interview(attempt: dict, attempt_id: Optional[str], resume_projects: List[dict],
+                                user: Dict[str, Any], *, tier: str = "dave", tier_source: str = "oa_designated",
+                                company_id: str = "capgemini") -> dict:
     now = now_utc().timestamp()
     project1, project2 = capgemini_interview.dave_pick_two_projects(resume_projects)
     interview = {
         "interview_id": new_id("intv"),
         "user_id": attempt["user_id"],
         "attempt_id": attempt_id,
+        "company_id": company_id,
         "company_name": attempt["company_name"],
         "resume_id": attempt.get("resume_id"),
+        "tier": tier,
+        "tier_source": tier_source,
         "candidate_name": capgemini_interview.usable_account_name(user.get("name"), user.get("email")),
         "mode": "dave",
         "state": capgemini_interview.dave_new_state(now, capgemini_interview.dave_duration_seconds()),
@@ -4929,7 +5176,7 @@ async def _commit_persist(interview: dict, expected_turn_count: int, changes: di
     if res.matched_count == 0:
         raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
     if changes.get("status") in ("completed", "timed_out"):
-        await db.reports.delete_many({"attempt_id": interview["attempt_id"], "user_id": interview["user_id"]})
+        await _invalidate_cached_report(interview)
 
 
 async def _commit_finish(interview: dict, now: float, timed_out: bool) -> None:
@@ -4971,16 +5218,20 @@ async def _commit_refresh(interview: dict) -> dict:
     return capgemini_commit.commit_client_view(interview, now_utc().timestamp())
 
 
-async def _start_commit_interview(attempt: dict, attempt_id: str, resume_projects: List[dict],
-                                  user: Dict[str, Any]) -> dict:
+async def _start_commit_interview(attempt: dict, attempt_id: Optional[str], resume_projects: List[dict],
+                                  user: Dict[str, Any], *, tier: str = "commit", tier_source: str = "oa_designated",
+                                  company_id: str = "capgemini") -> dict:
     now = now_utc().timestamp()
     project1, project2 = capgemini_interview.dave_pick_two_projects(resume_projects)
     interview = {
         "interview_id": new_id("intv"),
         "user_id": attempt["user_id"],
         "attempt_id": attempt_id,
+        "company_id": company_id,
         "company_name": attempt["company_name"],
         "resume_id": attempt.get("resume_id"),
+        "tier": tier,
+        "tier_source": tier_source,
         "candidate_name": capgemini_interview.usable_account_name(user.get("name"), user.get("email")),
         "mode": "commit",
         "state": capgemini_commit.commit_new_state(now, capgemini_commit.commit_duration_seconds()),
@@ -6140,7 +6391,6 @@ async def oa_ai_assisted_self_review(attempt_id: str, section_key: str, body: Ai
 #  Final cross-phase report
 # =============================================================================
 
-@api.get("/report/{attempt_id}")
 def _build_tcs_template_report(attempt: dict, oa_summary: dict, review: dict) -> Dict[str, Any]:
     """Deterministic, template-based final-report narrative for TCS (2026-10
     zero-AI-calls pass) -- no call_json, ever, unless TCS_REPORT_USE_AI is
@@ -6188,59 +6438,78 @@ def _build_tcs_template_report(attempt: dict, oa_summary: dict, review: dict) ->
     }
 
 
-async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
-    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
-    if not attempt:
-        raise HTTPException(404, "Attempt not found")
+async def _finalize_interview_if_expired(interview_doc: Optional[dict]) -> Optional[dict]:
+    if interview_doc and interview_doc.get("mode") == "spark":
+        # An abandoned Spark interview is closed as timed out before the report reads it.
+        return await _spark_finalize_if_expired(interview_doc)
+    if interview_doc and interview_doc.get("mode") == "dave":
+        # Same idempotent timeout-finalization, for an abandoned Dave interview.
+        return await _dave_finalize_if_expired(interview_doc)
+    if interview_doc and interview_doc.get("mode") == "commit":
+        # Same idempotent timeout-finalization, for an abandoned Commit interview.
+        return await _commit_finalize_if_expired(interview_doc)
+    return interview_doc
 
-    resume_analysis = {}
-    if attempt.get("resume_id"):
-        r = await db.resumes.find_one({"resume_id": attempt["resume_id"]}, {"_id": 0})
+
+def _build_interview_summary(interview_doc: Optional[dict]) -> dict:
+    if not interview_doc:
+        return {"skipped": True}
+    answered = interview_doc.get("answers", [])
+    scores = [a["grade"].get("score", 0) for a in answered]
+    summary = {
+        "skipped": False,
+        "avg_score": round(sum(scores) / max(1, len(scores)), 1) if scores else 0,
+        "verdicts": [a["grade"].get("one_line_verdict", "") for a in answered],
+        "completed": interview_doc.get("status") == "completed",
+    }
+    if hints_enabled():
+        summary["hints_used"] = interview_doc.get("hints_used", 0)
+    return summary
+
+
+async def _build_final_report_doc(
+    *, attempt: Optional[dict], interview_doc: Optional[dict], user: Dict[str, Any],
+    company_name: str, cache_query: Dict[str, Any], extra_doc_fields: Dict[str, Any],
+) -> dict:
+    """Shared core for both GET /report/{attempt_id} (legacy, attempt-
+    anchored -- unchanged response shape for old data and old clients) and
+    GET /interview/{interview_id}/report (new, interview-anchored). `attempt`
+    is None for an interview started via company_id with no OA attempt at
+    all -- oa_summary then degrades to {"skipped": True}, the same shape
+    interview_summary already uses when there's no interview, rather than
+    calling oa_review against an attempt that doesn't exist."""
+    resume_analysis: Dict[str, Any] = {}
+    resume_id = (attempt or {}).get("resume_id") or (interview_doc or {}).get("resume_id")
+    if resume_id:
+        r = await db.resumes.find_one({"resume_id": resume_id}, {"_id": 0})
         if r:
             resume_analysis = r.get("analysis", {})
 
-    review = await oa_review(attempt_id, user)  # reuse
-    oa_summary = {
-        "verdict": review["verdict"],
-        "composite_score": review["composite_score"],
-        "weakest_section": review["weakest_section"],
-        "section_results": {k: {"score": v.get("score"), "passed": v.get("passed")} for k, v in review["section_results"].items()},
-    }
-
-    interview_doc = await db.interviews.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
-    if interview_doc and interview_doc.get("mode") == "spark":
-        # An abandoned Spark interview is closed as timed out before the report reads it.
-        interview_doc = await _spark_finalize_if_expired(interview_doc)
-    elif interview_doc and interview_doc.get("mode") == "dave":
-        # Same idempotent timeout-finalization, for an abandoned Dave interview.
-        interview_doc = await _dave_finalize_if_expired(interview_doc)
-    elif interview_doc and interview_doc.get("mode") == "commit":
-        # Same idempotent timeout-finalization, for an abandoned Commit interview.
-        interview_doc = await _commit_finalize_if_expired(interview_doc)
-    interview_summary = {"skipped": True}
-    if interview_doc:
-        answered = interview_doc.get("answers", [])
-        scores = [a["grade"].get("score", 0) for a in answered]
-        interview_summary = {
-            "skipped": False,
-            "avg_score": round(sum(scores) / max(1, len(scores)), 1) if scores else 0,
-            "verdicts": [a["grade"].get("one_line_verdict", "") for a in answered],
-            "completed": interview_doc.get("status") == "completed",
+    review = None
+    if attempt is not None:
+        review = await oa_review(attempt["attempt_id"], user)  # reuse
+        oa_summary = {
+            "verdict": review["verdict"],
+            "composite_score": review["composite_score"],
+            "weakest_section": review["weakest_section"],
+            "section_results": {k: {"score": v.get("score"), "passed": v.get("passed")} for k, v in review["section_results"].items()},
         }
-        if hints_enabled():
-            interview_summary["hints_used"] = interview_doc.get("hints_used", 0)
+    else:
+        oa_summary = {"skipped": True}
+
+    interview_doc = await _finalize_interview_if_expired(interview_doc)
+    interview_summary = _build_interview_summary(interview_doc)
 
     # A Spark, Dave or Commit attempt's report is neither read from nor
     # written to the cache while its interview is still open: the report
     # must not freeze without the interview.
     capgemini_interview_open = bool(interview_doc and interview_doc.get("mode") in ("spark", "dave", "commit")
                       and interview_doc["state"]["status"] == "in_progress")
-    cached = None if capgemini_interview_open else await db.reports.find_one(
-        {"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    cached = None if capgemini_interview_open else await db.reports.find_one(dict(cache_query), {"_id": 0})
     if cached:
         return cached
 
-    is_static_bank_only = attempt.get("company_id") in _STATIC_BANK_ONLY_COMPANY_IDS
+    is_static_bank_only = attempt is not None and attempt.get("company_id") in _STATIC_BANK_ONLY_COMPANY_IDS
     if is_static_bank_only and not tcs_report_use_ai_enabled():
         # TCS, TCS_REPORT_USE_AI off (the default): deterministic template,
         # never call_json. forbid_ai_calls() here is a tripwire, not load-
@@ -6249,36 +6518,87 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
         with forbid_ai_calls():
             report = _build_tcs_template_report(attempt, oa_summary, review)
     else:
+        fallback_verdict = oa_summary.get("verdict", "not_ready")
+        fallback_score = int(oa_summary["composite_score"] * 100) if "composite_score" in oa_summary else 0
+        fallback_weakest = (review or {}).get("weakest_section") or ""
         report = await call_json(
             "You are a senior career coach. Write ONE cohesive report. Return only strict JSON.",
-            final_report_prompt(attempt["company_name"], resume_analysis, oa_summary, interview_summary),
+            final_report_prompt(company_name, resume_analysis, oa_summary, interview_summary),
             model=SONNET,
             max_tokens=8000,  # longest, most synthesis-heavy output in the app; extra
                               # headroom above the 4096 default costs nothing if unused
         ) or {
-            "overall_verdict": oa_summary["verdict"],
-            "overall_score": int(oa_summary["composite_score"] * 100),
+            "overall_verdict": fallback_verdict,
+            "overall_score": fallback_score,
             "narrative": "Report generation failed; showing raw OA verdict.",
-            "weakest_dimension": review["weakest_section"] or "",
+            "weakest_dimension": fallback_weakest,
             "strongest_dimension": "",
             "next_steps": [],
         }
 
     doc = {
         "report_id": new_id("rep"),
-        "attempt_id": attempt_id,
         "user_id": user["user_id"],
-        "company_name": attempt["company_name"],
+        "company_name": company_name,
         "resume_analysis": resume_analysis,
         "oa_summary": oa_summary,
         "interview_summary": interview_summary,
         "report": report,
         "created_at": iso(now_utc()),
+        **extra_doc_fields,
     }
     if not capgemini_interview_open:
         await db.reports.insert_one(doc)
         doc.pop("_id", None)
     return doc
+
+
+@api.get("/report/{attempt_id}")
+async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Attempt not found")
+
+    interview_doc = await db.interviews.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+
+    return await _build_final_report_doc(
+        attempt=attempt, interview_doc=interview_doc, user=user, company_name=attempt["company_name"],
+        cache_query={"attempt_id": attempt_id, "user_id": user["user_id"]},
+        extra_doc_fields={
+            "attempt_id": attempt_id,
+            "interview_id": interview_doc.get("interview_id") if interview_doc else None,
+            # Legacy interview docs predating this field fall back to the
+            # attempt's own tier for display continuity; a brand-new
+            # interview always has its own "tier" already (see 1b).
+            "tier": (interview_doc or {}).get("tier") or (attempt.get("capgemini_tier") or {}).get("tier"),
+            "tier_source": (interview_doc or {}).get("tier_source"),
+        },
+    )
+
+
+@api.get("/interview/{interview_id}/report")
+async def interview_report(interview_id: str, user: Dict[str, Any] = Depends(require_user)):
+    interview_doc = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not interview_doc:
+        raise HTTPException(404, "Interview not found")
+
+    attempt = None
+    if interview_doc.get("attempt_id"):
+        attempt = await db.oa_attempts.find_one(
+            {"attempt_id": interview_doc["attempt_id"], "user_id": user["user_id"]}, {"_id": 0},
+        )
+
+    company_name = (attempt or {}).get("company_name") or interview_doc.get("company_name")
+    return await _build_final_report_doc(
+        attempt=attempt, interview_doc=interview_doc, user=user, company_name=company_name,
+        cache_query={"interview_id": interview_id, "user_id": user["user_id"]},
+        extra_doc_fields={
+            "attempt_id": interview_doc.get("attempt_id"),
+            "interview_id": interview_id,
+            "tier": interview_doc.get("tier") or ((attempt or {}).get("capgemini_tier") or {}).get("tier"),
+            "tier_source": interview_doc.get("tier_source"),
+        },
+    )
 
 
 # =============================================================================

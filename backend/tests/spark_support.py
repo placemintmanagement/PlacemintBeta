@@ -23,6 +23,18 @@ class _Result:
         self.modified_count = matched
 
 
+class _Cursor:
+    """Minimal stand-in for a Motor cursor -- only what this codebase's
+    `.find(...).to_list(n)` call sites need (no `.sort()`; callers that
+    need an order sort the plain list themselves in Python)."""
+
+    def __init__(self, docs):
+        self._docs = docs
+
+    async def to_list(self, length=None):
+        return list(self._docs if length is None else self._docs[:length])
+
+
 class _Coll:
     def __init__(self, docs=None):
         self.docs = docs if docs is not None else []
@@ -51,6 +63,9 @@ class _Coll:
             if self._match(d, query):
                 return json.loads(json.dumps(d, default=str))
         return None
+
+    def find(self, query=None, projection=None):
+        return _Cursor([json.loads(json.dumps(d, default=str)) for d in self.docs if self._match(d, query or {})])
 
     async def update_one(self, query, update):
         for d in self.docs:
