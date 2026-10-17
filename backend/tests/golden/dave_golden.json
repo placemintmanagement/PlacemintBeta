@@ -1,0 +1,561 @@
+{
+  "final_closing_message": "Thank you, Priya, for attending the interview. We will update you soon.",
+  "final_report": {
+    "attempt_id": "att1",
+    "company_name": "Capgemini",
+    "created_at": "2027-01-15T08:00:00+00:00",
+    "interview_id": "<NORMALIZED>",
+    "interview_summary": {
+      "avg_score": 100.0,
+      "completed": true,
+      "skipped": false,
+      "verdicts": [
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Project2 answer noted.",
+        "Project2 answer noted.",
+        "Solid approach.",
+        "Complexity noted.",
+        "Complexity noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "HR answer noted.",
+        "HR answer noted.",
+        "HR answer noted."
+      ]
+    },
+    "oa_summary": {
+      "composite_score": 0.5,
+      "section_results": {},
+      "verdict": "borderline",
+      "weakest_section": ""
+    },
+    "report": {
+      "narrative": "n",
+      "next_steps": [],
+      "overall_score": 50,
+      "overall_verdict": "borderline",
+      "strongest_dimension": "",
+      "weakest_dimension": ""
+    },
+    "report_id": "<NORMALIZED>",
+    "resume_analysis": {
+      "extracted_projects": [
+        {
+          "name": "Inventory tracker",
+          "one_line_summary": "Tracks stock levels for a shop.",
+          "tech_stack": "Python, SQLite"
+        },
+        {
+          "name": "Chat app",
+          "one_line_summary": "Realtime chat.",
+          "tech_stack": "Node"
+        },
+        {
+          "name": "Analytics dashboard",
+          "one_line_summary": "Shows usage metrics.",
+          "tech_stack": "React, Postgres"
+        }
+      ]
+    },
+    "tier": "dave",
+    "tier_source": "oa_designated",
+    "user_id": "u1"
+  },
+  "final_score": {
+    "cs_fundamentals": 1.0,
+    "dsa_complexity": 1.0,
+    "hr": 1.0,
+    "interview": 1.0,
+    "not_reached": [],
+    "project1_followups": 1.0,
+    "project2": 1.0
+  },
+  "final_status": "completed",
+  "questions": [
+    {
+      "id": "dave-intro",
+      "prompt": "Please introduce yourself in a few sentences: your background and what you are working on now.",
+      "stage": "intro"
+    },
+    {
+      "id": "dave-project1",
+      "prompt": "Your resume lists the project \"Chat app\". Walk me through what it does and which parts you built yourself.",
+      "stage": "project1"
+    },
+    {
+      "id": "dave-f1",
+      "prompt": "Follow-up 1: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "dave-f2",
+      "prompt": "Follow-up 2: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "dave-f3",
+      "prompt": "Follow-up 3: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "dave-f4",
+      "prompt": "Follow-up 4: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "dave-f5",
+      "prompt": "Follow-up 5: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "dave-f6",
+      "prompt": "Follow-up 6: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "dave-project2-overview",
+      "prompt": "Let's talk about another project on your resume: \"Inventory tracker\". Give me a brief overview of what it does.",
+      "stage": "project2"
+    },
+    {
+      "id": "dave-project2-role",
+      "prompt": "Project2 Q1: tell me more about that, specifically?",
+      "stage": "project2"
+    },
+    {
+      "id": "dave-project2-challenge",
+      "prompt": "Project2 Q2: tell me more about that, specifically?",
+      "stage": "project2"
+    },
+    {
+      "id": "dave-dsa",
+      "prompt": "Coding question: Is Graph Bipartite\n\nGiven an undirected graph with n nodes (0-indexed) and m edges, print 'YES' if its nodes can be split into two groups such that every edge connects nodes from different groups, else 'NO'.\n\nInput: Line 1: n m. Next m lines: 'u v' (omitted entirely if m is 0).\nOutput: YES or NO.\nConstraints: 1 <= n <= 10^4, 0 <= m <= 10^4\n\nYou may answer with the algorithm or with full code.",
+      "stage": "dsa"
+    },
+    {
+      "id": "dave-time-complexity",
+      "prompt": "What is the time complexity of your solution?",
+      "stage": "time_complexity"
+    },
+    {
+      "id": "dave-space-complexity",
+      "prompt": "What is the space complexity?",
+      "stage": "space_complexity"
+    },
+    {
+      "id": "dave-cs-0",
+      "prompt": "What is a constructor, and when is it called?",
+      "stage": "cs_fundamentals"
+    },
+    {
+      "id": "dave-cs-0-nudge",
+      "prompt": "Could you explain that a bit more, or give an example?",
+      "stage": "cs_fundamentals"
+    },
+    {
+      "id": "dave-cs-1",
+      "prompt": "Given this schema and sample data:\nemployees(id, name, manager_id)\n1, Asha, NULL\n2, Bilal, 1\n3, Chen, 1\n4, Deepa, 2\n\nWrite a query that returns each employee's name along with their manager's name (NULL if they have no manager).",
+      "stage": "cs_fundamentals"
+    },
+    {
+      "id": "dave-cs-1-nudge",
+      "prompt": "Could you explain that a bit more, or give an example?",
+      "stage": "cs_fundamentals"
+    },
+    {
+      "id": "dave-cs-2",
+      "prompt": "What is the difference between WHERE, GROUP BY, and HAVING?",
+      "stage": "cs_fundamentals"
+    },
+    {
+      "id": "dave-cs-2-nudge",
+      "prompt": "Could you explain that a bit more, or give an example?",
+      "stage": "cs_fundamentals"
+    },
+    {
+      "id": "dave-cs-3",
+      "prompt": "What is the difference between a primary key and a foreign key? And what do UNIQUE, NOT NULL and CHECK constraints each do?",
+      "stage": "cs_fundamentals"
+    },
+    {
+      "id": "dave-cs-3-nudge",
+      "prompt": "Could you explain that a bit more, or give an example?",
+      "stage": "cs_fundamentals"
+    },
+    {
+      "id": "dave-hr-0",
+      "prompt": "What motivates you to do your best work?",
+      "stage": "hr"
+    },
+    {
+      "id": "dave-hr-0-nudge",
+      "prompt": "Could you give me a specific example or a bit more detail?",
+      "stage": "hr"
+    },
+    {
+      "id": "dave-hr-1",
+      "prompt": "Describe a skill you're particularly proud of, and how you developed it.",
+      "stage": "hr"
+    },
+    {
+      "id": "dave-hr-1-nudge",
+      "prompt": "Could you give me a specific example or a bit more detail?",
+      "stage": "hr"
+    },
+    {
+      "id": "dave-hr-2",
+      "prompt": "Where do you see yourself professionally in the next few years?",
+      "stage": "hr"
+    },
+    {
+      "id": "dave-hr-2-nudge",
+      "prompt": "Could you give me a specific example or a bit more detail?",
+      "stage": "hr"
+    }
+  ],
+  "stage_transitions": [
+    "intro",
+    "project1",
+    "followups",
+    "project2",
+    "dsa",
+    "time_complexity",
+    "space_complexity",
+    "cs_fundamentals",
+    "hr",
+    "done"
+  ],
+  "stored_turns": [
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "Please introduce yourself in a few sentences: your background and what you are working on now.",
+      "question_id": "dave-intro",
+      "stage": "intro",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Your resume lists the project \"Chat app\". Walk me through what it does and which parts you built yourself.",
+      "question_id": "dave-project1",
+      "rejections": [],
+      "stage": "project1",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 1: what did you change, and why?",
+      "question_id": "dave-f1",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 2: what did you change, and why?",
+      "question_id": "dave-f2",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 3: what did you change, and why?",
+      "question_id": "dave-f3",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 4: what did you change, and why?",
+      "question_id": "dave-f4",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 5: what did you change, and why?",
+      "question_id": "dave-f5",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 6: what did you change, and why?",
+      "question_id": "dave-f6",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "Let's talk about another project on your resume: \"Inventory tracker\". Give me a brief overview of what it does.",
+      "question_id": "dave-project2-overview",
+      "stage": "project2",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "challenge_described": true,
+        "own_contribution": true
+      },
+      "question": "Project2 Q1: tell me more about that, specifically?",
+      "question_id": "dave-project2-role",
+      "rejections": [],
+      "stage": "project2",
+      "verdict": "Project2 answer noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "challenge_described": true,
+        "own_contribution": true
+      },
+      "question": "Project2 Q2: tell me more about that, specifically?",
+      "question_id": "dave-project2-challenge",
+      "rejections": [],
+      "stage": "project2",
+      "verdict": "Project2 answer noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "approach_0": true,
+        "approach_1": true,
+        "edge_cases_named": true
+      },
+      "question": "Coding question: Is Graph Bipartite\n\nGiven an undirected graph with n nodes (0-indexed) and m edges, print 'YES' if its nodes can be split into two groups such that every edge connects nodes from different groups, else 'NO'.\n\nInput: Line 1: n m. Next m lines: 'u v' (omitted entirely if m is 0).\nOutput: YES or NO.\nConstraints: 1 <= n <= 10^4, 0 <= m <= 10^4\n\nYou may answer with the algorithm or with full code.",
+      "question_id": "dave-dsa",
+      "rejections": [],
+      "stage": "dsa",
+      "verdict": "Solid approach."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "time_correct": true,
+        "time_stated": true
+      },
+      "question": "What is the time complexity of your solution?",
+      "question_id": "dave-time-complexity",
+      "rejections": [],
+      "stage": "time_complexity",
+      "verdict": "Complexity noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "space_correct": true,
+        "space_stated": true
+      },
+      "question": "What is the space complexity?",
+      "question_id": "dave-space-complexity",
+      "rejections": [],
+      "stage": "space_complexity",
+      "verdict": "Complexity noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What is a constructor, and when is it called?",
+      "question_id": "dave-cs-0",
+      "stage": "cs_fundamentals",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true,
+        "key_point_2": true
+      },
+      "question": "Could you explain that a bit more, or give an example?",
+      "question_id": "dave-cs-0-nudge",
+      "rejections": [],
+      "stage": "cs_fundamentals",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "Given this schema and sample data:\nemployees(id, name, manager_id)\n1, Asha, NULL\n2, Bilal, 1\n3, Chen, 1\n4, Deepa, 2\n\nWrite a query that returns each employee's name along with their manager's name (NULL if they have no manager).",
+      "question_id": "dave-cs-1",
+      "stage": "cs_fundamentals",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true,
+        "key_point_2": true
+      },
+      "question": "Could you explain that a bit more, or give an example?",
+      "question_id": "dave-cs-1-nudge",
+      "rejections": [],
+      "stage": "cs_fundamentals",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What is the difference between WHERE, GROUP BY, and HAVING?",
+      "question_id": "dave-cs-2",
+      "stage": "cs_fundamentals",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true,
+        "key_point_2": true
+      },
+      "question": "Could you explain that a bit more, or give an example?",
+      "question_id": "dave-cs-2-nudge",
+      "rejections": [],
+      "stage": "cs_fundamentals",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What is the difference between a primary key and a foreign key? And what do UNIQUE, NOT NULL and CHECK constraints each do?",
+      "question_id": "dave-cs-3",
+      "stage": "cs_fundamentals",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true,
+        "key_point_2": true
+      },
+      "question": "Could you explain that a bit more, or give an example?",
+      "question_id": "dave-cs-3-nudge",
+      "rejections": [],
+      "stage": "cs_fundamentals",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What motivates you to do your best work?",
+      "question_id": "dave-hr-0",
+      "stage": "hr",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_example_or_reason": true,
+        "direct_answer": true,
+        "reflection_or_outcome": true
+      },
+      "question": "Could you give me a specific example or a bit more detail?",
+      "question_id": "dave-hr-0-nudge",
+      "rejections": [],
+      "stage": "hr",
+      "verdict": "HR answer noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "Describe a skill you're particularly proud of, and how you developed it.",
+      "question_id": "dave-hr-1",
+      "stage": "hr",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_example_or_reason": true,
+        "direct_answer": true,
+        "reflection_or_outcome": true
+      },
+      "question": "Could you give me a specific example or a bit more detail?",
+      "question_id": "dave-hr-1-nudge",
+      "rejections": [],
+      "stage": "hr",
+      "verdict": "HR answer noted."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "Where do you see yourself professionally in the next few years?",
+      "question_id": "dave-hr-2",
+      "stage": "hr",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_example_or_reason": true,
+        "direct_answer": true,
+        "reflection_or_outcome": true
+      },
+      "question": "Could you give me a specific example or a bit more detail?",
+      "question_id": "dave-hr-2-nudge",
+      "rejections": [],
+      "stage": "hr",
+      "verdict": "HR answer noted."
+    }
+  ],
+  "tier": "dave"
+}
