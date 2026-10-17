@@ -179,6 +179,148 @@ async def sample_static_with_reuse(
     return items + reused, len(reused), short - len(reused)
 
 
+_DIFFICULTIES = ("Easy", "Medium", "Hard")
+# Single-hop fallback target for a bucket that can't fill its own target
+# even with full reuse. Medium falls back to Hard (arbitrary but fixed,
+# for determinism); Easy/Hard both fall back to Medium, their one shared
+# neighbor.
+_NEAREST_DIFFICULTY = {"Easy": "Medium", "Hard": "Medium", "Medium": "Hard"}
+
+
+def _bucket_targets(count: int, difficulty_mix: Dict[str, float]) -> Dict[str, int]:
+    """Largest-remainder rounding of `count` into Easy/Medium/Hard integer
+    targets from `difficulty_mix`'s fractional weights -- always sums to
+    exactly `count` (e.g. count=25, mix 0.40/0.45/0.15 -> Easy 10, Medium
+    11, Hard 4). Ties in the fractional remainder are broken by
+    `_DIFFICULTIES`'s own order (Easy, then Medium, then Hard), so the
+    same (count, mix) always rounds the same way."""
+    if count <= 0:
+        return {d: 0 for d in _DIFFICULTIES}
+    raw = {d: count * difficulty_mix.get(d, 0.0) for d in _DIFFICULTIES}
+    targets = {d: int(raw[d]) for d in _DIFFICULTIES}
+    remainder = count - sum(targets.values())
+    order = sorted(_DIFFICULTIES, key=lambda d: raw[d] - targets[d], reverse=True)
+    for d in order[:remainder]:
+        targets[d] += 1
+    return targets
+
+
+async def _draw_bucket(
+    user_id: str, topic: str, difficulty: Optional[str], want: int, excluded: set,
+    rng: Optional[random.Random],
+) -> Tuple[List[dict], int]:
+    """Up to `want` distinct (topic[, difficulty]) docs not already in
+    `excluded`. `difficulty=None` means "any difficulty" -- used only by
+    this module's own topic-wide safety net below, never by a bucket
+    itself. Unseen docs are drawn RANDOMLY (the actual fix for
+    sample_static's cursor/insertion-order bug -- every fresh user
+    otherwise gets the identical first N questions, confirmed by direct
+    experiment); any shortfall is then filled by this user's least-
+    recently-seen docs of the same query, unchanged from
+    sample_static_with_reuse's own recycling logic. Does not call
+    mark_seen -- the caller marks everything actually served, once, at
+    the end, so a document that's fetched here but then discarded (e.g.
+    superseded by a later, more successful bucket) is never wrongly
+    marked seen."""
+    if want <= 0 or _db is None:
+        return [], 0
+    base_query: Dict[str, Any] = {"topic": topic}
+    if difficulty is not None:
+        base_query["difficulty"] = difficulty
+    seen = await get_seen_ids(user_id, topic)
+    unseen_docs = await _db.mcq_static_bank.find(
+        {**base_query, "question_id": {"$nin": list(seen | excluded)}}
+    ).to_list(length=None)
+    (rng.shuffle if rng is not None else random.shuffle)(unseen_docs)
+    picked_docs = unseen_docs[:want]
+    items = [_item_from_doc(d) for d in picked_docs]
+    short = want - len(items)
+    if short <= 0:
+        return items, 0
+    got_ids = {it["id"] for it in items}
+    doc = await _db.mcq_static_bank_seen.find_one({"user_id": user_id, "topic": topic}) or {}
+    seen_at = doc.get("seen_at") or {}
+    candidates = await _db.mcq_static_bank.find(
+        {**base_query, "question_id": {"$nin": list(got_ids | excluded)}}
+    ).to_list(length=None)
+    if rng is not None:
+        rng.shuffle(candidates)
+    candidates.sort(key=lambda d: seen_at.get(d["question_id"], ""))
+    reuse_docs = candidates[:short]
+    reused_items = [_item_from_doc(d) for d in reuse_docs]
+    return items + reused_items, len(reused_items)
+
+
+async def sample_static_difficulty_weighted_with_reuse(
+    user_id: str, topic: str, count: int, difficulty_mix: Dict[str, float],
+    rng: Optional[random.Random] = None,
+) -> Tuple[List[dict], int, int, Dict[str, Any]]:
+    """TCS-only opt-in draw (2026-10, "make the TCS draw genuinely random
+    and difficulty-aware" pass) -- draws within Easy/Medium/Hard buckets
+    per `difficulty_mix` (e.g. {"Easy": 0.40, "Medium": 0.45, "Hard":
+    0.15}) instead of a flat pool. Completely new and additive:
+    sample_static, sample_static_with_reuse and sample_mixed_static_part
+    (every other company's path, Capgemini included) are untouched and
+    stay byte-identical to before.
+
+    Within each bucket: unseen docs are drawn randomly, then any shortfall
+    is filled by this user's least-recently-seen docs of that SAME
+    difficulty (recycling behavior unchanged from sample_static_with_reuse
+    -- "keep the existing least-recently-seen recycling for students who
+    have seen everything"). If a bucket's own total bank is still too
+    small even with full reuse, the remaining shortfall falls back to the
+    nearest difficulty bucket (see _NEAREST_DIFFICULTY) and is recorded in
+    the returned metadata; if that ALSO can't cover it, a final safety net
+    draws from the topic's entire pool regardless of difficulty (the same
+    guarantee sample_static_with_reuse already gives) -- so this function
+    never returns fewer questions than the flat draw would for the same
+    bank size.
+
+    Returns (items, reused, unfilled, metadata). `metadata` = {
+      "bucket_targets": {"Easy": n, "Medium": n, "Hard": n},
+      "fallback": [{"from": "Hard", "to": "Medium", "count": n}, ...],
+    }."""
+    if _db is None or count <= 0:
+        return [], 0, max(count, 0), {"bucket_targets": {}, "fallback": []}
+
+    targets = _bucket_targets(count, difficulty_mix)
+    fallback_log: List[Dict[str, Any]] = []
+    all_items: List[dict] = []
+    picked_ids: set = set()
+    reused_total = 0
+
+    for d in _DIFFICULTIES:
+        want = targets[d]
+        if want <= 0:
+            continue
+        items, reused = await _draw_bucket(user_id, topic, d, want, picked_ids, rng)
+        all_items.extend(items)
+        picked_ids.update(it["id"] for it in items)
+        reused_total += reused
+        short = want - len(items)
+        if short > 0:
+            nxt = _NEAREST_DIFFICULTY[d]
+            extra, extra_reused = await _draw_bucket(user_id, topic, nxt, short, picked_ids, rng)
+            if extra:
+                all_items.extend(extra)
+                picked_ids.update(it["id"] for it in extra)
+                reused_total += extra_reused
+                fallback_log.append({"from": d, "to": nxt, "count": len(extra)})
+
+    unfilled_so_far = count - len(all_items)
+    if unfilled_so_far > 0:
+        extra, extra_reused = await _draw_bucket(user_id, topic, None, unfilled_so_far, picked_ids, rng)
+        if extra:
+            all_items.extend(extra)
+            picked_ids.update(it["id"] for it in extra)
+            reused_total += extra_reused
+            fallback_log.append({"from": "bucketed", "to": "any", "count": len(extra)})
+
+    unfilled = max(count - len(all_items), 0)
+    await mark_seen(user_id, topic, [it["id"] for it in all_items])
+    return all_items, reused_total, unfilled, {"bucket_targets": targets, "fallback": fallback_log}
+
+
 async def topic_bank_size(topic: str) -> int:
     """Total question count for `topic`, seen or unseen, across every
     candidate -- used for feasibility checks (e.g. TCS's static-only draw)

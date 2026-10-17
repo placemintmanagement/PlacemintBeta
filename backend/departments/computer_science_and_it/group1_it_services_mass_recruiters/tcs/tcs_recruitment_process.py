@@ -68,11 +68,14 @@ detail added later must be tagged INTERPOLATED or PUBLIC-SOURCE-ONLY,
 never written as a plain fact, until real evidence exists.
 """
 from __future__ import annotations
+import logging
 import random
 from typing import Any, Dict, List, Optional, Tuple
 
 from companies import get_company
 from banks import mcq_static_bank, problem_bank
+
+logger = logging.getLogger(__name__)
 
 # PART B OPTIONAL (companies.py config flag: "part_b_optional": True on the
 # tcs-nqt entry, "optional": True on the "advanced" and "coding" sections).
@@ -206,14 +209,49 @@ class TCSBankBlockedError(RuntimeError):
 # Foundation section key -> its one canonical topic (no sibling in-section).
 _FOUNDATION_TOPIC = {"numerical": "aptitude", "verbal": "verbal", "reasoning": "reasoning"}
 
+# TCS-ONLY difficulty-weighted draw (2026-10, "make the TCS draw genuinely
+# random and difficulty-aware" pass). ESTIMATE, TCS does not publish a
+# difficulty mix anywhere -- both constants below are this project's own
+# estimate, not a sourced fact; tagged per this file's own TAGGING
+# CONVENTION. Passed to mcq_static_bank.sample_static_difficulty_weighted_
+# with_reuse (itself new and additive) via _draw_one_topic_weighted below.
+# Every other company's draw path (mcq_static_bank.sample_static /
+# sample_mixed_static_part, Capgemini included) never sees either constant.
+TCS_FOUNDATION_DIFFICULTY_MIX = {"Easy": 0.40, "Medium": 0.45, "Hard": 0.15}  # ESTIMATE, TCS does not publish a difficulty mix
+TCS_ADVANCED_DIFFICULTY_MIX = {"Easy": 0.15, "Medium": 0.45, "Hard": 0.40}  # ESTIMATE, TCS does not publish a difficulty mix
+
 
 async def _draw_one_topic(attempt_id: str, user_id: str, topic: str, count: int) -> Tuple[List[dict], int]:
-    """One seeded, recycle-aware, never-live draw. Returns (items, unfilled)."""
+    """One seeded, recycle-aware, never-live draw -- the original flat
+    (not difficulty-aware) path. Kept exactly as it was: still used by
+    this module's own direct-call tests, and available as a fallback
+    primitve. Returns (items, unfilled)."""
     if count <= 0:
         return [], 0
     rng = random.Random(f"tcs-static:{attempt_id}:{topic}")
     items, _reused, unfilled = await mcq_static_bank.sample_static_with_reuse(user_id, topic, count, rng=rng)
     return items, unfilled
+
+
+async def _draw_one_topic_weighted(
+    attempt_id: str, user_id: str, topic: str, count: int, difficulty_mix: Dict[str, float],
+) -> Tuple[List[dict], int, Dict[str, Any]]:
+    """Same seeding convention as _draw_one_topic, but through the
+    difficulty-weighted draw. This is the path draw_tcs_foundation_and_
+    advanced actually uses in production; _draw_one_topic itself is no
+    longer called from here. Returns (items, unfilled, draw_metadata)."""
+    if count <= 0:
+        return [], 0, {"bucket_targets": {}, "fallback": []}
+    rng = random.Random(f"tcs-static:{attempt_id}:{topic}")
+    items, _reused, unfilled, metadata = await mcq_static_bank.sample_static_difficulty_weighted_with_reuse(
+        user_id, topic, count, difficulty_mix, rng=rng,
+    )
+    if metadata.get("fallback"):
+        logger.info(
+            "TCS difficulty-weighted draw fell back for attempt %s topic %s: %s",
+            attempt_id, topic, metadata["fallback"],
+        )
+    return items, unfilled, metadata
 
 
 async def draw_tcs_foundation_and_advanced(
@@ -243,7 +281,9 @@ async def draw_tcs_foundation_and_advanced(
             out[key] = sec["questions"]
             continue
         count = sec.get("count", 0)
-        items, unfilled = await _draw_one_topic(attempt_id, user_id, topic, count)
+        items, unfilled, _metadata = await _draw_one_topic_weighted(
+            attempt_id, user_id, topic, count, TCS_FOUNDATION_DIFFICULTY_MIX,
+        )
         if unfilled > 0:
             bank_size = await mcq_static_bank.topic_bank_size(topic)
             raise TCSBankBlockedError(key, topic, count, bank_size)
@@ -268,7 +308,9 @@ async def draw_tcs_foundation_and_advanced(
         drawn: Dict[str, List[dict]] = {}
         shortfalls: Dict[str, int] = {}
         for tkey, _tname, tcount in needs:
-            items, unfilled = await _draw_one_topic(attempt_id, user_id, tkey, tcount)
+            items, unfilled, _metadata = await _draw_one_topic_weighted(
+                attempt_id, user_id, tkey, tcount, TCS_ADVANCED_DIFFICULTY_MIX,
+            )
             drawn[tkey] = items
             shortfalls[tkey] = unfilled
         # Sibling-borrow: if one sub-topic came up short, pull the shortfall
