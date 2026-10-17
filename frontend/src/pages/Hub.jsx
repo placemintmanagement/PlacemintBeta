@@ -183,6 +183,27 @@ export default function Hub() {
             <CardTitle style={{ fontSize: 22 }}>{company.name} online assessment</CardTitle>
             <p className="mt-2 mb-5" style={BODY}>{company.time_minutes} minutes · {company.sections?.length ?? 0} sections.</p>
 
+            {/* Round breakdown (moved here from CompanyDetail, 2026-10 --
+                belongs next to the actual "Start the OA" decision, not on
+                the page before it). */}
+            {company.sections?.length > 0 && (
+              <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {company.sections.map((s, i) => (
+                  <Card key={s.key} padding="16px 18px" style={{ borderRadius: 16, boxShadow: "none", border: "1px solid rgba(7,59,67,0.08)" }}>
+                    <div className="flex items-center gap-3">
+                      <div className="grid place-items-center shrink-0 font-display font-semibold" style={{ width: 32, height: 32, borderRadius: 10, background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 14 }}>{i + 1}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-display font-semibold" style={{ fontSize: 15, color: "var(--pm-ink)" }}>{s.name}</div>
+                        <div className="mt-0.5" style={META}>
+                          {s.type} • {s.count} q • {s.minutes} min • cutoff {Math.round(s.cutoff * 100)}%{s.negative ? " • negative marking" : ""}
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+
             {oaResultChip && (
               <div data-testid={TID.hubOaResult} className="mb-5 p-4 rounded-[16px]" style={{ background: "var(--pm-sky)" }}>
                 <div className="pm-eyebrow" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>{oaResultChip.label}</div>

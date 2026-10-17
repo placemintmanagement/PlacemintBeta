@@ -32,8 +32,20 @@ jest.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
 }));
 
-const CAPGEMINI = { id: "capgemini", name: "Capgemini", time_minutes: 181, sections: [1, 2, 3] };
-const TCS = { id: "tcs-nqt", name: "TCS NQT", time_minutes: 190, sections: [1, 2, 3, 4, 5] };
+const CG_SECTIONS = [
+  { key: "round1", name: "Round 1: Communication Assessment", type: "capgemini_round1", count: 28, minutes: 60, cutoff: 0.5 },
+  { key: "round2a", name: "Round 2: AI Literacy", type: "capgemini_round2_ai_literacy", count: 20, minutes: 20, cutoff: 0.5 },
+  { key: "round2b", name: "Round 2: Technical Assessment", type: "capgemini_round2_technical", count: 20, minutes: 25, cutoff: 0.5 },
+];
+const CAPGEMINI = { id: "capgemini", name: "Capgemini", time_minutes: 181, sections: CG_SECTIONS };
+const TCS_SECTIONS = [
+  { key: "numerical", name: "Numerical Ability", type: "mcq", count: 20, minutes: 25, cutoff: 0.5 },
+  { key: "verbal", name: "Verbal Ability", type: "mcq", count: 25, minutes: 25, cutoff: 0.5 },
+  { key: "reasoning", name: "Reasoning Ability", type: "mcq", count: 20, minutes: 25, cutoff: 0.5 },
+  { key: "advanced", name: "Advanced Quantitative + Reasoning Ability", type: "mcq", count: 15, minutes: 25, cutoff: 0.5 },
+  { key: "coding", name: "Advanced Coding", type: "coding", count: 2, minutes: 90, cutoff: 0.5 },
+];
+const TCS = { id: "tcs-nqt", name: "TCS NQT", time_minutes: 190, sections: TCS_SECTIONS };
 
 function mockLoad({ company = CAPGEMINI, interviews = [], companies = [] } = {}) {
   api.get.mockImplementation((url) => {
@@ -65,6 +77,22 @@ test("OA: no attempt yet shows Start the OA, no result panel", async () => {
   await waitFor(() => expect(screen.getByTestId("hub-oa-start-btn")).toBeInTheDocument());
   expect(screen.getByTestId("hub-oa-start-btn")).toHaveTextContent("Start the OA");
   expect(screen.queryByTestId("hub-oa-result")).not.toBeInTheDocument();
+});
+
+test("OA: the round-by-round breakdown (moved here from CompanyDetail) renders inside the OA card", async () => {
+  mockLoad({ companies: [] });
+  renderHub();
+  await waitFor(() => expect(screen.getByTestId("hub-oa-start-btn")).toBeInTheDocument());
+  const oaCard = screen.getByTestId(TID.hubOaCard);
+  for (const s of CG_SECTIONS) {
+    expect(within(oaCard).getByText(s.name)).toBeInTheDocument();
+  }
+  // Each {expr} in that line is wrapped by the dev build's instrumentation
+  // in its own <span>, so getByText's direct-text-node matcher can't see
+  // the joined string -- use real textContent instead.
+  expect(oaCard.textContent).toMatch(/capgemini_round1.*28 q.*60 min.*cutoff 50%/);
+  // Not shown in the interview card.
+  expect(within(screen.getByTestId(TID.hubInterviewCard)).queryByText(CG_SECTIONS[0].name)).not.toBeInTheDocument();
 });
 
 test("OA: clicking Start, discovering it's already in progress, shows Continue and navigates", async () => {
@@ -115,7 +143,10 @@ test("OA: a TCS result uses the existing 'does not publish cutoffs' wording", as
 // ---- OA skill cluster (2026-10: moved here from CompanyDetail, which
 // used to start the OA directly and bypass the hub entirely) --------------
 
-const WIPRO = { id: "wipro", name: "Wipro", time_minutes: 90, sections: [1], cluster_options: ["Java", "Python"] };
+const WIPRO = {
+  id: "wipro", name: "Wipro", time_minutes: 90, cluster_options: ["Java", "Python"],
+  sections: [{ key: "aptitude", name: "Quant + Reasoning", type: "mcq", count: 15, minutes: 15, cutoff: 0.5 }],
+};
 
 test("OA: a company with cluster_options shows the picker and requires a choice before starting", async () => {
   mockLoad({ company: WIPRO, companies: [] });

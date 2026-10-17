@@ -85,23 +85,6 @@ export default function CompanyDetail() {
           </div>
         </div>
 
-        {/* Sections list */}
-        <section className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {company.sections.map((s, i) => (
-            <Card key={s.key} padding="20px 22px">
-              <div className="flex items-center gap-4">
-                <div className="grid place-items-center shrink-0 font-display font-semibold" style={{ width: 40, height: 40, borderRadius: 12, background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 16 }}>{i+1}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{s.name}</div>
-                  <div className="mt-1" style={META}>
-                    {s.type} • {s.count} q • {s.minutes} min • cutoff {Math.round(s.cutoff*100)}%{s.negative ? " • negative marking" : ""}
-                  </div>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </section>
-
         {/* Resume upload + start */}
         <section className="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <form onSubmit={uploadResume} className="flex">

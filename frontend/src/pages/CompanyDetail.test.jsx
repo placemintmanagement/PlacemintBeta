@@ -87,3 +87,9 @@ test("no cluster picker is rendered on this page anymore -- it moved to the hub"
   await screen.findByTestId(TID.startOaBtn);
   expect(screen.queryByText(/Pick your skill cluster/i)).not.toBeInTheDocument();
 });
+
+test("the round-by-round breakdown is no longer rendered here -- it moved to the hub's OA card", async () => {
+  renderPage();
+  await screen.findByTestId(TID.startOaBtn);
+  expect(screen.queryByText("Section 1")).not.toBeInTheDocument();
+});
