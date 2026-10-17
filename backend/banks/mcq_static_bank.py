@@ -98,19 +98,44 @@ async def mark_seen(user_id: str, topic: str, question_ids: List[str]) -> None:
     )
 
 
-async def sample_static(user_id: str, topic: str, count: int) -> List[dict]:
+async def sample_static(user_id: str, topic: str, count: int, rng: Optional[random.Random] = None) -> List[dict]:
     """Return up to `count` static-bank questions for `topic`, excluding
     ones this user has already been served, and mark them seen immediately.
     Returns FEWER than `count` (down to zero) if the bank is exhausted for
     this user — callers are expected to backfill the shortfall from the
-    live pool, never treat this as a hard failure."""
+    live pool, never treat this as a hard failure.
+
+    The unseen pool is drawn RANDOMLY (2026-10 fix for every non-TCS
+    caller, e.g. Capgemini -- before this, the query had no sort/shuffle
+    at all, so every fresh user got the identical first `count` questions
+    in Mongo's own cursor/insertion order; confirmed by direct experiment
+    against the live bank). Only `question_id`s are fetched for the
+    shuffle -- never the full documents for the whole topic -- then
+    exactly the picked `count` full documents are fetched by id, and
+    re-ordered to match the shuffled pick (an `$in` query doesn't promise
+    to preserve that order).
+
+    `rng`: optional seeded random.Random for a reproducible draw (e.g.
+    keyed on an attempt_id, same convention as sample_static_with_reuse's
+    own `rng`). Omitted, a FRESH random.Random() is used -- genuinely
+    random every call, deliberately never the shared global `random`
+    module, so no caller's state can leak in or out."""
     if _db is None or count <= 0:
         return []
     seen = await get_seen_ids(user_id, topic)
-    cursor = _db.mcq_static_bank.find({"topic": topic, "question_id": {"$nin": list(seen)}}).limit(count)
-    docs = await cursor.to_list(length=count)
-    if not docs:
+    id_docs = await _db.mcq_static_bank.find(
+        {"topic": topic, "question_id": {"$nin": list(seen)}},
+        {"question_id": 1, "_id": 0},
+    ).to_list(length=None)
+    candidate_ids = [d["question_id"] for d in id_docs]
+    if not candidate_ids:
         return []
+    (rng or random.Random()).shuffle(candidate_ids)
+    picked_ids = candidate_ids[:count]
+    docs_by_id = {
+        d["question_id"]: d
+        for d in await _db.mcq_static_bank.find({"question_id": {"$in": picked_ids}}).to_list(length=len(picked_ids))
+    }
     items = [{
         "id": d["question_id"],
         "prompt": d["prompt"],
@@ -120,7 +145,7 @@ async def sample_static(user_id: str, topic: str, count: int) -> List[dict]:
         "difficulty": d.get("difficulty", "Medium"),
         "chart": d.get("chart"),
         "svg_diagram": d.get("svg_diagram"),
-    } for d in docs]
+    } for qid in picked_ids if (d := docs_by_id.get(qid)) is not None]
     await mark_seen(user_id, topic, [it["id"] for it in items])
     return items
 
@@ -147,17 +172,23 @@ async def sample_static_with_reuse(
     `reused` counts questions repeated from earlier draws, `unfilled` counts
     slots the bank could not fill at all (the bank is smaller than `count`).
 
-    `rng`: optional seeded random.Random, used ONLY to break ties among
-    candidates sharing the same seen_at (most commonly: several questions
-    with no recorded seen_at at all, sorting as equally "oldest") -- shuffled
-    BEFORE the stable least-recently-seen sort, so the sort key still
-    dominates and only genuine ties get randomized, deterministically, per
-    the given seed. Omitting `rng` (the default) leaves candidates in
-    whatever order Mongo's cursor returned them -- byte-identical to this
-    function's behavior before `rng` existed, for every existing caller."""
+    `rng`: optional seeded random.Random, used for BOTH this function's own
+    unseen-first draw (passed straight through to sample_static -- 2026-10:
+    now genuinely random there too, not Mongo cursor order, see its own
+    docstring) AND to break ties among reuse candidates sharing the same
+    seen_at (most commonly: several questions with no recorded seen_at at
+    all, sorting as equally "oldest") -- shuffled BEFORE the stable least-
+    recently-seen sort, so the sort key still dominates and only genuine
+    ties get randomized. Omitting `rng` (the default, 2026-10 change) now
+    means a FRESH, unseeded random.Random() is used for each of those two
+    shuffles -- every caller (Capgemini and everyone else) gets a
+    genuinely random draw; it is simply no longer reproducible across
+    calls without passing an explicit rng. (The one caller that always
+    passes a seeded rng -- TCS's own draw -- is unaffected in spirit: it
+    was already deterministic and stays deterministic.)"""
     if _db is None or count <= 0:
         return [], 0, max(count, 0)
-    items = await sample_static(user_id, topic, count)
+    items = await sample_static(user_id, topic, count, rng=rng)
     short = count - len(items)
     if short <= 0:
         return items, 0, 0
@@ -167,11 +198,10 @@ async def sample_static_with_reuse(
     candidates = await _db.mcq_static_bank.find(
         {"topic": topic, "question_id": {"$nin": list(served)}}
     ).to_list(length=None)
-    if rng is not None:
-        rng.shuffle(candidates)
+    (rng or random.Random()).shuffle(candidates)
     # Oldest last-served first. A question with no recorded time was served
     # before seen_at existed, so it sorts as oldest. Python's sort is
-    # stable, so a prior rng.shuffle only affects the order WITHIN ties.
+    # stable, so the shuffle above only affects the order WITHIN ties.
     candidates.sort(key=lambda d: seen_at.get(d["question_id"], ""))
     reused_docs = candidates[:short]
     reused = [_item_from_doc(d) for d in reused_docs]

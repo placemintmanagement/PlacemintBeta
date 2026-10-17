@@ -28,6 +28,7 @@ Covers:
 Uses mongomock_motor's AsyncMongoMockClient (real Mongo query semantics)
 for the new function's own tests -- same convention as test_tcs_zero_ai.py.
 """
+import ast
 import asyncio
 import random
 import subprocess
@@ -51,6 +52,24 @@ REPO_ROOT = BACKEND_DIR.parent
 BASELINE_COMMIT = "a60c25e"
 
 
+def _function_source_at_baseline(func_name: str) -> str:
+    """Extract one function's exact source text from the baseline commit's
+    copy of mcq_static_bank.py, via ast (not inspect.getsource) -- the
+    baseline module is exec'd from a string with a synthetic filename, and
+    inspect.getsource can't retrieve source for that (no linecache entry,
+    no real file on disk), raising OSError. ast.get_source_segment works
+    directly on the source string, no import/linecache needed."""
+    src = subprocess.check_output(
+        ["git", "show", f"{BASELINE_COMMIT}:backend/banks/mcq_static_bank.py"],
+        cwd=REPO_ROOT, text=True,
+    )
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+            return ast.get_source_segment(src, node)
+    raise LookupError(f"{func_name!r} not found in mcq_static_bank.py at {BASELINE_COMMIT}")
+
+
 def _mcq_doc(topic, qid, difficulty="Medium"):
     return {
         "topic": topic, "question_id": qid, "prompt": f"{topic} question {qid}",
@@ -72,39 +91,60 @@ def _fresh_db():
     return db
 
 
-# ---- 1. Before this change, the draw was cursor/insertion order -----------
+# ---- 1. Before the follow-up fix, the draw was cursor/insertion order -----
+# (pinned to BASELINE_COMMIT, which predates the "fix it for Capgemini and
+# every other non-TCS caller" follow-up -- these two tests now document
+# the OLD behavior via that frozen copy, since the LIVE module's sample_
+# static/sample_static_with_reuse deliberately no longer behave this way.)
 
-def test_sample_static_has_no_shuffle_anywhere_in_its_source():
-    """Pinned regression for the "is it actually random" question: confirms
-    sample_static's only query is topic + $nin-seen + .limit(count), with
-    no .sort()/shuffle call in the function at all -- i.e. whatever order
-    Mongo's cursor returns (insertion order in practice) is exactly what
-    gets served. If this ever gains a shuffle, this test should be updated
-    deliberately, not silently pass through unnoticed."""
-    import inspect
-    src = inspect.getsource(mcq_static_bank.sample_static)
+def test_sample_static_had_no_shuffle_at_the_baseline_commit():
+    """Pinned regression for the "was it ever actually random" question:
+    at BASELINE_COMMIT, sample_static's only query was topic + $nin-seen +
+    .limit(count), with no .sort()/shuffle call anywhere -- i.e. whatever
+    order Mongo's cursor returned (insertion order in practice) was
+    exactly what got served. Confirmed independently by a direct, read-
+    only experiment against the live bank (10 simulated fresh users all
+    got the identical first-20 sequence)."""
+    src = _function_source_at_baseline("sample_static")
     assert "shuffle" not in src
     assert "sort(" not in src
     assert ".limit(count)" in src
 
 
-def test_sample_static_with_reuse_only_shuffles_the_reuse_tiebreak_not_the_main_draw():
-    """The OLD flat draw (still used by every non-TCS caller, and by TCS's
-    own _draw_one_topic primitive) randomizes ties in the recycle/backfill
-    path only -- the primary "serve unseen" call (sample_static) it makes
-    internally is never shuffled. This is exactly why every fresh user
-    used to get the identical first N questions (confirmed by direct
-    experiment against the live bank, read-only, separately from this
-    suite)."""
-    import inspect
-    src = inspect.getsource(mcq_static_bank.sample_static_with_reuse)
-    # The one shuffle CALL that exists is gated on `rng is not None` and
-    # only touches `candidates` (the reuse pool), never the sample_static()
-    # call that serves the unseen-first items. (Counting ".shuffle(" rather
-    # than the bare word "shuffle" since the docstring's own prose mentions
-    # "shuffle" twice without calling it.)
+def test_sample_static_with_reuse_only_shuffled_the_reuse_tiebreak_at_baseline():
+    """At BASELINE_COMMIT, sample_static_with_reuse randomized ties in the
+    recycle/backfill path only (gated on `rng is not None`) -- the primary
+    "serve unseen" call (sample_static) it made internally was never
+    shuffled, by either function. This is exactly why every fresh user
+    used to get the identical first N questions."""
+    src = _function_source_at_baseline("sample_static_with_reuse")
     assert src.count(".shuffle(") == 1
     assert "rng.shuffle(candidates)" in src
+    assert "if rng is not None:" in src  # the old gate: no rng => no shuffle at all
+
+
+# ---- 1b. After the fix: the LIVE module's draw is genuinely random -------
+
+def test_sample_static_now_shuffles_the_unseen_pool():
+    """2026-10 follow-up fix landed: sample_static now shuffles its
+    candidate ids (fetched by projection, not full documents) before
+    picking `count`, and no longer relies on .limit() for truncation at
+    all (truncation happens in Python after the shuffle)."""
+    import inspect
+    src = inspect.getsource(mcq_static_bank.sample_static)
+    assert ".shuffle(" in src
+    assert "$in" in src  # the second, picked-ids-only fetch
+    assert ".limit(" not in src  # truncation moved to Python-side slicing
+
+
+def test_sample_static_with_reuse_now_shuffles_unconditionally_when_rng_omitted():
+    """sample_static_with_reuse's own reuse-tiebreak shuffle is no longer
+    gated on `rng is not None` -- omitting `rng` now means a FRESH
+    random.Random() is used, not "skip the shuffle entirely"."""
+    import inspect
+    src = inspect.getsource(mcq_static_bank.sample_static_with_reuse)
+    assert "if rng is not None:" not in src
+    assert "(rng or random.Random()).shuffle(candidates)" in src
 
 
 # ---- 2. Every other company's path is untouched, byte-identical -----------
@@ -149,6 +189,10 @@ def _matches(doc, query):
         if isinstance(cond, dict) and "$nin" in cond:
             if value in cond["$nin"]:
                 return False
+        elif isinstance(cond, dict) and "$in" in cond:
+            # sample_static's 2026-10 rewrite fetches its picked ids back via $in.
+            if value not in cond["$in"]:
+                return False
         else:
             if value != cond:
                 return False
@@ -159,7 +203,8 @@ class _Coll:
     def __init__(self, docs=None):
         self.docs = docs if docs is not None else []
 
-    def find(self, query=None):
+    def find(self, query=None, projection=None):
+        # `projection` accepted and ignored -- always returns whole docs.
         return _Cursor([dict(d) for d in self.docs if _matches(d, query or {})])
 
     async def find_one(self, query=None):
@@ -218,10 +263,15 @@ def _seen_doc(user_id, topic, seen_ids):
     ("reasoning", 6, 3),
     ("verbal", 25, 10),  # TCS-shaped count, but via Capgemini/everyone's GENERIC path
 ])
-def test_capgemini_path_sample_mixed_static_part_byte_identical_to_baseline(
+def test_capgemini_path_sample_mixed_static_part_same_contract_as_baseline(
     seed, topic, count, seen_n, baseline_mcq_static_bank, live_mcq_static_bank,
 ):
+    """No longer byte-identical BY DESIGN (this follow-up task's whole
+    point: Capgemini's draw is now genuinely randomized) -- the CONTRACT
+    still must match exactly: same total served, same live_n, no
+    duplicates, every id genuinely from this topic's bank."""
     bank_docs = _bank_docs(topic, 40)
+    bank_ids = {d["question_id"] for d in bank_docs}
     seen_ids = [f"{topic}-{i}" for i in range(seen_n)]
     user_id = "u-regress"
 
@@ -232,13 +282,16 @@ def test_capgemini_path_sample_mixed_static_part_byte_identical_to_baseline(
     )
 
     live_mcq_static_bank.init(_FakeDb([dict(d) for d in bank_docs], [_seen_doc(user_id, topic, seen_ids)]))
-    random.seed(seed)
+    random.seed(seed)  # inert for the live module now -- kept only so baseline's own draw is reproducible
     after_items, after_live_n = asyncio.run(
         live_mcq_static_bank.sample_mixed_static_part(user_id, topic, count)
     )
 
-    assert [it["id"] for it in before_items] == [it["id"] for it in after_items]
-    assert before_live_n == after_live_n
+    after_ids = [it["id"] for it in after_items]
+    assert len(after_items) == len(before_items)
+    assert len(set(after_ids)) == len(after_ids)
+    assert set(after_ids).issubset(bank_ids)
+    assert after_live_n == before_live_n
 
 
 @pytest.mark.parametrize("seed", [0, 7, 2026])
@@ -246,10 +299,14 @@ def test_capgemini_path_sample_mixed_static_part_byte_identical_to_baseline(
     ("oops", 10, 6, 0),   # Capgemini R2 Technical's real shape -- fresh
     ("dbms", 5, 8, 2),    # returning candidate + shortfall -- exercises reuse
 ])
-def test_capgemini_path_sample_static_with_reuse_byte_identical_to_baseline(
+def test_capgemini_path_sample_static_with_reuse_same_contract_as_baseline(
     seed, topic, bank_n, count, seen_n, baseline_mcq_static_bank, live_mcq_static_bank,
 ):
+    """Same deliberate relaxation as the sample_mixed_static_part test
+    above: exact sequence is no longer expected to match; reused/unfilled
+    counts, total served, and no-duplicates must."""
     bank_docs = _bank_docs(topic, bank_n)
+    bank_ids = {d["question_id"] for d in bank_docs}
     seen_ids = [f"{topic}-{i}" for i in range(seen_n)]
     user_id = "u-regress"
 
@@ -265,8 +322,11 @@ def test_capgemini_path_sample_static_with_reuse_byte_identical_to_baseline(
         live_mcq_static_bank.sample_static_with_reuse(user_id, topic, count)
     )
 
-    assert [it["id"] for it in b_items] == [it["id"] for it in a_items]
-    assert (b_reused, b_unfilled) == (a_reused, a_unfilled)
+    a_ids = [it["id"] for it in a_items]
+    assert len(a_items) == len(b_items)
+    assert len(set(a_ids)) == len(a_ids)
+    assert set(a_ids).issubset(bank_ids)
+    assert (a_reused, a_unfilled) == (b_reused, b_unfilled)
 
 
 def test_new_function_is_additive_not_a_modification(baseline_mcq_static_bank, live_mcq_static_bank):

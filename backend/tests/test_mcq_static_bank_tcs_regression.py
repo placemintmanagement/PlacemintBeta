@@ -10,11 +10,24 @@
   3. topic_bank_size() is a brand-new function, not a modification -- no
      existing caller can be affected by it.
 
-These tests prove (1) and (2) are behavior-preserving for every OTHER
-company's actual call shape, the same way test_problem_bank_tcs_regression.py
-already proved problem_bank.py's "easy" branch is additive: load HEAD's copy
-of mcq_static_bank.py into a throwaway module, run both HEAD and the live
-module against byte-identical fake-Mongo state, and diff the output.
+UPDATE (2026-10, "make the Capgemini/non-TCS draw genuinely random" pass):
+sample_static() was rewritten to actually shuffle its unseen pool before
+picking `count` (previously pure Mongo cursor/insertion order -- confirmed
+dead code for randomness: every fresh user got the identical first `count`
+questions). Tests 1 and 2 below used to assert the EXACT id sequence was
+byte-identical between HEAD and the live module -- that assumption is now
+WRONG BY DESIGN (the whole point of this change is that the draw differs
+run to run without an explicit rng), so both were rewritten to assert the
+new contract instead: same total count, same live_n, no duplicates, and
+every drawn id actually belongs to the real candidate pool. The fake
+collection's `_matches`/`find()` also gained `$in` and a `projection` param,
+since sample_static's new id-then-fetch-by-id design needs both.
+
+These tests prove the NEW contract holds for every OTHER company's actual
+call shape (same technique test_problem_bank_tcs_regression.py established:
+load HEAD's copy of mcq_static_bank.py into a throwaway module, run both
+HEAD and the live module against byte-identical fake-Mongo state, and
+compare).
 
 Real call shapes exercised (grepped from server.py / companies.py at
 write-time):
@@ -98,6 +111,11 @@ def _matches(doc, query):
         if isinstance(cond, dict) and "$nin" in cond:
             if value in cond["$nin"]:
                 return False
+        elif isinstance(cond, dict) and "$in" in cond:
+            # Added for sample_static's 2026-10 randomization rewrite: its
+            # second query fetches the picked ids back via $in.
+            if value not in cond["$in"]:
+                return False
         elif isinstance(cond, dict) and "$exists" in cond:
             has = key in doc
             if has != cond["$exists"]:
@@ -111,7 +129,9 @@ class _Coll:
     def __init__(self, docs=None):
         self.docs = docs if docs is not None else []
 
-    def find(self, query=None):
+    def find(self, query=None, projection=None):
+        # `projection` accepted (and ignored -- always returns whole docs)
+        # for sample_static's new id-only projection query.
         return _Cursor([dict(d) for d in self.docs if _matches(d, query or {})])
 
     async def find_one(self, query=None):
@@ -175,16 +195,22 @@ def _seen_doc(user_id: str, topic: str, seen_ids: list) -> dict:
     ("reasoning", 6, 3),   # returning candidate, partial seen history
     ("verbal", 25, 10),    # TCS-shaped count, but via the GENERIC path
 ])
-def test_sample_mixed_static_part_byte_identical_to_head(
+def test_sample_mixed_static_part_same_contract_as_head(
     seed, topic, count, seen_n, head_mcq_static_bank, live_mcq_static_bank,
 ):
+    """HEAD and the live module no longer draw the identical SEQUENCE (the
+    live module's sample_static is now genuinely randomized -- that's the
+    deliberate point of this change), but the CONTRACT must match: same
+    total served, same live_n backfill need, no duplicates, and every
+    served id genuinely belongs to this topic's bank."""
     bank_docs = _bank_docs(topic, 40)
+    bank_ids = {d["question_id"] for d in bank_docs}
     seen_ids = [f"{topic}-{i}" for i in range(seen_n)]
     user_id = "u-regress"
 
     head_db = _FakeDb([dict(d) for d in bank_docs], [_seen_doc(user_id, topic, seen_ids)])
     head_mcq_static_bank.init(head_db)
-    random.seed(seed)
+    random.seed(seed)  # inert for the live module now (fresh random.Random() per call), kept for head's own sake
     before_items, before_live_n = asyncio.run(
         head_mcq_static_bank.sample_mixed_static_part(user_id, topic, count)
     )
@@ -196,12 +222,13 @@ def test_sample_mixed_static_part_byte_identical_to_head(
         live_mcq_static_bank.sample_mixed_static_part(user_id, topic, count)
     )
 
-    before_ids = [it["id"] for it in before_items]
     after_ids = [it["id"] for it in after_items]
-    assert before_ids == after_ids, (
-        f"topic={topic} count={count} seed={seed}: HEAD gave {before_ids}, current gives {after_ids}"
+    assert len(after_items) == len(before_items), (
+        f"topic={topic} count={count} seed={seed}: HEAD served {len(before_items)}, live served {len(after_items)}"
     )
-    assert before_live_n == after_live_n
+    assert len(set(after_ids)) == len(after_ids), "duplicate ids within one draw"
+    assert set(after_ids).issubset(bank_ids), "drew an id that doesn't belong to this topic's bank"
+    assert after_live_n == before_live_n
 
 
 # ---- 2. sample_static_with_reuse -- Capgemini R2 Technical's real shape ---
@@ -212,12 +239,17 @@ def test_sample_mixed_static_part_byte_identical_to_head(
     ("dbms", 5, 8, 2),     # returning candidate + shortfall -- exercises reuse
     ("cn", 3, 6, 0),       # bank smaller than count even unseen -- unfilled path
 ])
-def test_sample_static_with_reuse_byte_identical_to_head_when_rng_omitted(
+def test_sample_static_with_reuse_same_contract_as_head_when_rng_omitted(
     seed, topic, bank_n, count, seen_n, head_mcq_static_bank, live_mcq_static_bank,
 ):
+    """Same deliberate relaxation as test_sample_mixed_static_part_same_
+    contract_as_head above: the live module's draw is no longer the exact
+    same SEQUENCE as HEAD's (genuinely randomized now), but reused/unfilled
+    counts, total served, and no-duplicates must still match exactly."""
     # Every real production call site (the static_only branch of
     # _generate_extra_topics) omits `rng` -- exactly like this test.
     bank_docs = _bank_docs(topic, bank_n)
+    bank_ids = {d["question_id"] for d in bank_docs}
     seen_ids = [f"{topic}-{i}" for i in range(seen_n)]
     user_id = "u-regress"
 
@@ -235,13 +267,14 @@ def test_sample_static_with_reuse_byte_identical_to_head_when_rng_omitted(
         live_mcq_static_bank.sample_static_with_reuse(user_id, topic, count)
     )
 
-    b_ids = [it["id"] for it in b_items]
     a_ids = [it["id"] for it in a_items]
-    assert b_ids == a_ids, (
+    assert len(a_items) == len(b_items), (
         f"topic={topic} bank_n={bank_n} count={count} seed={seed}: "
-        f"HEAD gave {b_ids}, current gives {a_ids}"
+        f"HEAD served {len(b_items)}, live served {len(a_items)}"
     )
-    assert (b_reused, b_unfilled) == (a_reused, a_unfilled)
+    assert len(set(a_ids)) == len(a_ids), "duplicate ids within one draw"
+    assert set(a_ids).issubset(bank_ids), "drew an id that doesn't belong to this topic's bank"
+    assert (a_reused, a_unfilled) == (b_reused, b_unfilled)
 
 
 # ---- 3. new functions are additive, not replacements ----------------------
@@ -267,14 +300,21 @@ def test_sample_static_signature_gained_only_an_optional_trailing_rng_kwarg():
 # ---- 4. the mongomock_motor .limit() bug this diff actually fixes ---------
 
 def test_limit_bug_this_diff_fixes_is_real_and_fixed(live_mcq_static_bank):
-    """Documents WHY sample_static() needed .limit() at all: without it,
-    mongomock_motor's to_list(length=count) silently ignores `length` and
-    returns the WHOLE matching set, over-filling the section. This is a
-    test-double bug (real motor/pymongo honors to_list(length=...)
-    correctly), but since this repo's new TCS test suite uses
-    mongomock_motor, the fix had to land in production code. Guard against
-    ever regressing it by asserting the live code path actually caps the
-    result at `count` even when the fake cursor WOULD over-return."""
+    """Originally documented WHY sample_static() needed .limit() at all:
+    without it, mongomock_motor's to_list(length=count) silently ignores
+    `length` and returns the WHOLE matching set, over-filling the section.
+
+    UPDATE (2026-10 randomization rewrite): sample_static() no longer
+    calls .limit() anywhere -- it fetches ALL unseen ids (deliberately
+    unbounded), shuffles them client-side, and takes `count` in Python,
+    then fetches exactly those `count` ids back by `$in`. So it is now
+    structurally immune to this exact mongomock_motor quirk regardless of
+    whether the backing store honors `to_list(length=...)`: the final
+    result size is bounded by Python's own slicing, not by what Mongo
+    chooses to return. This test (with `_BuggyColl.find` updated to accept
+    the new `projection` arg sample_static's id-only query passes) is kept
+    as a regression guard for that structural guarantee, not for .limit()
+    itself."""
     class _OverReturningCursor:
         """Simulates the exact mongomock_motor bug: to_list(length=N) returns
         more than N if .limit() was never called first."""
@@ -295,7 +335,9 @@ def test_limit_bug_this_diff_fixes_is_real_and_fixed(live_mcq_static_bank):
         def __init__(self, docs):
             self.docs = docs
 
-        def find(self, query=None):
+        def find(self, query=None, projection=None):
+            # Deliberately ignores `query` too (same as before this
+            # update) -- always over-returns every doc, unfiltered.
             return _OverReturningCursor([dict(d) for d in self.docs])
 
         async def find_one(self, query=None):
@@ -314,5 +356,6 @@ def test_limit_bug_this_diff_fixes_is_real_and_fixed(live_mcq_static_bank):
     items = asyncio.run(live_mcq_static_bank.sample_static("u1", "aptitude", 3))
     assert len(items) == 3, (
         f"expected exactly 3 items (the requested count) even with an "
-        f"over-returning cursor, got {len(items)} -- the .limit(count) fix regressed"
+        f"over-returning, query-ignoring cursor, got {len(items)}"
     )
+    assert len({it["id"] for it in items}) == 3

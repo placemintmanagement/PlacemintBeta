@@ -30,6 +30,11 @@ def _matches(doc, query):
         if isinstance(cond, dict) and "$nin" in cond:
             if value in cond["$nin"]:
                 return False
+        elif isinstance(cond, dict) and "$in" in cond:
+            # Added for sample_static's 2026-10 randomization rewrite: it
+            # now fetches its final `count` documents by a $in-on-id query.
+            if value not in cond["$in"]:
+                return False
         elif value != cond:
             return False
     return True
@@ -39,7 +44,9 @@ class _Coll:
     def __init__(self, docs=None):
         self.docs = docs if docs is not None else []
 
-    def find(self, query=None):
+    def find(self, query=None, projection=None):
+        # `projection` accepted (and ignored -- this fake always returns
+        # whole docs) for sample_static's new id-only projection query.
         return _Cursor([d for d in self.docs if _matches(d, query or {})])
 
     async def find_one(self, query=None):
