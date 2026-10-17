@@ -5,6 +5,7 @@ import api from "../api";
 import Header from "../components/Header";
 import { SendHorizontal } from "lucide-react";
 import { PageShell, SectionLabel, PageTitle, Card, Button } from "../components/shared";
+import { parseErrorDetail } from "../lib/apiError";
 
 // Capgemini Spark interview (text, 35 minutes). Everything time-related comes
 // from the server: the deadline and "server_now" arrive with every response, so
@@ -130,13 +131,27 @@ export default function SparkInterview({ interviewId, initial }) {
       // messages below. It never touches the problem statement.
       if (data.notice?.text) toast.message(data.notice.text);
     } catch (err) {
-      const code = err.response?.data?.detail?.code;
-      if (code === "time_up" || code === "stale_question" || code === "stale_turn" || code === "interview_closed"
-          || code === "turn_in_progress") {
-        toast.message(err.response?.data?.detail?.message || "Refreshing the interview");
+      // parseErrorDetail, not a bare err.response?.data?.detail?.code read:
+      // api.js's shared response interceptor stringifies any object-shaped
+      // `detail` into JSON text (see src/lib/apiError.js's own docstring),
+      // so `.code` was never actually readable here against the REAL
+      // interceptor in production -- only in tests that mock api.js
+      // directly, bypassing it. parseErrorDetail recovers the original
+      // {code, message, ...} object either way.
+      const detail = parseErrorDetail(err);
+      if (detail.code === "interview_already_in_progress" && detail.interview_id) {
+        // This interview was superseded by another one already in
+        // progress (e.g. started from a second tab) -- go to the real one
+        // instead of showing a stale/broken view of this one.
+        navigate(`/interview/${detail.interview_id}`);
+        return;
+      }
+      if (detail.code === "time_up" || detail.code === "stale_question" || detail.code === "stale_turn"
+          || detail.code === "interview_closed" || detail.code === "turn_in_progress") {
+        toast.message(detail.message || "Refreshing the interview");
         await refresh();
       } else {
-        toast.error(typeof err.response?.data?.detail === "string" ? err.response.data.detail : "Failed to submit");
+        toast.error(detail.message || "Failed to submit");
       }
     } finally {
       setSubmitting(false);

@@ -23,6 +23,12 @@ jest.mock("sonner", () => ({
   toast: { error: jest.fn(), message: jest.fn(), success: jest.fn() },
 }));
 
+const mockNavigate = jest.fn();
+jest.mock("react-router-dom", () => ({
+  ...jest.requireActual("react-router-dom"),
+  useNavigate: () => mockNavigate,
+}));
+
 const BASE_VIEW = {
   interview_id: "intv1",
   mode: "commit",
@@ -79,6 +85,23 @@ test.each(["turn_in_progress", "stale_turn", "stale_question", "time_up", "inter
     expect(textarea.value).toBe(typed); // never cleared on this path
   }
 );
+
+test("interview_already_in_progress sends the student to the existing interview, no broken message", async () => {
+  api.post.mockRejectedValueOnce({
+    response: { data: { detail: { code: "interview_already_in_progress", message: "already running", interview_id: "intv-live" } } },
+  });
+
+  const user = userEvent.setup();
+  renderSpark();
+  const textarea = screen.getByTestId("spark-answer-input");
+  await user.type(textarea, "A clear, specific answer about my own part and the trade-off I handled.");
+  await user.click(screen.getByTestId("spark-submit-answer"));
+
+  await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/interview/intv-live"));
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(toast.message).not.toHaveBeenCalled();
+  expect(api.get).not.toHaveBeenCalled(); // no silent refetch of the superseded interview
+});
 
 test("an unrelated error (not one of the race/timeout codes) still shows an error toast", async () => {
   api.post.mockRejectedValueOnce({ response: { data: { detail: "Answer is empty" } } });
