@@ -187,19 +187,21 @@ export default function Hub() {
                 belongs next to the actual "Start the OA" decision, not on
                 the page before it). */}
             {company.sections?.length > 0 && (
-              <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="mb-5 space-y-2">
                 {company.sections.map((s, i) => (
-                  <Card key={s.key} padding="16px 18px" style={{ borderRadius: 16, boxShadow: "none", border: "1px solid rgba(7,59,67,0.08)" }}>
-                    <div className="flex items-center gap-3">
-                      <div className="grid place-items-center shrink-0 font-display font-semibold" style={{ width: 32, height: 32, borderRadius: 10, background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 14 }}>{i + 1}</div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-display font-semibold" style={{ fontSize: 15, color: "var(--pm-ink)" }}>{s.name}</div>
-                        <div className="mt-0.5" style={META}>
-                          {s.type} • {s.count} q • {s.minutes} min • cutoff {Math.round(s.cutoff * 100)}%{s.negative ? " • negative marking" : ""}
-                        </div>
+                  <div
+                    key={s.key}
+                    className="rounded-[16px] p-4 flex items-center gap-3"
+                    style={{ border: "1.5px solid var(--pm-border-control)", background: "var(--pm-white)" }}
+                  >
+                    <div className="grid place-items-center shrink-0 font-display font-semibold" style={{ width: 32, height: 32, borderRadius: 10, background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 14 }}>{i + 1}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-display font-semibold" style={{ fontSize: 16, color: "var(--pm-ink)" }}>{s.name}</div>
+                      <div className="mt-1" style={META}>
+                        {s.type} • {s.count} q • {s.minutes} min • cutoff {Math.round(s.cutoff * 100)}%{s.negative ? " • negative marking" : ""}
                       </div>
                     </div>
-                  </Card>
+                  </div>
                 ))}
               </div>
             )}
