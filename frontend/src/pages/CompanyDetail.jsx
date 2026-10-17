@@ -3,7 +3,6 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../api";
 import Header from "../components/Header";
-import { useAuth } from "../auth";
 import { TID } from "../testIds";
 import { Clock, ArrowRight, ChevronLeft, TriangleAlert, FileText, CheckCircle2, XCircle, Sparkles, Check, X } from "lucide-react";
 import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } from "../components/shared";
@@ -24,16 +23,13 @@ function scoreColor(score) {
 
 export default function CompanyDetail() {
   const { companyId } = useParams();
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [company, setCompany] = useState(null);
   const [role, setRole] = useState("Software Engineer");
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [starting, setStarting] = useState(false);
   const [resumeId, setResumeId] = useState(null);
   const [analysis, setAnalysis] = useState(null);
-  const [cluster, setCluster] = useState(null);
 
   useEffect(() => {
     api.get(`/companies/${companyId}`).then(r => setCompany(r.data)).catch(() => toast.error("Company not found"));
@@ -61,17 +57,12 @@ export default function CompanyDetail() {
     } finally { setUploading(false); }
   };
 
-  const startOA = async () => {
-    if (!user) { navigate("/login"); return; }
-    if (company.cluster_options?.length && !cluster) { toast.error("Pick a skill cluster first."); return; }
-    setStarting(true);
-    try {
-      const { data } = await api.post("/oa/start", { company_id: companyId, resume_id: resumeId, cluster });
-      navigate(`/oa/${data.attempt_id}`);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || err.message || "Could not start OA");
-    } finally { setStarting(false); }
-  };
+  // Starting the OA (and picking a skill cluster, for the one company that
+  // has cluster_options) now lives entirely on the hub -- this page's job
+  // is "get a resume on file" (optional) and "go to the hub," not starting
+  // anything itself. Previously this called POST /oa/start directly and
+  // skipped the hub page entirely, which meant Interview was unreachable
+  // from here.
 
   if (!company) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Loading…</div></PageShell></div>;
 
@@ -138,34 +129,12 @@ export default function CompanyDetail() {
                   Start the full {company.name} run, with real section timing.
                 </div>
                 <div className="mt-3" style={{ fontSize: 15, color: "rgba(255,255,255,0.8)" }}>Total: {company.time_minutes} minutes · {company.sections.length} sections</div>
-                {company.cluster_options?.length > 0 && (
-                  <div className="mt-6">
-                    <SectionLabel onDark>Pick your skill cluster</SectionLabel>
-                    <div className="flex gap-2 flex-wrap">
-                      {company.cluster_options.map((opt) => (
-                        <button
-                          key={opt}
-                          type="button"
-                          data-testid={TID.clusterOption(opt)}
-                          aria-pressed={cluster === opt}
-                          onClick={() => setCluster(opt)}
-                          className="font-display font-semibold rounded-full px-4 py-2 transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-lime)]"
-                          style={cluster === opt
-                            ? { fontSize: 15, background: "var(--pm-lime)", color: "var(--pm-ink)", border: "1.5px solid var(--pm-lime)" }
-                            : { fontSize: 15, background: "transparent", color: "var(--pm-white)", border: "1.5px solid rgba(255,255,255,0.5)" }}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
               <div>
-                <Button variant="lime" onClick={startOA} disabled={starting} className="w-full">
-                  {starting ? "Starting…" : (<>Start OA <ArrowRight size={14}/></>)}
+                <Button data-testid={TID.startOaBtn} variant="lime" onClick={() => navigate(`/company/${companyId}/hub`)} className="w-full">
+                  Continue to OA &amp; interview <ArrowRight size={14}/>
                 </Button>
-                <button data-testid={TID.resumeSkip} onClick={() => setResumeId(null)} className="mt-3 hover:text-[var(--pm-white)] underline-offset-2 hover:underline" style={{ fontSize: 14, color: "rgba(255,255,255,0.75)" }}>skip resume for this run</button>
+                <button data-testid={TID.resumeSkip} onClick={() => navigate(`/company/${companyId}/hub`)} className="mt-3 hover:text-[var(--pm-white)] underline-offset-2 hover:underline" style={{ fontSize: 14, color: "rgba(255,255,255,0.75)" }}>skip resume for this run</button>
               </div>
             </div>
           </Card>

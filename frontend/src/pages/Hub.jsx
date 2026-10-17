@@ -51,6 +51,7 @@ export default function Hub() {
 
   const [oaStarting, setOaStarting] = useState(false);
   const [oaInProgressId, setOaInProgressId] = useState(null);
+  const [cluster, setCluster] = useState(null);
 
   const [intvStarting, setIntvStarting] = useState(false);
   const [intvError, setIntvError] = useState(null); // {code, message, ...}
@@ -83,9 +84,18 @@ export default function Hub() {
   const tiers = TIER_CATALOG[companyId] || [];
 
   const startOA = async () => {
+    // Skill-cluster picker (2026-10 fix: this used to live on CompanyDetail's
+    // own "Start OA" button, which bypassed the hub entirely -- now that
+    // the hub is the only place that actually calls POST /oa/start, the
+    // picker has to live here too, for the one company (Wipro) that has
+    // cluster_options. Harmless no-op for every other company.
+    if (company.cluster_options?.length && !cluster) {
+      toast.error("Pick a skill cluster first.");
+      return;
+    }
     setOaStarting(true);
     try {
-      const { data } = await api.post("/oa/start", { company_id: companyId });
+      const { data } = await api.post("/oa/start", { company_id: companyId, cluster });
       navigate(`/oa/${data.attempt_id}`);
     } catch (err) {
       const detail = parseErrorDetail(err);
@@ -185,9 +195,33 @@ export default function Hub() {
                 Continue your OA <ArrowRight size={14} aria-hidden="true" />
               </Button>
             ) : (
-              <Button data-testid={TID.hubOaStartBtn} onClick={startOA} disabled={oaStarting} className="w-full">
-                {oaStarting ? "Starting…" : oaResultChip ? "Retake the OA" : "Start the OA"}
-              </Button>
+              <>
+                {company.cluster_options?.length > 0 && (
+                  <div className="mb-4">
+                    <SectionLabel>Pick your skill cluster</SectionLabel>
+                    <div className="flex gap-2 flex-wrap">
+                      {company.cluster_options.map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          data-testid={TID.clusterOption(opt)}
+                          aria-pressed={cluster === opt}
+                          onClick={() => setCluster(opt)}
+                          className="font-display font-semibold rounded-full px-4 py-2 transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                          style={cluster === opt
+                            ? { fontSize: 15, background: "var(--pm-teal-deep)", color: "var(--pm-white)", border: "1.5px solid var(--pm-teal-deep)" }
+                            : { fontSize: 15, background: "transparent", color: "var(--pm-ink)", border: "1.5px solid var(--pm-border-control)" }}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <Button data-testid={TID.hubOaStartBtn} onClick={startOA} disabled={oaStarting} className="w-full">
+                  {oaStarting ? "Starting…" : oaResultChip ? "Retake the OA" : "Start the OA"}
+                </Button>
+              </>
             )}
           </Card>
 

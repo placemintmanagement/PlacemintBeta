@@ -45,6 +45,17 @@ import Auth0TokenSync from "@/auth/Auth0TokenSync";
 // branch below dead code in any real deployment.
 const _TEST_AUTH_BYPASS_ACTIVE = Boolean(process.env.REACT_APP_TEST_AUTH_TOKEN);
 
+// "No login required yet" switch (2026-10, temporary, owner-requested) --
+// mirrors backend/server.py's DISABLE_AUTH exactly (see that file's own
+// comment for why: Auth0 isn't configured correctly yet, and the app is
+// still under active development). Separate from the Playwright bypass
+// above -- no token involved at all. Re-enabling real auth later is simply
+// removing REACT_APP_DISABLE_AUTH from frontend/.env (and DISABLE_AUTH
+// from backend/.env) -- no code change needed on either side.
+const _AUTH_DISABLED = ["1", "true"].includes(
+  (process.env.REACT_APP_DISABLE_AUTH || "").trim().toLowerCase(),
+);
+
 // /dev/* preview routes: available in development and in the TEST-ONLY
 // Playwright build (the bypass flag above). A real production build has
 // neither, so these paths fall through to the 404 page.
@@ -63,7 +74,7 @@ export function Protected({ children }) {
   // authenticated visitor to /login during that brief resolution window --
   // auth0Authenticated-but-no-`user`-yet shows Loading, not a redirect.
   const { isLoading: auth0Loading, isAuthenticated: auth0Authenticated } = useAuth0();
-  if (_TEST_AUTH_BYPASS_ACTIVE) return children;
+  if (_TEST_AUTH_BYPASS_ACTIVE || _AUTH_DISABLED) return children;
   if (loading || auth0Loading) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
   if (!user && auth0Authenticated) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;

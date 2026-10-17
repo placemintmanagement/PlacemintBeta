@@ -15,6 +15,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import Hub from "./Hub";
 import api from "../api";
 import { toast } from "sonner";
+import { TID } from "../testIds";
 
 jest.mock("../api", () => ({
   __esModule: true,
@@ -109,6 +110,46 @@ test("OA: a TCS result uses the existing 'does not publish cutoffs' wording", as
   const panel = await screen.findByTestId("hub-oa-result");
   expect(within(panel).getByText(/TCS does not publish cutoffs/)).toBeInTheDocument();
   expect(within(panel).getByText("Digital")).toBeInTheDocument();
+});
+
+// ---- OA skill cluster (2026-10: moved here from CompanyDetail, which
+// used to start the OA directly and bypass the hub entirely) --------------
+
+const WIPRO = { id: "wipro", name: "Wipro", time_minutes: 90, sections: [1], cluster_options: ["Java", "Python"] };
+
+test("OA: a company with cluster_options shows the picker and requires a choice before starting", async () => {
+  mockLoad({ company: WIPRO, companies: [] });
+  const user = userEvent.setup();
+  renderHub("wipro");
+  await waitFor(() => expect(screen.getByTestId("hub-oa-start-btn")).toBeInTheDocument());
+
+  expect(screen.getByTestId(TID.clusterOption("Java"))).toBeInTheDocument();
+  expect(screen.getByTestId(TID.clusterOption("Python"))).toBeInTheDocument();
+
+  await user.click(screen.getByTestId("hub-oa-start-btn"));
+  expect(toast.error).toHaveBeenCalledWith("Pick a skill cluster first.");
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+test("OA: picking a cluster then starting posts it", async () => {
+  mockLoad({ company: WIPRO, companies: [] });
+  api.post.mockResolvedValueOnce({ data: { attempt_id: "att-wipro" } });
+  const user = userEvent.setup();
+  renderHub("wipro");
+  await waitFor(() => expect(screen.getByTestId("hub-oa-start-btn")).toBeInTheDocument());
+
+  await user.click(screen.getByTestId(TID.clusterOption("Python")));
+  await user.click(screen.getByTestId("hub-oa-start-btn"));
+
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith("/oa/start", { company_id: "wipro", cluster: "Python" }));
+  expect(mockNavigate).toHaveBeenCalledWith("/oa/att-wipro");
+});
+
+test("OA: a company without cluster_options shows no picker at all", async () => {
+  mockLoad({ companies: [] });
+  renderHub();
+  await waitFor(() => expect(screen.getByTestId("hub-oa-start-btn")).toBeInTheDocument());
+  expect(screen.queryByText(/Pick your skill cluster/i)).not.toBeInTheDocument();
 });
 
 // ---- Interview card -----------------------------------------------------

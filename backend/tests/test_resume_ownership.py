@@ -97,14 +97,46 @@ def test_oa_start_normal_path_is_unchanged(monkeypatch):
 
 
 def test_oa_start_with_no_resume_id_is_unaffected(monkeypatch):
-    """No resume_id at all (the optional-field default) skips the new
-    check entirely -- the no-resume start path is unchanged."""
+    """No resume_id at all, and no resume on file for this company either
+    -- stays resume_id=None, exactly as before."""
     db = _fake_db()
     _wire_start_oa(monkeypatch, db)
     body = server.StartOAIn(company_id="capgemini", resume_id=None)
     attempt = asyncio.run(server.start_oa(body, USER_A))
     assert attempt["resume_id"] is None
     assert attempt["status"] == "in_progress"
+
+
+def test_oa_start_with_no_resume_id_auto_associates_the_latest_one_on_file(monkeypatch):
+    """2026-10 follow-up (hub is now the only caller of /oa/start, and it
+    never collects a resume_id itself): omitting resume_id now falls back
+    to this user's latest resume for this exact company, via the same
+    _latest_resume_for_company helper /interview/start already uses --
+    instead of silently discarding a resume analyzed earlier."""
+    db = _fake_db(resumes=[
+        {"resume_id": "resOld", "user_id": "userA", "company_id": "capgemini", "created_at": "2026-01-01T00:00:00+00:00"},
+        {"resume_id": "resNew", "user_id": "userA", "company_id": "capgemini", "created_at": "2026-06-01T00:00:00+00:00"},
+        {"resume_id": "resOtherCo", "user_id": "userA", "company_id": "tcs-nqt", "created_at": "2026-09-01T00:00:00+00:00"},
+        {"resume_id": "resOtherUser", "user_id": "userB", "company_id": "capgemini", "created_at": "2026-09-01T00:00:00+00:00"},
+    ])
+    _wire_start_oa(monkeypatch, db)
+    body = server.StartOAIn(company_id="capgemini", resume_id=None)
+    attempt = asyncio.run(server.start_oa(body, USER_A))
+    assert attempt["resume_id"] == "resNew"  # newest, this user, this company -- not the older one, not another company's, not another user's
+
+
+def test_oa_start_explicit_resume_id_is_not_overridden_by_auto_fallback(monkeypatch):
+    """An explicitly-passed resume_id still wins over whatever the
+    auto-fallback would have picked -- the fallback only ever fires when
+    resume_id is omitted entirely."""
+    db = _fake_db(resumes=[
+        {"resume_id": "resExplicit", "user_id": "userA", "company_id": "capgemini", "created_at": "2026-01-01T00:00:00+00:00"},
+        {"resume_id": "resNewer", "user_id": "userA", "company_id": "capgemini", "created_at": "2026-06-01T00:00:00+00:00"},
+    ])
+    _wire_start_oa(monkeypatch, db)
+    body = server.StartOAIn(company_id="capgemini", resume_id="resExplicit")
+    attempt = asyncio.run(server.start_oa(body, USER_A))
+    assert attempt["resume_id"] == "resExplicit"
 
 
 # ---- 2. /interview/start --------------------------------------------------

@@ -338,7 +338,37 @@ if _test_bypass_active():
     logger.warning("=" * 70)
 
 
+# ---- "No login required yet" switch (2026-10, temporary, owner-requested) -
+# The real app is still under active development and the Auth0 tenant isn't
+# configured correctly yet (frontend/.env's REACT_APP_AUTH0_CLIENT_ID
+# doesn't match any application in that tenant -- confirmed via Auth0's own
+# "Unknown client" error). Rather than fight that config while building the
+# rest of the app, EVERY request is treated as one fixed synthetic dev user
+# when DISABLE_AUTH is set -- no token, no login, no signup needed at all.
+# Deliberately separate from the Playwright test-bypass above (different
+# env var, different synthetic sub, no token-matching at all) so re-
+# enabling real auth later is simply: unset DISABLE_AUTH (backend) and
+# REACT_APP_DISABLE_AUTH (frontend, see App.js's `Protected`) -- no code
+# change needed on either side. Same safety shape as the test bypass: reads
+# the env var fresh on every request (never cached), and is unset in every
+# committed .env / real deployment, so omission is what keeps it off.
+_DISABLE_AUTH_USER_SUB = "dev-no-auth|local"
+
+
+def _auth_disabled() -> bool:
+    return os.environ.get("DISABLE_AUTH", "").strip().lower() in ("1", "true", "yes")
+
+
+if _auth_disabled():
+    logger.warning("=" * 70)
+    logger.warning("AUTH IS COMPLETELY DISABLED (DISABLE_AUTH=1). Every request is the same")
+    logger.warning("local dev user -- TEMPORARY, remove before any real deployment.")
+    logger.warning("=" * 70)
+
+
 async def _resolve_auth0_sub(authorization: Optional[str]) -> str:
+    if _auth_disabled():
+        return _DISABLE_AUTH_USER_SUB
     if _test_bypass_active():
         test_token = os.environ.get("TEST_AUTH_TOKEN", "")
         if (
@@ -1881,6 +1911,16 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
     # convention as get_resume's own user_id-scoped lookup above. This
     # mirrors cluster's existing "an optional field, if given, must be
     # valid" treatment rather than silently ignoring a bad value.
+    #
+    # When resume_id is omitted entirely (2026-10 follow-up: the hub is now
+    # the only place that calls this endpoint, and it never collects a
+    # resume_id itself -- resume upload is a separate step on CompanyDetail)
+    # fall back to this user's latest resume on file for this company, if
+    # any -- same _latest_resume_for_company helper /interview/start already
+    # uses for its own "designated tier" lookup, so a resume analyzed before
+    # landing on the hub still gets associated with the OA automatically,
+    # instead of silently going in as resume_id=None.
+    effective_resume_id = body.resume_id
     if body.resume_id:
         resume_doc = await db.resumes.find_one(
             {"resume_id": body.resume_id, "user_id": user["user_id"], "company_id": body.company_id},
@@ -1888,6 +1928,10 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
         )
         if not resume_doc:
             raise HTTPException(404, "Resume not found")
+    else:
+        latest_resume = await _latest_resume_for_company(user["user_id"], body.company_id)
+        if latest_resume:
+            effective_resume_id = latest_resume["resume_id"]
 
     # Double-start guard (2026-10): OA and interview are independent rounds
     # that can each be retaken any number of times, but not started TWICE
@@ -1968,7 +2012,7 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
         "user_id": user["user_id"],
         "company_id": company["id"],
         "company_name": company["name"],
-        "resume_id": body.resume_id,
+        "resume_id": effective_resume_id,
         "cluster": body.cluster,
         "scoring_mode": company["scoring_mode"],
         "sections": placeholder_sections,
