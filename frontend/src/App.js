@@ -10,6 +10,7 @@ import Signup from "@/pages/Signup";
 import AuthCallback from "@/pages/AuthCallback";
 import Dashboard from "@/pages/Dashboard";
 import CompanyDetail from "@/pages/CompanyDetail";
+import Hub from "@/pages/Hub";
 import DepartmentCompanies from "@/pages/DepartmentCompanies";
 import OARunner from "@/pages/OARunner";
 import OAReview from "@/pages/OAReview";
@@ -78,12 +79,14 @@ function AppRouter() {
       <Route path="/legal/cookies" element={<CookiePolicy />} />
       <Route path="/legal/about" element={<About />} />
       <Route path="/company/:companyId" element={<CompanyDetail />} />
+      <Route path="/company/:companyId/hub" element={<Protected><Hub /></Protected>} />
       <Route path="/departments/:departmentId" element={<DepartmentCompanies />} />
       <Route path="/oa/:attemptId" element={<Protected><OARunner /></Protected>} />
       <Route path="/attempt/:attemptId/review" element={<Protected><OAReview /></Protected>} />
       <Route path="/deck" element={<Protected><ReviewDeck /></Protected>} />
       <Route path="/interview/:interviewId" element={<Protected><Interview /></Protected>} />
       <Route path="/attempt/:attemptId/report" element={<Protected><FinalReport /></Protected>} />
+      <Route path="/interview/:interviewId/report" element={<Protected><FinalReport /></Protected>} />
       {/* Standing dev tool — DI chart question visual check, not gated behind auth */}
       {DEV_ROUTES_ENABLED && <Route path="/dev/chart-preview" element={<DevChartPreview />} />}
       {/* Standing dev tool — gamified-round component visual check, not gated behind auth */}

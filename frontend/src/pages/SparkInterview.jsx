@@ -261,9 +261,9 @@ export default function SparkInterview({ interviewId, initial }) {
               <p className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>
                 {view.closing_message}
               </p>
-              {view.attempt_id && (
+              {(view.attempt_id || view.interview_id) && (
                 <div className="mt-6">
-                  <Button onClick={() => navigate(`/attempt/${view.attempt_id}/report`)}>Go to your report</Button>
+                  <Button onClick={() => navigate(view.attempt_id ? `/attempt/${view.attempt_id}/report` : `/interview/${view.interview_id}/report`)}>Go to your report</Button>
                 </div>
               )}
             </Card>

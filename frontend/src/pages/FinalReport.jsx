@@ -11,13 +11,15 @@ const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
 const BODY = { fontSize: 16, color: "rgba(11,42,48,0.85)", lineHeight: 1.7 };
 
 export default function FinalReport() {
-  const { attemptId } = useParams();
+  const { attemptId, interviewId } = useParams();
   const [doc, setDoc] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get(`/report/${attemptId}`).then(r => { setDoc(r.data); setLoading(false); });
-  }, [attemptId]);
+    setLoading(true);
+    const url = interviewId ? `/interview/${interviewId}/report` : `/report/${attemptId}`;
+    api.get(url).then(r => { setDoc(r.data); setLoading(false); });
+  }, [attemptId, interviewId]);
 
   if (loading) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Building your final report…</div></PageShell></div>;
   if (!doc) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Report not available.</div></PageShell></div>;

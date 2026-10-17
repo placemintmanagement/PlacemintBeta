@@ -5,16 +5,11 @@ import api from "../api";
 import Header from "../components/Header";
 import { CheckCircle2, XCircle, ArrowRight, ChevronDown, ChevronUp, MinusCircle, BookmarkPlus, BookmarkCheck } from "lucide-react";
 import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } from "../components/shared";
+import { TIER_NAMES, TCS_TRACK_NAMES } from "../lib/tierLabels";
 
 // Body-size meta text (never monospace).
 const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
 const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
-
-const TIER_NAMES = { spark: "Spark", dave: "Dave", commit: "Commit" };
-const TCS_TRACK_NAMES = {
-  ninja: "Ninja", digital: "Digital", prime: "Prime",
-  not_qualified: "Below the estimated Foundation cutoff",
-};
 
 // Shown once, right after the final section of a Capgemini attempt. The tier
 // is computed by the server (services/capgemini_tiers.py) and passed here in

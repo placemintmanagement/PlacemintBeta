@@ -52,6 +52,10 @@ export default function CompanyDetail() {
       setResumeId(data.resume_id);
       setAnalysis(data.analysis);
       toast.success("Resume analysed!");
+      // After a resume is on file for this company, the student lands on
+      // the hub -- OA and interview as two independent next steps -- per
+      // the 2026-10 company-hub rollout.
+      navigate(`/company/${companyId}/hub`);
     } catch (err) {
       toast.error(err.response?.data?.detail || "Upload failed");
     } finally { setUploading(false); }
