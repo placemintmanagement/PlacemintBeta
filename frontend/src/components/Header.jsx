@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth0 } from "@auth0/auth0-react";
 import { useAuth } from "../auth";
 import { TID } from "../testIds";
 import { SHOW_PRICING } from "../featureFlags";
@@ -28,6 +29,7 @@ const PLAN_META = {
 // look untouched.
 export default function Header({ light = false } = {}) {
   const { user, logout } = useAuth();
+  const { isAuthenticated: auth0Authenticated, logout: auth0Logout } = useAuth0();
   const navigate = useNavigate();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -35,9 +37,18 @@ export default function Header({ light = false } = {}) {
   const plan = user ? PLAN_META[user.plan] || PLAN_META.free : null;
   const runsLeft = user ? Math.max(0, (user.runs_quota ?? 0) - (user.runs_used ?? 0)) : 0;
 
+  // Real sign-in is now Auth0 (2026-10) -- the legacy logout() alone only
+  // clears this app's own session state, leaving Auth0's own hosted
+  // session (and its SDK cache) still authenticated, so the very next
+  // page load would silently sign the candidate back in via
+  // Auth0TokenSync. auth0Logout() redirects away, so nothing after it runs.
   const doSignOut = async () => {
     setSigningOut(true);
     await logout();
+    if (auth0Authenticated) {
+      auth0Logout({ logoutParams: { returnTo: window.location.origin } });
+      return;
+    }
     setSigningOut(false);
     setConfirmOpen(false);
     navigate("/");

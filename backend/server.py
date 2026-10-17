@@ -281,12 +281,21 @@ def make_jwt(user_id: str) -> str:
 # a separate concern -- account creation / session issuance, not route
 # gating) and still create accounts and set session cookies exactly as
 # before. But since NOTHING reads that cookie/JWT anymore, those flows are
-# now functionally dead ends for reaching any Depends(require_user) route --
+# functional dead ends for reaching any Depends(require_user) route --
 # including /auth/me, which the frontend's OWN AuthProvider polls to
-# determine login state. The frontend's Protected/useAuth() (App.js) was
-# NOT updated to use Auth0 in this pass (out of scope here) -- so a user who
-# logs in via the app's own /login page will still see protected pages
-# render client-side, but every API call they make will now 401.
+# determine login state.
+#
+# UPDATE (2026-10, frontend "wire /login to Auth0" pass): the real /login
+# and /signup pages now call Auth0's loginWithRedirect() as their primary
+# path (the old Google-session/email-password UI is still there, collapsed
+# under an "Other sign-in options" disclosure, but is no longer the
+# default -- it still only reaches the dead-end flows above). The
+# frontend's own AuthProvider/useAuth() still drives Header/Dashboard/
+# OnboardingModal/etc., but is now kept correctly in sync with Auth0 by
+# frontend/src/auth/Auth0TokenSync.jsx, which re-fetches /auth/me once
+# Auth0 resolves a real access token -- so a user who signs in via Auth0
+# now gets a working session everywhere, including every
+# Depends(require_user) route.
 # ---- Test-only auth bypass (2026-08, E2E click-through testing) -----------
 # Exists so a scripted Playwright run can authenticate as a designated
 # synthetic user WITHOUT a real Auth0 login (no test Auth0 tenant/user

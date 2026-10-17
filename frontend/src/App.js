@@ -32,6 +32,7 @@ import DevAuth0Preview from "@/pages/DevAuth0Preview";
 import DevDebuggingPreview from "@/pages/DevDebuggingPreview";
 import DevAiAssistedPreview from "@/pages/DevAiAssistedPreview";
 import NotFound from "@/pages/NotFound";
+import { useAuth0 } from "@auth0/auth0-react";
 import Auth0ProviderWithNavigate from "@/auth/Auth0ProviderWithNavigate";
 import Auth0TokenSync from "@/auth/Auth0TokenSync";
 
@@ -49,10 +50,22 @@ const _TEST_AUTH_BYPASS_ACTIVE = Boolean(process.env.REACT_APP_TEST_AUTH_TOKEN);
 // neither, so these paths fall through to the 404 page.
 const DEV_ROUTES_ENABLED = process.env.NODE_ENV !== "production" || _TEST_AUTH_BYPASS_ACTIVE;
 
-function Protected({ children }) {
+// Exported (not just module-local) so it's unit-testable in isolation --
+// see App.test.jsx -- without needing to render the whole route tree.
+export function Protected({ children }) {
   const { user, loading } = useAuth();
+  // Real sign-in is now Auth0 (2026-10, "wire /login to Auth0" pass) --
+  // server.py's require_user only accepts an Auth0 token, so the app's own
+  // useAuth()/`user` is downstream of it: Auth0TokenSync re-runs
+  // useAuth()'s refresh() once Auth0 resolves isAuthenticated, which races
+  // this component's own render on first page load. Gating on BOTH
+  // signals, not just the legacy one, avoids bouncing a genuinely
+  // authenticated visitor to /login during that brief resolution window --
+  // auth0Authenticated-but-no-`user`-yet shows Loading, not a redirect.
+  const { isLoading: auth0Loading, isAuthenticated: auth0Authenticated } = useAuth0();
   if (_TEST_AUTH_BYPASS_ACTIVE) return children;
-  if (loading) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
+  if (loading || auth0Loading) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
+  if (!user && auth0Authenticated) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
