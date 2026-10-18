@@ -318,6 +318,65 @@ def test_flag_off_valid_interview_tiers_and_tier_start_fn_are_also_unchanged():
     assert server._tier_start_fn("tcs-nqt", "ninja") is None
 
 
+# ---- hub-only guard: attempt_id path is broken for TCS, always blocked ----
+
+def test_tcs_attempt_id_start_is_blocked_hub_only_when_flag_is_on(tcs_world):
+    """With TCS_INTERVIEW_ENABLED on, "tcs-nqt" is no longer in
+    _no_interview_company_ids(), so the attempt_id path (tcs_world's
+    fixture already seeds one OA attempt, attempt_id="att1", via
+    tcs_support._tcs_attempt()) would otherwise fall through
+    _tier_start_fn (tier resolves to None off attempt.capgemini_tier,
+    which a TCS attempt never has) into the WRONG generic AI-planned
+    interview flow. The new guard in server.start_interview blocks this
+    before any of that, with a TCS-specific error distinct from the
+    generic interview_not_available."""
+    body = server.StartInterviewIn(attempt_id="att1")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.start_interview(body, tcs_world.user))
+    assert exc.value.status_code == 400
+    assert exc.value.detail == {
+        "code": "tcs_interview_hub_only",
+        "message": "TCS NQT interviews must be started from the hub by choosing a tier -- "
+                   "not from a completed OA attempt.",
+    }
+
+
+def test_tcs_attempt_id_guard_does_not_affect_the_company_id_tier_path(tcs_world):
+    """The SAME flag-on world, started the normal (hub) way, is completely
+    unaffected by the new guard -- it only looks at the attempt_id path."""
+    started = _start(tcs_world, company_id="tcs-nqt", tier="digital")
+    assert started["mode"] == "tcs"
+    assert started["tier"] == "digital"
+    assert started["status"] == "in_progress"
+
+
+def test_tcs_attempt_id_start_flag_off_is_still_interview_not_available_not_hub_only(monkeypatch):
+    """Flag OFF: "tcs-nqt" is still in _no_interview_company_ids(), so that
+    earlier check raises its own generic error FIRST -- the new hub-only
+    guard is never reached, and this exact response is byte-identical to
+    before this guard existed (see also
+    tests/test_interview_oa_independence.py's
+    test_tcs_attempt_id_start_is_also_blocked, which pins the same thing)."""
+    monkeypatch.delenv("TCS_INTERVIEW_ENABLED", raising=False)
+    from types import SimpleNamespace
+    from spark_support import _Coll
+    fake = SimpleNamespace(
+        interviews=_Coll(), reports=_Coll(), resumes=_Coll(),
+        oa_attempts=_Coll([{"attempt_id": "a1", "user_id": "u1", "company_id": "tcs-nqt",
+                            "status": "completed"}]),
+    )
+    monkeypatch.setattr(server, "db", fake)
+    monkeypatch.setattr(server.entitlements, "free_is_oa_only", lambda user: False)
+    body = server.StartInterviewIn(attempt_id="a1")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.start_interview(body, {"user_id": "u1", "name": "Priya"}))
+    assert exc.value.status_code == 400
+    assert exc.value.detail == {
+        "code": "interview_not_available",
+        "message": "This company does not have an interview phase yet.",
+    }
+
+
 # ---- resume required before a TCS interview can start ----------------------
 
 def test_resume_required_before_a_tcs_interview_can_start(tcs_world):

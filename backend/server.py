@@ -3796,6 +3796,35 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
             "message": "This company does not have an interview phase yet.",
         })
 
+    # TCS NQT interviews must be started from the hub (company_id + tier),
+    # never from a completed OA attempt_id. The attempt_id path above only
+    # ever resolves a `tier` from attempt.get("capgemini_tier") (a
+    # Capgemini-only field -- a TCS attempt never has it), so a TCS
+    # attempt_id would fall through _tier_start_fn() with tier=None,
+    # landing in the generic AI-planned interview plan below instead of
+    # the real TCS tiered-phase flow -- and that mismatch then corrupts
+    # the final report (_build_tcs_template_report reads only OA section
+    # results, discarding the generic interview's actual content/answers
+    # entirely). Checked here, right after the no-interview-phase check
+    # above, and unconditionally (no TCS_INTERVIEW_ENABLED check of its
+    # own): with the flag OFF, "tcs-nqt" is already in
+    # _no_interview_company_ids() and raises interview_not_available
+    # before this line is ever reached (existing/unchanged behaviour --
+    # see tests/test_interview_oa_independence.py's
+    # test_tcs_attempt_id_start_is_also_blocked and
+    # tests/test_tcs_interview.py's flag-off tests), so this guard only
+    # ever actually fires once the flag is on and the company_id+tier
+    # path has become the viable one. It is written without its own flag
+    # check anyway, on purpose, so it keeps protecting this broken path
+    # even if that ordering/gating ever changes later -- the attempt_id
+    # path for TCS has no correct destination regardless of the flag.
+    if company_id == "tcs-nqt" and attempt is not None:
+        raise HTTPException(400, {
+            "code": "tcs_interview_hub_only",
+            "message": "TCS NQT interviews must be started from the hub by choosing a tier -- "
+                       "not from a completed OA attempt.",
+        })
+
     # Free-tier lock: after the contest window ends, Free plan gets OA-only.
     if entitlements.free_is_oa_only(user):
         raise HTTPException(402, {
