@@ -4090,7 +4090,9 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
     return {"grade": grade, "next_index": current_index, "status": status}
 
 
-# ---- TCS NQT interview (text, 45 minutes: 25 TR / 10 MR / 10 HR) ----------
+# ---- TCS NQT interview (text; ONE interview round per tier -- USER-STATED:
+# Ninja 30 minutes, Digital/Prime 60 minutes each, phases within that one
+# round, see tcs_interview/core.py's TCS_TIER_PHASE_ORDER) ----------------
 # (2026-10, TCS_INTERVIEW_ENABLED, default OFF.) Routes stay thin, same
 # philosophy as the Capgemini section below: these three functions are
 # mechanical trampolines into tcs_interview/orchestration.py (built as a

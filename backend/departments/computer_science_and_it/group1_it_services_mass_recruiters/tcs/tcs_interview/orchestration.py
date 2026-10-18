@@ -3,30 +3,24 @@
 calling glue -- the one part of this package that is deliberately NOT pure
 (core.py explicitly is pure; this file is where that purity ends).
 
-Lives inside the tcs_interview package rather than server.py, unlike
-Capgemini's own _start_spark_interview/_spark_answer/_spark_refresh (which
-live directly in server.py and reach server.py's module-level `db`/
-`call_json_gpt`/`now_utc`/`new_id`/`iso` as globals) -- a deliberate
-difference, not an oversight: the task that built this module required
-commit 2 (this file) to be self-contained NEW FILES ONLY, with ZERO lines
-touched in server.py until commit 3. Since this module cannot import
-server.py (server.py will import THIS package, and Python can't have both
-directions), every function below takes its db/clock/model/id dependencies
-as explicit keyword arguments instead of reaching for globals. Commit 3's
-server.py wiring is then mechanical: five thin trampoline functions
-(_start_tcs_interview, _tcs_answer, _tcs_refresh, _finalize_if_expired's
-TCS branch) that each do nothing but forward server.py's own `db`,
-`now_utc`, `new_id`, `iso`, `call_json_gpt` into the matching function here
--- see server.py's own TCS section for exactly those five call sites.
+Lives inside the tcs_interview package rather than server.py. Every
+function below takes its db/clock/model/id dependencies as explicit
+keyword arguments (no module-level globals), so this module never needs
+to import server.py.
 
-Mirrors Capgemini Spark's shape closely (one turn = one graded Q&A, a
-turn_count-guarded optimistic persist, timeout finalization idempotent on
-read) but is simpler by design: v1 has no humanizer, no pushback, no DSA
-hints (explicit product scope -- see core.py's module docstring), and
-every TCS question is fixed SEED-content bank text, never a live model-
-written follow-up -- so there is exactly one kind of model call anywhere
-in this file (grading the current answer against its key_points), unlike
-Spark's writer-and-grader split.
+REWRITE (part 1 of the 4-part TCS restructure): the old TR/MR/HR three-
+stage model is gone. There is now a single "interview" stage with an
+ordered list of PHASES per tier (core.TCS_TIER_PHASE_ORDER) -- all of
+`technical_questions`/`managerial_questions`/`hr_questions` are replaced
+by one `phase_questions: {phase_name: [questions]}` dict per interview
+doc.
+
+Long-sitting hygiene (new in this rewrite): Digital/Prime sittings run up
+to 60 minutes. _rolling_context() below builds a BOUNDED context block --
+short one-line summaries of already-finished phases, plus a capped window
+of the most recent turns within the phase in progress -- instead of ever
+resending the whole transcript to the model. See _rolling_context's own
+docstring and tests/test_tcs_interview.py's prompt-size-bounded test.
 """
 import logging
 import random
@@ -46,18 +40,55 @@ GRADING_TEMPERATURE = 0  # STATED (matches Capgemini's own grading temperature c
 _MODEL_ANSWER_CAP = 4000   # OUR ESTIMATE: characters of one answer sent to the model
 _STORED_ANSWER_CAP = 8000  # OUR ESTIMATE: characters of one answer kept
 
+# ---- Rolling per-phase summary (long-sitting hygiene) ----------------------
+_RECENT_TURNS_IN_CONTEXT = 3     # OUR ESTIMATE: only this many of the CURRENT phase's own turns
+_CONTEXT_SNIPPET_CHARS = 160     # OUR ESTIMATE: per-turn snippet cap inside the context block
+_PHASE_SUMMARY_CHARS = 200       # OUR ESTIMATE: cap on one phase's rolling summary line
+
+
+def _phase_summary_line(phase: str, turns: List[Dict[str, Any]]) -> str:
+    """A short, DETERMINISTIC (no extra AI call) one-line summary of a
+    just-finished phase, built from already-computed flags -- never from a
+    fresh model call. Stored once, re-used on every later grading call
+    instead of ever re-sending that phase's own turns in full."""
+    phase_turns = [t for t in turns if t["phase"] == phase]
+    if not phase_turns:
+        return f"{phase}: not reached."
+    scored = [core.flags_score({k: v for k, v in t["flags"].items() if k != core.EXTRA_SIGNAL}) for t in phase_turns]
+    avg = round(100 * (sum(scored) / len(scored)))
+    line = f"{phase}: {len(phase_turns)} question(s) answered, avg content score {avg}%."
+    return line[:_PHASE_SUMMARY_CHARS]
+
+
+def _rolling_context(interview: Dict[str, Any]) -> Optional[str]:
+    """Bounded context for the NEXT grading call: one short line per
+    already-finished phase (interview['phase_summaries'], updated once per
+    phase transition -- see _advance_and_persist below), plus at most the
+    last `_RECENT_TURNS_IN_CONTEXT` turns of the phase CURRENTLY in
+    progress (never the whole interview). Size is bounded by construction:
+    it never grows past (number of phases in this tier's order) summary
+    lines + `_RECENT_TURNS_IN_CONTEXT` snippets, regardless of how many
+    turns the sitting has actually taken so far."""
+    summaries = interview.get("phase_summaries") or {}
+    state = interview["state"]
+    phase = state["phase"]
+    turns = interview.get("turns", [])
+    current_phase_turns = [t for t in turns if t["phase"] == phase][-_RECENT_TURNS_IN_CONTEXT:]
+    lines: List[str] = [summaries[p] for p in summaries]
+    for t in current_phase_turns:
+        q_snip = " ".join(str(t["question"]).split())[:_CONTEXT_SNIPPET_CHARS]
+        v_snip = " ".join(str(t.get("verdict") or "").split())[:_CONTEXT_SNIPPET_CHARS]
+        lines.append(f"- (this phase) Q: {q_snip} -> {v_snip}")
+    return "\n".join(lines) if lines else None
+
 
 def _stage_questions(interview: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-    return {
-        "technical": interview["technical_questions"],
-        "managerial": interview["managerial_questions"],
-        "hr": interview["hr_questions"],
-    }
+    return interview["phase_questions"]
 
 
 def _current_bank_question(interview: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     state = interview["state"]
-    questions = _stage_questions(interview)[state["stage"]]
+    questions = interview["phase_questions"][state["phase"]]
     idx = state["index"]
     return questions[idx] if idx < len(questions) else None
 
@@ -84,25 +115,20 @@ def _log_rejections(interview_id: str, question_id: str, rejections: List[Dict[s
                        interview_id, question_id, r["flag"], r["reason"])
 
 
-def _score_doc(turns: list) -> Dict[str, Any]:
-    tr = core.technical_score([t for t in turns if t["stage"] == "technical"])
-    mr = core.managerial_score([t for t in turns if t["stage"] == "managerial"])
-    hr = core.hr_score([t for t in turns if t["stage"] == "hr"])
-    return core.tcs_interview_score(tr, mr, hr)
+def _score_doc(tier: str, turns: list) -> Dict[str, Any]:
+    return core.tcs_interview_score(tier, turns)
 
 
 def _report_answers(turns: list) -> list:
     """Canonical {question_id, answer, grade:{one_line_verdict, score}}
     shape -- the SAME shape _report_answer_entry (server.py) already
-    produces for Spark/Dave/Commit, built independently here (not by
-    importing server.py's helper, which this package cannot import; not
-    by importing capgemini_interview.flags_score either, to keep this
-    package's scoring 100% its own) so server.py's already-generic
-    _build_interview_summary/final_report_prompt work on a TCS interview
-    for free, same as every other tier."""
+    produces for Spark/Dave/Commit, built independently here so server.py's
+    already-generic _build_interview_summary/final_report_prompt work on a
+    TCS interview for free, same as every other tier."""
     return [
         {"question_id": t["question_id"], "answer": t["answer"],
-         "grade": {"one_line_verdict": t.get("verdict") or "", "score": round(100 * core.flags_score(t["flags"]))}}
+         "grade": {"one_line_verdict": t.get("verdict") or "", "score": round(100 * core.flags_score(
+             {k: v for k, v in t["flags"].items() if k != core.EXTRA_SIGNAL}))}}
         for t in turns
     ]
 
@@ -114,11 +140,15 @@ async def _invalidate_cached_report(db, interview: Dict[str, Any]) -> None:
 
 
 async def _persist(db, interview: Dict[str, Any], expected_turn_count: int, changes: Dict[str, Any]) -> None:
-    """Optimistic guard: a double-submitted answer cannot advance the stage
-    twice -- same turn_count convention as _spark_persist/_dave_persist/
-    _commit_persist in server.py (and the same one _claim_turn_or_409's
-    atomic claim, applied generically by server.py before this is ever
-    reached, also keys off)."""
+    """Optimistic guard: a double-submitted answer cannot advance the
+    phase twice -- same turn_count convention as _spark_persist/
+    _dave_persist/_commit_persist in server.py. This is also WHY resuming
+    an interrupted sitting (reload, closed tab, idle-but-not-expired) works
+    correctly: every single answer is written to db.interviews here, not
+    just held in memory, so the next read (refresh_interview, below, or a
+    fresh GET after a reload) always sees the latest state/turns/
+    current_question from the database, never from a server-process-local
+    variable that a reload would lose."""
     res = await db.interviews.update_one(
         {"interview_id": interview["interview_id"], "turn_count": expected_turn_count},
         {"$set": changes},
@@ -137,7 +167,7 @@ async def _finish(db, iso, now_utc, interview: Dict[str, Any], now: float, timed
     count = interview.get("turn_count", 0)
     changes = {
         "state": state, "status": state["status"], "current_question": None,
-        "tcs_score": _score_doc(turns),
+        "tcs_score": _score_doc(interview["tier"], turns),
         "answers": _report_answers(turns),
         "completed_at": iso(now_utc()),
         "turn_count": count + 1,
@@ -150,7 +180,11 @@ async def finalize_if_expired(*, db, now_utc, iso, interview: Dict[str, Any]) ->
     """Idempotent: a TCS interview past its deadline is closed as timed out
     the first time anything reads it -- same pattern as
     _spark_finalize_if_expired/_dave_finalize_if_expired/
-    _commit_finalize_if_expired."""
+    _commit_finalize_if_expired. This is also the resume path for an idle-
+    past-deadline sitting: the NEXT read (reload, or the report route)
+    closes it out from whatever was last persisted, never from in-memory
+    state, because `interview` here is whatever the caller freshly loaded
+    from db.interviews."""
     now = now_utc().timestamp()
     state = interview["state"]
     if state["status"] != "in_progress" or not core.is_expired(state, now):
@@ -172,19 +206,20 @@ async def refresh_interview(*, db, now_utc, iso, interview: Dict[str, Any]) -> D
 
 async def start_interview(*, db, now_utc, new_id, iso, attempt: dict, attempt_id: Optional[str],
                           resume_projects: List[dict], user: Dict[str, Any], tier: str = "ninja",
-                          tier_source: str = "oa_designated", company_id: str = "tcs-nqt") -> dict:
-    """Same call signature _start_spark_interview uses (server.py:4345),
-    so server.py's `_tier_start_fn` dispatch (which calls every start
-    function identically: positional attempt/attempt_id/resume_projects/
-    user, then keyword tier/tier_source/company_id) needs no special case
-    for TCS -- see commit 3's thin `_start_tcs_interview` trampoline."""
+                          tier_source: str = "oa_designated", company_id: str = "tcs-nqt",
+                          puzzle_provider: core.PuzzleProvider = core.stub_puzzle_provider) -> dict:
+    """Same call signature _start_spark_interview uses (server.py), so
+    server.py's `_tier_start_fn` dispatch needs no special case for TCS.
+
+    `puzzle_provider` (STUB default, Part 1): Part 3 passes the real
+    banks/interview_puzzle_bank.py-backed provider here instead of relying
+    on the default -- see core.stub_puzzle_provider's own docstring."""
     now = now_utc().timestamp()
     rng = random.Random()
     project = core.pick_project(resume_projects, rng)
-    tr_questions = core.select_technical_questions(tier, resume_projects, project, rng)
-    mr_questions = core.select_managerial_questions(tier, project, rng)
-    hr_questions = core.select_hr_questions(tier, rng)
-    first = tr_questions[0]
+    phase_questions = core.build_phase_questions(tier, resume_projects, project, rng, puzzle_provider)
+    first_phase = core.TCS_TIER_PHASE_ORDER[tier][0]
+    first = phase_questions[first_phase][0]
     interview = {
         "interview_id": new_id("intv"),
         "user_id": attempt["user_id"],
@@ -198,14 +233,13 @@ async def start_interview(*, db, now_utc, new_id, iso, attempt: dict, attempt_id
         # the closing message. Never sent to a model.
         "candidate_name": core.usable_account_name(user.get("name"), user.get("email")),
         "mode": "tcs",
-        "state": core.new_state(now),
+        "state": core.new_state(tier, now),
         "status": "in_progress",
         "turn_count": 0,
         "project": project,
-        "technical_questions": tr_questions,
-        "managerial_questions": mr_questions,
-        "hr_questions": hr_questions,
-        "current_question": {"id": first["id"], "stage": "technical", "prompt": first["text"]},
+        "phase_questions": phase_questions,
+        "phase_summaries": {},
+        "current_question": {"id": first["id"], "phase": first_phase, "prompt": first["text"]},
         "turns": [],
         "answers": [],
         "usage": [],
@@ -221,6 +255,7 @@ async def answer_interview(*, db, now_utc, iso, call_json_gpt, interview: Dict[s
     """`body` only needs .question_id/.answer (server.py's AnswerIn
     satisfies this by duck typing; no pydantic import needed here)."""
     now = now_utc().timestamp()
+    tier = interview["tier"]
     state = interview["state"]
     if state["status"] != "in_progress":
         raise HTTPException(409, {"code": "interview_closed", "message": "This interview is already finished."})
@@ -239,28 +274,40 @@ async def answer_interview(*, db, now_utc, iso, call_json_gpt, interview: Dict[s
     usage = list(interview.get("usage", []))
     turns = list(interview.get("turns", []))
     count = interview.get("turn_count", 0)
-    stage = state["stage"]
+    phase = state["phase"]
 
     bank_q = _current_bank_question(interview)
     key_points = bank_q.get("key_points", [])
-    extra_signal = bank_q.get("extra_signal")
-    prompt = tcs_key_point_flags_prompt(current["prompt"], key_points, model_answer, extra_signal)
-    raw = await _tcs_call(call_json_gpt, prompt, _SYSTEM_GRADER, GRADING_TEMPERATURE, usage, f"grade_{stage}")
+    extra_signal = core.EXTRA_SIGNAL
+    context = _rolling_context(interview)
+    prompt = tcs_key_point_flags_prompt(current["prompt"], key_points, model_answer, extra_signal, context)
+    raw = await _tcs_call(call_json_gpt, prompt, _SYSTEM_GRADER, GRADING_TEMPERATURE, usage, f"grade_{phase}")
     flags, rejections = core.normalize_key_point_flags(raw, len(key_points), model_answer, extra_signal)
     verdict = _verdict(raw, "Your answer is recorded.")
 
-    turn = {"stage": stage, "topic": bank_q["topic"], "question_id": current["id"], "question": current["prompt"],
+    turn = {"phase": phase, "topic": bank_q["topic"], "question_id": current["id"], "question": current["prompt"],
             "answer": stored, "verdict": verdict, "flags": flags}
     turns.append(turn)
     _log_rejections(interview.get("interview_id"), current["id"], rejections)
 
-    nxt = core.advance(_stage_questions(interview), state, now)
+    nxt = core.advance(tier, _stage_questions(interview), state, now)
 
-    changes: Dict[str, Any] = {"state": state, "turns": turns, "turn_count": count + 1, "usage": usage}
+    phase_summaries = dict(interview.get("phase_summaries") or {})
+    if nxt is None or nxt["phase"] != phase:
+        # The phase just ended (either the whole interview is done, or we
+        # moved to the next phase) -- freeze its rolling summary now, once,
+        # deterministically (no extra AI call), so later grading calls
+        # never need that phase's own turns again.
+        phase_summaries[phase] = _phase_summary_line(phase, turns)
+
+    changes: Dict[str, Any] = {
+        "state": state, "turns": turns, "turn_count": count + 1, "usage": usage,
+        "phase_summaries": phase_summaries,
+    }
     if nxt is None:
         changes.update({
             "status": state["status"], "current_question": None,
-            "tcs_score": _score_doc(turns),
+            "tcs_score": _score_doc(tier, turns),
             "answers": _report_answers(turns),
             "completed_at": iso(now_utc()),
         })

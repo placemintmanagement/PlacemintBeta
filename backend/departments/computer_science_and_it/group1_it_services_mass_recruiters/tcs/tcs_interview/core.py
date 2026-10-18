@@ -1,39 +1,53 @@
 # -*- coding: utf-8 -*-
 """TCS NQT interview: the single home for TCS interview information.
 
-Built as a brand-new module beside the Capgemini interview package
-(`capgemini/capgemini_interview/`), NOT as a refactor of it -- see the
-design review this module came from (scratchpad `tcs_interview_spec.md`,
-session of 2026-10). Reuse is deliberately narrow: the ONLY Capgemini-
-package import anywhere in this file is `pick_project` (core.py's own
-module-level docstring there confirms it is pure, generic, tier/company-
-blind -- operates on plain {name, tech_stack, one_line_summary} dicts).
-Everything else -- banks, prompts (ai_service.py, a shared/non-Capgemini
-service module), scoring, the stage machine, the client-view projection --
-is new code owned entirely by this package. Humanizer, pushback and DSA
-hints are explicitly OUT OF SCOPE for v1 (product decision, not a technical
-limitation) -- see the per-feature config tables in pushback.py/
-dsa_hints.py, which live inside the Capgemini package itself and would
-need an edit there to extend to TCS; v1 skips that trade entirely.
+REWRITE (2026-10, part 1 of the 4-part "real TCS structure" task). The
+previous version of this module modelled TCS as three SEPARATE stages
+(Technical/Managerial/HR) -- a third-party guess at TCS's format. The
+product owner has since corrected that assumption with real facts, listed
+below as USER-STATED. This rewrite REPLACES the old TR/MR/HR stage model;
+it does not add to it. The managerial and HR banks/questions/logistics
+grading are gone (see banks/ directory -- managerial.py and hr.py were
+deleted in this commit).
 
-Three stages, kept separate: Technical (TR), Managerial (MR), HR. Tier
-(ninja/digital/prime) changes question SELECTION and emphasis only --
-never the stage list, durations or weights (explicit product decision).
+USER-STATED facts (supersede the old TR/MR/HR assumption):
+  - TCS has 3 tiers (Ninja, Digital, Prime) with ONE interview round each
+    -- no separate managerial or HR rounds.
+  - Durations: Ninja 30 minutes; Digital and Prime 60 minutes each.
+  - Core CS covers OOP, DBMS/SQL, Networks, OS, and Software Development.
+    Core CS comes LAST in every tier.
+  - Coding discussion is Easy for Ninja, Medium for Digital and Prime.
+    Never Hard (TCS does not use Hard).
+  - Architecture / tech-stack justification comes right after the project
+    discussion (Digital and Prime only).
+  - Puzzles are asked in Digital and Prime interviews only, no puzzle for
+    Ninja. (Frequency unverified -- noted as unverified where relevant.)
 
-Tags on every constant, same convention as capgemini_interview/core.py:
-  OUR ESTIMATE -- this repo's own choice, no independent TCS source; every
-                  one of the six headline numbers (three durations, three
-                  stage weights) is tagged this way, per the product
-                  owner's explicit instruction, because TCS publishes no
-                  interview-structure timing or weighting data anywhere.
+Shape: ONE stage, literally named "interview", per tier. Within that single
+stage, a tier works through an ordered list of PHASES (see
+TCS_TIER_PHASE_ORDER below) -- expressed as plain per-tier config (a list),
+not hardcoded per-tier control flow, so reordering a tier's phases later is
+a one-line config edit, not a code change.
+
+  ninja:   project -> coding (EASY) -> core
+  digital: project -> architecture -> coding (MEDIUM) -> puzzle -> core
+  prime:   project -> architecture -> coding (MEDIUM, deeper follow-ups) ->
+           puzzle -> core
+
+Prime differs from Digital by follow-up DEPTH and WEIGHTS, never by harder
+coding problems (both Medium, never Hard).
+
+Every numeric constant below not covered by a USER-STATED fact is tagged
+`# OUR ESTIMATE` -- this repo's own choice, no independent TCS source.
+Seed question content is tagged `# SEED CONTENT` in the bank files.
 
 This module is pure: no imports from server.py, no database, no clock, no
-LLM. server.py calls these functions; ai_service.py builds the grading
-prompt.
+LLM. orchestration.py (this package) calls these functions; ai_service.py
+builds the grading prompt.
 """
 import random
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini.capgemini_interview import (
     pick_project as _pick_project,
@@ -44,11 +58,7 @@ from .banks.dbms_sql import DBMS_SQL_QUESTIONS
 from .banks.os_bank import OS_QUESTIONS
 from .banks.networking import NETWORKING_QUESTIONS
 from .banks.coding_discussion import CODING_DISCUSSION_QUESTIONS
-from .banks.managerial import MANAGERIAL_SITUATIONAL_QUESTIONS, GAP_EXPLANATION_QUESTIONS
-from .banks.hr import (
-    MOTIVATION_QUESTIONS, STRENGTHS_WEAKNESSES_QUESTIONS,
-    COMPANY_KNOWLEDGE_QUESTIONS, LOGISTICS_QUESTIONS,
-)
+from .banks.software_development import SOFTWARE_DEVELOPMENT_QUESTIONS
 
 # ---- Tiers -----------------------------------------------------------------
 # Real, already-live tier identifiers on the OA side (services/tcs_tiers.py:
@@ -74,74 +84,106 @@ def is_tcs_interview_tier(tier: Optional[str]) -> bool:
     return tier in TCS_INTERVIEW_TIERS
 
 
-# ---- The six mandated headline numbers (OUR ESTIMATE, all six) ------------
-TCS_TECHNICAL_DURATION_SECONDS = 25 * 60  # OUR ESTIMATE
-TCS_MANAGERIAL_DURATION_SECONDS = 10 * 60  # OUR ESTIMATE
-TCS_HR_DURATION_SECONDS = 10 * 60  # OUR ESTIMATE
+# ---- Durations (USER-STATED) ------------------------------------------------
+TCS_TIER_DURATION_MINUTES = {"ninja": 30, "digital": 60, "prime": 60}  # USER-STATED
+TCS_TIER_DURATION_SECONDS = {t: m * 60 for t, m in TCS_TIER_DURATION_MINUTES.items()}
 
-TCS_TECHNICAL_WEIGHT = 0.50  # OUR ESTIMATE
-TCS_MANAGERIAL_WEIGHT = 0.25  # OUR ESTIMATE
-TCS_HR_WEIGHT = 0.25  # OUR ESTIMATE
-
-# Fixed, tier-independent total: tier changes question selection/emphasis
-# only, never the duration (explicit product decision) -- so there is only
-# ONE deadline, the sum of the three stage budgets, same for every tier.
-TCS_DURATION_SECONDS = TCS_TECHNICAL_DURATION_SECONDS + TCS_MANAGERIAL_DURATION_SECONDS + TCS_HR_DURATION_SECONDS
-
-TCS_STAGE_ORDER: List[str] = ["technical", "managerial", "hr"]
-TCS_STAGE_BUDGETS_SECONDS = {
-    "technical": TCS_TECHNICAL_DURATION_SECONDS,
-    "managerial": TCS_MANAGERIAL_DURATION_SECONDS,
-    "hr": TCS_HR_DURATION_SECONDS,
+# ---- Phase order per tier: CONFIG, not control flow ------------------------
+# A plain ordered list per tier. The engine (advance(), below) walks this
+# list generically -- reordering a tier's phases is a one-line edit here,
+# never a code change to the stage machine. Ninja has no "architecture" and
+# no "puzzle" phase at all (not even a stub call) -- USER-STATED.
+TCS_TIER_PHASE_ORDER: Dict[str, List[str]] = {
+    "ninja":   ["project", "coding", "core"],
+    "digital": ["project", "architecture", "coding", "puzzle", "core"],
+    "prime":   ["project", "architecture", "coding", "puzzle", "core"],
 }
-STAGE_LABELS = {"technical": "Technical", "managerial": "Managerial", "hr": "HR", "done": "Done"}
-
-# ---- Within-stage dimension weights (OUR ESTIMATE; design choices beyond ---
-# the six mandated numbers above, kept as named constants for the same
-# reason). Each sums to 1.0 within its own stage.
-TCS_TECHNICAL_DIMENSION_WEIGHTS = {  # OUR ESTIMATE
-    "resume_language": 0.20,
-    "oop": 0.15,
-    "dbms_sql": 0.15,
-    "os": 0.15,
-    "networking": 0.10,
-    "coding_discussion": 0.25,
-}
-TCS_MANAGERIAL_DIMENSION_WEIGHTS = {  # OUR ESTIMATE
-    "situational": 0.40,
-    "gap_explanation": 0.15,
-    "technical_depth_followup": 0.30,
-    "communication_clarity": 0.15,
-}
-TCS_HR_DIMENSION_WEIGHTS = {  # OUR ESTIMATE
-    "motivation": 0.30,
-    "strengths_weaknesses": 0.25,
-    "company_knowledge": 0.20,
-    "logistics": 0.25,
+PHASE_LABELS = {
+    "project": "Project", "architecture": "Architecture", "coding": "Coding Discussion",
+    "puzzle": "Puzzle", "core": "Core CS", "done": "Done",
 }
 
-# ---- Per-tier question-selection depth (OUR ESTIMATE; emphasis only -- -----
-# never changes the stage list, durations or weights above). Prime draws
-# more/harder questions in the heavier topics; Ninja/Digital draw the bank's
-# minimum per topic. HR's draw is fixed at 1 per category for every tier
-# (one motivation + one strengths/weaknesses + one company-knowledge + one
-# logistics question, always) -- HR wasn't part of the brief's tier-emphasis
-# examples, so this module keeps it uniform rather than inventing a split.
-TCS_TECHNICAL_TOPIC_COUNTS = {  # OUR ESTIMATE
-    "ninja":   {"oop": 1, "dbms_sql": 1, "os": 1, "networking": 1, "coding_discussion": 1},
-    "digital": {"oop": 1, "dbms_sql": 1, "os": 1, "networking": 1, "coding_discussion": 1},
-    "prime":   {"oop": 2, "dbms_sql": 2, "os": 1, "networking": 1, "coding_discussion": 2},
+# ---- Per-phase time/question budgets (OUR ESTIMATE, every value) ----------
+# Each tier's phase minutes sum to that tier's total duration above.
+# min_questions is a sensible small integer consistent with that budget --
+# NOT a hard cap (a phase may ask slightly more if content calls for it),
+# but the engine will never let an EARLIER phase eat into whatever phase
+# comes after it beyond this budget once that later phase's own minimum has
+# been met (see advance()'s overrun-skip below) -- and because "core" is
+# always the LAST phase, nothing ever comes after it to protect itself
+# against, so core's own pre-selected question list is delivered in full
+# (bounded only by the overall interview deadline), never shortened by an
+# earlier phase's overrun.
+TCS_PHASE_BUDGETS: Dict[str, Dict[str, Dict[str, int]]] = {
+    "ninja": {  # OUR ESTIMATE (sums to 30)
+        "project": {"minutes": 8, "min_questions": 1},
+        "coding":  {"minutes": 9, "min_questions": 1},
+        "core":    {"minutes": 13, "min_questions": 5},
+    },
+    "digital": {  # OUR ESTIMATE (sums to 60)
+        "project":      {"minutes": 10, "min_questions": 1},
+        "architecture": {"minutes": 8, "min_questions": 1},
+        "coding":       {"minutes": 18, "min_questions": 2},
+        "puzzle":       {"minutes": 6, "min_questions": 1},
+        "core":         {"minutes": 18, "min_questions": 5},
+    },
+    "prime": {  # OUR ESTIMATE (sums to 60)
+        "project":      {"minutes": 7, "min_questions": 1},
+        "architecture": {"minutes": 10, "min_questions": 1},
+        "coding":       {"minutes": 18, "min_questions": 2},
+        "puzzle":       {"minutes": 7, "min_questions": 1},
+        "core":         {"minutes": 18, "min_questions": 5},
+    },
 }
-TCS_MANAGERIAL_SITUATIONAL_COUNTS = {"ninja": 1, "digital": 2, "prime": 2}  # OUR ESTIMATE
 
-# ---- Question text (code-owned; never model-written) -----------------------
-NO_PROJECT_LANGUAGES_QUESTION = (
-    "Which two programming languages would you like to be evaluated in during this interview, and why?"
-)
+# ---- Core-CS sub-mix (OUR ESTIMATE; sums to 1.0 per tier) ------------------
+TCS_CORE_SUBMIX: Dict[str, Dict[str, float]] = {
+    "ninja":   {"oop": 0.25, "dbms_sql": 0.25, "networking": 0.20, "os": 0.15, "software_development": 0.15},
+    "digital": {"oop": 0.25, "dbms_sql": 0.25, "networking": 0.20, "os": 0.15, "software_development": 0.15},
+    "prime":   {"oop": 0.25, "dbms_sql": 0.25, "networking": 0.20, "os": 0.20, "software_development": 0.10},
+}
+_CORE_BANKS = {
+    "oop": OOP_QUESTIONS, "dbms_sql": DBMS_SQL_QUESTIONS, "networking": NETWORKING_QUESTIONS,
+    "os": OS_QUESTIONS, "software_development": SOFTWARE_DEVELOPMENT_QUESTIONS,
+}
+
+# ---- Phase weights for final scoring (OUR ESTIMATE; sums to 1.0 per tier) --
+# "communication" is NOT a flow phase (no questions/time budget of its own
+# above) -- it is graded via the existing piggyback "communication_clarity"
+# flag on every grading call (see ai_service.tcs_key_point_flags_prompt's
+# extra_signal), never a separate AI call. It only appears here, as a
+# scoring dimension.
+TCS_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "ninja":   {"project": 0.25, "coding": 0.25, "core": 0.35, "communication": 0.15},
+    "digital": {"project": 0.15, "architecture": 0.10, "coding": 0.25, "puzzle": 0.10,
+                "core": 0.30, "communication": 0.10},
+    "prime":   {"project": 0.10, "architecture": 0.15, "coding": 0.25, "puzzle": 0.10,
+                "core": 0.30, "communication": 0.10},
+}
+
+EXTRA_SIGNAL = "communication_clarity"  # piggybacked onto every question's grading call
 
 
 def _clean(value: Any, limit: int = 120) -> str:
     return " ".join(str(value or "").split())[:limit]
+
+
+def _allocate_counts(weights: Dict[str, float], total: int) -> Dict[str, int]:
+    """Largest-remainder (Hamilton) apportionment: splits `total` whole
+    items across `weights`' keys in proportion to their weight, rounding so
+    the parts sum to EXACTLY `total` (ordinary rounding of each part
+    independently can over/undershoot). Generic -- used for the core-CS
+    sub-mix today, reusable anywhere else a weighted integer split is
+    needed."""
+    if total <= 0 or not weights:
+        return {k: 0 for k in weights}
+    quotas = {k: w * total for k, w in weights.items()}
+    floors = {k: int(q) for k, q in quotas.items()}
+    remainder = total - sum(floors.values())
+    order = sorted(weights, key=lambda k: (quotas[k] - floors[k]), reverse=True)
+    for k in order[:remainder]:
+        floors[k] += 1
+    return floors
 
 
 _LANGUAGE_SPLIT_RE = re.compile(r"[,/;&]|\band\b", re.IGNORECASE)
@@ -149,11 +191,7 @@ _LANGUAGE_SPLIT_RE = re.compile(r"[,/;&]|\band\b", re.IGNORECASE)
 
 def infer_top_languages(resume_projects: Optional[List[Dict[str, Any]]]) -> List[str]:
     """The candidate's most common tech_stack entries across every analyzed
-    project (same `extracted_projects` resume data Capgemini's interview
-    reads -- no new schema). Returns up to 2 distinct tokens, most frequent
-    first, in their first-seen casing. An empty/short list means fewer than
-    2 distinct languages could be inferred this way -- the caller then asks
-    directly instead (see build_opener_question)."""
+    project. Returns up to 2 distinct tokens, most frequent first."""
     from collections import Counter
     counts: "Counter[str]" = Counter()
     display: Dict[str, str] = {}
@@ -179,12 +217,17 @@ def pick_project(resume_projects: Optional[List[Dict[str, Any]]],
     return _pick_project(resume_projects, rng)
 
 
-def build_opener_question(resume_projects: Optional[List[Dict[str, Any]]],
-                          project: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """The Technical stage's FIRST question. Per the product decision: infer
-    the candidate's two most-used languages from their resume's tech_stack
-    entries; if fewer than 2 distinct languages can be inferred, the opener
-    itself asks the candidate directly instead."""
+NO_PROJECT_LANGUAGES_QUESTION = (
+    "Which two programming languages would you like to be evaluated in during this interview, and why?"
+)
+
+
+# ---- Project phase ----------------------------------------------------------
+def build_project_question(resume_projects: Optional[List[Dict[str, Any]]],
+                           project: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Every tier's FIRST phase. Infers the candidate's two most-used
+    languages from resume tech_stack entries; if fewer than 2 can be
+    inferred, asks directly instead."""
     langs = infer_top_languages(resume_projects)
     if len(langs) >= 2:
         lang1, lang2 = langs[0], langs[1]
@@ -211,91 +254,191 @@ def build_opener_question(resume_projects: Optional[List[Dict[str, Any]]],
             kp("names two specific programming languages"),
             kp("gives a real reason for choosing them (comfort, experience, project use), not just naming them"),
         ]
-    return {"id": "tcs-opener", "topic": "resume_language", "text": text, "key_points": key_points}
+    return {"id": "tcs-project-1", "phase": "project", "topic": "project", "text": text, "key_points": key_points}
 
 
-def build_tech_depth_followup_question(project: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Managerial stage: a technical-depth follow-up framed from an
-    ownership/management angle (not pure technical correctness), tied to
-    the same resume project the Technical-stage opener used."""
+def select_project_questions(resume_projects: Optional[List[Dict[str, Any]]],
+                             project: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [build_project_question(resume_projects, project)]
+
+
+# ---- Architecture phase (Digital/Prime only) -------------------------------
+def build_architecture_question(project: Optional[Dict[str, Any]], tier: str) -> Dict[str, Any]:
+    """Right after the project phase (USER-STATED order), about the
+    student's OWN project: Digital asks tech-stack justification (why this
+    database, how the parts talk to each other); Prime asks the same ground
+    PLUS an explicit design-tradeoff framing (same question family, deeper
+    follow-up framing -- Prime differs from Digital by depth, not by a
+    different topic)."""
     name = _clean(project.get("name")) if project else ""
     subject = f"\"{name}\"" if name else "a project you built"
-    text = (
-        f"Imagine you had to hand off {subject} to a new teammate under a tight deadline. What would you "
-        "prioritize explaining to them first, and why?"
-    )
-    key_points = [
-        kp("names a concrete priority rather than a generic answer"),
-        kp("shows ownership-level understanding of the project, not just a surface description"),
-        kp("explains the reasoning behind the priority chosen"),
-    ]
-    return {"id": "tcs-mgr-followup", "topic": "managerial_followup", "text": text, "key_points": key_points}
+    if is_prime(tier):
+        text = (
+            f"Think about the architecture of {subject}. Why did you choose the database and overall "
+            "structure you used, how do the different parts of the system talk to each other, and what "
+            "is one tradeoff you accepted in that design -- what would you reconsider if you were "
+            "rebuilding it today?"
+        )
+        key_points = [
+            kp("gives a specific reason for the database/technology choice, not just naming it"),
+            kp("explains how the parts of the system communicate (e.g. API calls, shared DB, events)"),
+            kp("names a real tradeoff accepted in the design, not a generic 'it works fine' answer"),
+            kp("reflects on what they would reconsider or do differently, showing design judgement"),
+        ]
+    else:
+        text = (
+            f"Think about the architecture of {subject}. Why did you choose the database you used, and "
+            "how do the different parts of the system talk to each other?"
+        )
+        key_points = [
+            kp("gives a specific reason for the database/technology choice, not just naming it"),
+            kp("explains how the parts of the system communicate (e.g. API calls, shared DB, function calls)"),
+        ]
+    return {"id": "tcs-arch-1", "phase": "architecture", "topic": "architecture", "text": text, "key_points": key_points}
 
 
-# ---- Question selection (SEED-content banks; see banks/*.py) --------------
+def select_architecture_questions(project: Optional[Dict[str, Any]], tier: str) -> List[Dict[str, Any]]:
+    if is_ninja(tier):
+        return []
+    return [build_architecture_question(project, tier)]
+
+
+# ---- Coding-discussion phase ------------------------------------------------
+# USER-STATED: Easy for Ninja, Medium for Digital and Prime, never Hard.
+_CODING_DIFFICULTY_FOR_TIER = {"ninja": "easy", "digital": "medium", "prime": "medium"}
+
+
+def select_coding_questions(tier: str, rng: random.Random) -> List[Dict[str, Any]]:
+    difficulty = _CODING_DIFFICULTY_FOR_TIER.get(tier, "easy")
+    n = TCS_PHASE_BUDGETS[tier]["coding"]["min_questions"]
+    pool = [q for q in CODING_DISCUSSION_QUESTIONS if q.get("difficulty") == difficulty]
+    if len(pool) < n:
+        pool = CODING_DISCUSSION_QUESTIONS  # safety fallback, should not trigger with a healthy bank
+    n = min(n, len(pool))
+    chosen = [dict(q) for q in rng.sample(pool, n)]
+    for q in chosen:
+        q["phase"] = "coding"
+    return chosen
+
+
+# ---- Puzzle phase (Digital/Prime only) -------------------------------------
+# STUB (Part 1 only): Part 3 wires in the real banks/interview_puzzle_bank.py
+# (Part 2), chosen deterministically per-interview (seeded) by tier. For now
+# this is a fixed, deterministic placeholder so Part 1's tests pass
+# end-to-end without Part 2/3 existing yet. No NotImplementedError -- the
+# flow must work today, just with placeholder content.
+_PUZZLE_STUB_QUESTION: Dict[str, Any] = {
+    "id": "tcs-puzzle-stub-1", "phase": "puzzle", "topic": "puzzle",
+    "text": (
+        "You have two identical eggs and a 100-floor building. You want to find the highest floor from "
+        "which an egg can be dropped without breaking, using as few drops as possible in the worst case. "
+        "Walk me through how you would approach this."
+    ),
+    "key_points": [
+        kp("recognizes this is a worst-case minimization problem, not just a guess-and-check search",
+           "names it as an optimization-under-uncertainty problem"),
+        kp("describes a strategy better than a naive linear floor-by-floor search with one egg",
+           "proposes some form of stepped or decreasing-interval search"),
+    ],
+}
+
+
+def stub_puzzle_provider(tier: str, rng: random.Random) -> Dict[str, Any]:
+    """Default puzzle-provider function (STUB). Part 3 replaces the
+    default passed into select_puzzle_questions/build_phase_questions with
+    a real provider backed by banks/interview_puzzle_bank.py."""
+    return dict(_PUZZLE_STUB_QUESTION)
+
+
+PuzzleProvider = Callable[[str, random.Random], Dict[str, Any]]
+
+
+def select_puzzle_questions(tier: str, rng: random.Random,
+                            puzzle_provider: PuzzleProvider = stub_puzzle_provider) -> List[Dict[str, Any]]:
+    if is_ninja(tier):
+        return []
+    q = puzzle_provider(tier, rng)
+    q = dict(q)
+    q["phase"] = "puzzle"
+    q.setdefault("topic", "puzzle")
+    return [q]
+
+
+# ---- Core-CS phase (always LAST; largest weight) ---------------------------
 def _draw(bank: List[Dict[str, Any]], n: int, tier: str, rng: random.Random) -> List[Dict[str, Any]]:
-    """n questions, preferring items at or below this tier's difficulty rank
-    (falling back to the whole bank if the preferred pool is too small),
-    drawn without replacement. Returns fresh dict copies (never the bank's
-    own stored dicts) so later per-question tagging (e.g. extra_signal)
-    never mutates the shared bank."""
+    """n questions, drawn without replacement, preferring items at or below
+    this tier's difficulty rank (falling back to the whole eligible pool if
+    that preferred pool is too small). `tier_tags`, when present on an
+    item, is a HARD allow-list (e.g. CI/CD / REST items tagged
+    digital/prime-only must never reach Ninja even under that fallback) --
+    applied before the rank-preference logic, never bypassed by it."""
     if n <= 0:
         return []
+    eligible = [q for q in bank if not q.get("tier_tags") or tier in q["tier_tags"]]
     rank = _TIER_RANK.get(tier, 0)
-    preferred = [q for q in bank if _TIER_RANK.get(q.get("difficulty"), 0) <= rank]
-    pool = preferred if len(preferred) >= n else bank
+    preferred = [q for q in eligible if _TIER_RANK.get(q.get("difficulty"), 0) <= rank]
+    pool = preferred if len(preferred) >= n else eligible
     n = min(n, len(pool))
     return [dict(q) for q in rng.sample(pool, n)]
 
 
-def select_technical_questions(tier: str, resume_projects: Optional[List[Dict[str, Any]]],
-                               project: Optional[Dict[str, Any]],
-                               rng: Optional[random.Random] = None) -> List[Dict[str, Any]]:
-    r = rng or random
-    counts = TCS_TECHNICAL_TOPIC_COUNTS.get(tier, TCS_TECHNICAL_TOPIC_COUNTS["ninja"])
-    questions = [build_opener_question(resume_projects, project)]
-    questions += _draw(OOP_QUESTIONS, counts["oop"], tier, r)
-    questions += _draw(DBMS_SQL_QUESTIONS, counts["dbms_sql"], tier, r)
-    questions += _draw(OS_QUESTIONS, counts["os"], tier, r)
-    questions += _draw(NETWORKING_QUESTIONS, counts["networking"], tier, r)
-    questions += _draw(CODING_DISCUSSION_QUESTIONS, counts["coding_discussion"], tier, r)
+def select_core_questions(tier: str, rng: random.Random) -> List[Dict[str, Any]]:
+    total = TCS_PHASE_BUDGETS[tier]["core"]["min_questions"]
+    counts = _allocate_counts(TCS_CORE_SUBMIX[tier], total)
+    questions: List[Dict[str, Any]] = []
+    for topic, n in counts.items():
+        questions += _draw(_CORE_BANKS[topic], n, tier, rng)
+    for q in questions:
+        q["phase"] = "core"
     return questions
 
 
-def select_managerial_questions(tier: str, project: Optional[Dict[str, Any]],
-                                rng: Optional[random.Random] = None) -> List[Dict[str, Any]]:
-    r = rng or random
-    n_situational = TCS_MANAGERIAL_SITUATIONAL_COUNTS.get(tier, 1)
-    situational = _draw(MANAGERIAL_SITUATIONAL_QUESTIONS, n_situational, tier, r)
-    gap = dict(r.choice(GAP_EXPLANATION_QUESTIONS))
-    followup = build_tech_depth_followup_question(project)
-    # Every MR question ALSO carries a "communication_clarity" extra signal
-    # (OUR ESTIMATE: graded holistically per answer, not from a dedicated
-    # question) -- tagged here at selection time, not baked into the bank
-    # files, so the bank stays stage-agnostic.
-    return [dict(q, extra_signal="communication_clarity") for q in (situational + [gap, followup])]
-
-
-def select_hr_questions(tier: str, rng: Optional[random.Random] = None) -> List[Dict[str, Any]]:
-    r = rng or random
-    return (
-        _draw(MOTIVATION_QUESTIONS, 1, tier, r)
-        + _draw(STRENGTHS_WEAKNESSES_QUESTIONS, 1, tier, r)
-        + _draw(COMPANY_KNOWLEDGE_QUESTIONS, 1, tier, r)
-        + _draw(LOGISTICS_QUESTIONS, 1, tier, r)
-    )
+# ---- Whole-interview question selection ------------------------------------
+def build_phase_questions(tier: str, resume_projects: Optional[List[Dict[str, Any]]],
+                          project: Optional[Dict[str, Any]], rng: random.Random,
+                          puzzle_provider: PuzzleProvider = stub_puzzle_provider
+                          ) -> Dict[str, List[Dict[str, Any]]]:
+    """Every phase's full, pre-selected question list, built ONCE at
+    interview start -- same "select everything up front into independent
+    per-stage lists" shape the old TR/MR/HR version used, just generalized
+    over this tier's phase list. Each phase's list is selected
+    independently of every other phase's list (no shared pool to draw
+    down), which is exactly what makes core.py's "protect the last phase's
+    budget" guarantee hold: nothing an earlier phase does can shrink core's
+    question list, because there was never a shared budget to take from."""
+    builders = {
+        "project": lambda: select_project_questions(resume_projects, project),
+        "architecture": lambda: select_architecture_questions(project, tier),
+        "coding": lambda: select_coding_questions(tier, rng),
+        "puzzle": lambda: select_puzzle_questions(tier, rng, puzzle_provider),
+        "core": lambda: select_core_questions(tier, rng),
+    }
+    phases = TCS_TIER_PHASE_ORDER[tier]
+    out = {phase: builders[phase]() for phase in phases}
+    for phase, qs in out.items():
+        if not qs:
+            raise ValueError(f"TCS phase {phase!r} for tier {tier!r} produced zero questions")
+    return out
 
 
 # ---- Stage machine (pure; advanced only by code) ---------------------------
-def new_state(now: float) -> Dict[str, Any]:
+# Single stage, literally "interview", for every tier (USER-STATED: TCS has
+# ONE interview round per tier, not separate TR/MR/HR rounds). "phase"
+# tracks progress through that tier's TCS_TIER_PHASE_ORDER.
+STAGE_NAME = "interview"
+
+
+def new_state(tier: str, now: float) -> Dict[str, Any]:
+    first_phase = TCS_TIER_PHASE_ORDER[tier][0]
     return {
-        "stage": "technical",
+        "stage": STAGE_NAME,
+        "phase": first_phase,
         "status": "in_progress",
         "timed_out": False,
         "started_at": now,
-        "deadline_at": now + TCS_DURATION_SECONDS,
-        "budget_started_at": {"technical": now},
-        "index": 0,
+        "deadline_at": now + TCS_TIER_DURATION_SECONDS[tier],
+        "phase_started_at": {first_phase: now},
+        "index": 0,  # index within the CURRENT phase's question list
     }
 
 
@@ -305,43 +448,68 @@ def is_expired(state: Dict[str, Any], now: float) -> bool:
 
 def finish_timed_out(state: Dict[str, Any]) -> Dict[str, Any]:
     state["stage"] = "done"
+    state["phase"] = "done"
     state["status"] = "timed_out"
     state["timed_out"] = True
     return state
 
 
-def advance(stage_questions: Dict[str, List[Dict[str, Any]]], state: Dict[str, Any],
+def _client_question(q: Dict[str, Any], phase: str) -> Dict[str, Any]:
+    return {"id": q["id"], "stage": STAGE_NAME, "phase": phase, "prompt": q["text"]}
+
+
+def advance(tier: str, phase_questions: Dict[str, List[Dict[str, Any]]], state: Dict[str, Any],
            now: float) -> Optional[Dict[str, Any]]:
-    """Call AFTER grading the question at stage_questions[state['stage']]
+    """Call AFTER grading the question at phase_questions[state['phase']]
     [state['index']]. Mutates `state` in place and returns the next
-    question (as a client-shaped {id, stage, prompt} dict), or None once
-    every stage is exhausted (state['status'] is set to 'completed' then).
-    Every tier draws at least 1 question per stage by construction (see
-    TCS_TECHNICAL_TOPIC_COUNTS/TCS_MANAGERIAL_SITUATIONAL_COUNTS/
-    select_hr_questions), so no stage's question list is ever empty."""
-    stage = state["stage"]
+    question (client-shaped), or None once every phase is exhausted
+    (state['status'] set to 'completed' then).
+
+    Budget protection: once a NON-LAST phase has met its own
+    TCS_PHASE_BUDGETS min_questions AND has run longer than its own minutes
+    budget, any remaining (optional, beyond-minimum) questions in that
+    phase are skipped so the next phase starts sooner -- this is what
+    reserves time for whatever comes after. The LAST phase (core, by
+    construction, every tier) has no "next phase" to protect itself
+    against this way, so it is never skipped into early: its full
+    pre-selected question list (see build_phase_questions) is always
+    offered in full, bounded only by the overall interview deadline, never
+    by an earlier phase's overrun."""
+    phase_order = TCS_TIER_PHASE_ORDER[tier]
+    budgets = TCS_PHASE_BUDGETS[tier]
+    phase = state["phase"]
     state["index"] += 1
-    current_list = stage_questions[stage]
-    if state["index"] < len(current_list):
+    current_list = phase_questions[phase]
+    pos = phase_order.index(phase)
+    is_last_phase = pos + 1 >= len(phase_order)
+
+    more_in_phase = state["index"] < len(current_list)
+    overrun = False
+    if more_in_phase and not is_last_phase:
+        asked = state["index"]
+        elapsed_minutes = (now - state["phase_started_at"][phase]) / 60.0
+        budget = budgets[phase]
+        overrun = asked >= budget["min_questions"] and elapsed_minutes >= budget["minutes"]
+
+    if more_in_phase and not overrun:
         q = current_list[state["index"]]
-        return {"id": q["id"], "stage": stage, "prompt": q["text"]}
-    pos = TCS_STAGE_ORDER.index(stage)
-    if pos + 1 >= len(TCS_STAGE_ORDER):
+        return _client_question(q, phase)
+
+    if is_last_phase:
         state["stage"] = "done"
+        state["phase"] = "done"
         state["status"] = "completed"
         return None
-    nxt = TCS_STAGE_ORDER[pos + 1]
-    state["stage"] = nxt
+
+    nxt = phase_order[pos + 1]
+    state["phase"] = nxt
     state["index"] = 0
-    state["budget_started_at"][nxt] = now
-    q = stage_questions[nxt][0]
-    return {"id": q["id"], "stage": nxt, "prompt": q["text"]}
+    state["phase_started_at"][nxt] = now
+    q = phase_questions[nxt][0]
+    return _client_question(q, nxt)
 
 
 # ---- Element flags (normalised; never trusted raw) -------------------------
-# Same evidence-quote defence philosophy as capgemini_interview/core.py's
-# own normalize_*_flags functions (re-authored here, not imported, to keep
-# this package's grading logic 100% independent of the Capgemini package).
 QUOTE_MIN_CHARS = 12  # OUR ESTIMATE: shorter quotes are too thin to prove a signal
 QUOTE_STRIP_CHARS = " \"'“”‘’.…"
 INSTRUCTION_LIKE = ("ignore", "disregard", "mark all", "mark every", "score 100", "system:",
@@ -375,9 +543,9 @@ def _checked_flag(raw_flag: Any, answer: str, name: str, rejections: List[Dict[s
 
 def normalize_key_point_flags(raw: Any, key_point_count: int, answer: str,
                               extra_signal: Optional[str] = None) -> Tuple[Dict[str, bool], List[Dict[str, Any]]]:
-    """The one generic grader-output normalizer every TCS question uses
-    (Technical, Managerial and HR alike) -- one flag per key point, plus an
-    optional extra signal (Managerial's "communication_clarity")."""
+    """The one generic grader-output normalizer every TCS question uses,
+    whichever phase it belongs to -- one flag per key point, plus an
+    optional piggybacked extra signal (communication_clarity)."""
     src = raw if isinstance(raw, dict) else {}
     points = src.get("key_points")
     points = points if isinstance(points, list) else []
@@ -402,73 +570,44 @@ def _avg(values: List[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def _content_flags(flags: Dict[str, bool], extra_signal: Optional[str]) -> Dict[str, bool]:
-    if not extra_signal:
-        return flags
-    return {k: v for k, v in flags.items() if k != extra_signal}
+def _content_score(turns: List[Dict[str, Any]]) -> float:
+    return _avg([flags_score({k: v for k, v in t["flags"].items() if k != EXTRA_SIGNAL}) for t in turns])
 
 
-def technical_score(turns: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _simple_phase_score(turns: List[Dict[str, Any]], phase: str) -> Dict[str, Any]:
+    phase_turns = [t for t in turns if t["phase"] == phase]
+    return {"score": round(_content_score(phase_turns), 4), "reached": bool(phase_turns)}
+
+
+def core_score(turns: List[Dict[str, Any]], tier: str) -> Dict[str, Any]:
+    core_turns = [t for t in turns if t["phase"] == "core"]
     by_topic: Dict[str, List[float]] = {}
-    for t in turns:
-        by_topic.setdefault(t["topic"], []).append(flags_score(t["flags"]))
+    for t in core_turns:
+        by_topic.setdefault(t["topic"], []).append(
+            flags_score({k: v for k, v in t["flags"].items() if k != EXTRA_SIGNAL}))
     dims = {topic: _avg(vals) for topic, vals in by_topic.items()}
-    not_reached = [d for d in TCS_TECHNICAL_DIMENSION_WEIGHTS if d not in dims]
-    total = sum(TCS_TECHNICAL_DIMENSION_WEIGHTS[d] * dims.get(d, 0.0) for d in TCS_TECHNICAL_DIMENSION_WEIGHTS)
+    submix = TCS_CORE_SUBMIX[tier]
+    not_reached = [d for d in submix if d not in dims]
+    total = sum(submix[d] * dims.get(d, 0.0) for d in submix)
     return {"dimensions": dims, "score": round(total, 4), "not_reached": not_reached}
 
 
-def managerial_score(turns: List[Dict[str, Any]]) -> Dict[str, Any]:
-    situational = [flags_score(_content_flags(t["flags"], "communication_clarity"))
-                   for t in turns if t["topic"] == "managerial_situational"]
-    gap = [flags_score(_content_flags(t["flags"], "communication_clarity"))
-           for t in turns if t["topic"] == "managerial_gap"]
-    followup = [flags_score(_content_flags(t["flags"], "communication_clarity"))
-                for t in turns if t["topic"] == "managerial_followup"]
-    clarity = [1.0 if t["flags"].get("communication_clarity") else 0.0
-               for t in turns if "communication_clarity" in t.get("flags", {})]
-    dims = {
-        "situational": _avg(situational),
-        "gap_explanation": _avg(gap),
-        "technical_depth_followup": _avg(followup),
-        "communication_clarity": _avg(clarity),
-    }
-    not_reached = [d for d, vals in (("situational", situational), ("gap_explanation", gap),
-                                      ("technical_depth_followup", followup)) if not vals]
-    total = sum(TCS_MANAGERIAL_DIMENSION_WEIGHTS[d] * dims[d] for d in TCS_MANAGERIAL_DIMENSION_WEIGHTS)
-    return {"dimensions": dims, "score": round(total, 4), "not_reached": not_reached}
+def communication_score(turns: List[Dict[str, Any]]) -> float:
+    marked = [1.0 if t["flags"].get(EXTRA_SIGNAL) else 0.0 for t in turns if EXTRA_SIGNAL in t.get("flags", {})]
+    return round(_avg(marked), 4)
 
 
-_HR_TOPIC_TO_DIMENSION = {
-    "hr_motivation": "motivation",
-    "hr_strengths_weaknesses": "strengths_weaknesses",
-    "hr_company_knowledge": "company_knowledge",
-    "hr_logistics": "logistics",
-}
-
-
-def hr_score(turns: List[Dict[str, Any]]) -> Dict[str, Any]:
-    dims: Dict[str, float] = {}
-    not_reached = []
-    for topic, name in _HR_TOPIC_TO_DIMENSION.items():
-        matches = [flags_score(t["flags"]) for t in turns if t["topic"] == topic]
-        dims[name] = _avg(matches)
-        if not matches:
-            not_reached.append(name)
-    total = sum(TCS_HR_DIMENSION_WEIGHTS[d] * dims[d] for d in TCS_HR_DIMENSION_WEIGHTS)
-    return {"dimensions": dims, "score": round(total, 4), "not_reached": not_reached}
-
-
-def tcs_interview_score(tr: Dict[str, Any], mr: Dict[str, Any], hr: Dict[str, Any]) -> Dict[str, Any]:
-    total = (TCS_TECHNICAL_WEIGHT * tr["score"] + TCS_MANAGERIAL_WEIGHT * mr["score"]
-            + TCS_HR_WEIGHT * hr["score"])
-    return {"technical": tr, "managerial": mr, "hr": hr, "interview": round(total, 4)}
+def tcs_interview_score(tier: str, turns: List[Dict[str, Any]]) -> Dict[str, Any]:
+    phases: Dict[str, Any] = {}
+    for phase in TCS_TIER_PHASE_ORDER[tier]:
+        phases[phase] = core_score(turns, tier) if phase == "core" else _simple_phase_score(turns, phase)
+    comm = communication_score(turns)
+    weights = TCS_PHASE_WEIGHTS[tier]
+    total = sum(weights[p] * phases[p]["score"] for p in phases) + weights["communication"] * comm
+    return {"phases": phases, "communication": comm, "interview": round(total, 4)}
 
 
 # ---- Closing message (fixed template, emitted by code, never a model) -----
-# Small, self-contained duplicate of capgemini_interview.closing_message's
-# account-name sanitization (not imported) -- keeps this package's only
-# Capgemini-package dependency the single pick_project import above.
 CLOSING_TEMPLATE = "Thank you, {name}, for attending the interview. We will update you soon."
 CLOSING_FALLBACK = "Thank you for attending the interview. We will update you soon."
 _PLACEHOLDER_NAMES = {"", "auth0 user", "user", "unknown", "anonymous", "guest", "test user",
@@ -494,29 +633,31 @@ def closing_message(raw_name: Any, email: Any = None) -> str:
 # ---- Client projection (whitelist) -----------------------------------------
 def client_view(doc: Dict[str, Any], now: float) -> Dict[str, Any]:
     """The only shape the browser receives for a TCS interview. Strips
-    flags, scores, question banks, rubrics and feedback -- same whitelist
-    philosophy as capgemini_interview.client_view/dave_client_view."""
+    flags, scores, question banks, rubrics and feedback."""
     state = doc["state"]
+    tier = doc["tier"]
     finished = state["status"] != "in_progress"
+    phases = TCS_TIER_PHASE_ORDER[tier]
     view: Dict[str, Any] = {
         "interview_id": doc["interview_id"],
         "attempt_id": doc.get("attempt_id"),
         "mode": "tcs",
         "company_name": doc.get("company_name"),
-        "tier": doc.get("tier"),
+        "tier": tier,
         "tier_source": doc.get("tier_source"),
         "status": state["status"],
-        "stage": state["stage"],
-        "stage_label": STAGE_LABELS.get(state["stage"], state["stage"]),
-        "stages": [{"stage": s, "label": STAGE_LABELS[s]} for s in TCS_STAGE_ORDER],
+        "stage": STAGE_NAME,
+        "phase": state["phase"],
+        "phase_label": PHASE_LABELS.get(state["phase"], state["phase"]),
+        "phases": [{"phase": p, "label": PHASE_LABELS[p]} for p in phases],
         "deadline_epoch": state["deadline_at"],
         "server_now_epoch": now,
-        "turns": [{"stage": t["stage"], "question": t["question"], "answer": t["answer"]}
+        "turns": [{"phase": t["phase"], "question": t["question"], "answer": t["answer"]}
                   for t in doc.get("turns", [])],
         "current_question": None,
         "closing_message": closing_message(doc.get("candidate_name")) if finished else None,
     }
     if not finished and doc.get("current_question"):
         q = doc["current_question"]
-        view["current_question"] = {"id": q["id"], "stage": q["stage"], "prompt": q["prompt"]}
+        view["current_question"] = {"id": q["id"], "phase": q["phase"], "prompt": q["prompt"]}
     return view

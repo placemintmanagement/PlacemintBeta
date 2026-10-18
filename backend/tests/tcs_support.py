@@ -3,7 +3,13 @@ mocked clock, stubbed model -- no Mongo, no network, no real AI call.
 Mirrors dave_support.py's/spark_support.py's own pattern closely; reuses
 their generic, tier-agnostic _Coll/_Result/_Clock/_quote/_candidate_text
 directly (those have no Capgemini-specific content at all -- see
-spark_support.py)."""
+spark_support.py).
+
+Updated for the part-1 TCS restructure: single "interview" stage with
+per-tier phases (project/architecture/coding/puzzle/core), no more TR/MR/
+HR. `_TcsModel` is otherwise unchanged -- it already grades generically
+off "Key points (in order):"/"Candidate answer:", which every phase's
+prompt still uses."""
 import asyncio
 import re
 from types import SimpleNamespace
