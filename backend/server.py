@@ -6553,10 +6553,15 @@ async def _build_final_report_doc(
     interview_doc = await _finalize_interview_if_expired(interview_doc)
     interview_summary = _build_interview_summary(interview_doc)
 
-    # A Spark, Dave or Commit attempt's report is neither read from nor
+    # A Spark, Dave, Commit or TCS attempt's report is neither read from nor
     # written to the cache while its interview is still open: the report
-    # must not freeze without the interview.
-    capgemini_interview_open = bool(interview_doc and interview_doc.get("mode") in ("spark", "dave", "commit")
+    # must not freeze without the interview. "tcs" added 2026-10 -- it was
+    # missing here even though TCS has no live interview flow yet at this
+    # point in the codebase's history, so a TCS report would have been
+    # served stale/cached while its (future) interview was still open the
+    # moment that flow existed; fixing the gate now, before the TCS flow is
+    # wired in, closes that gap pre-emptively rather than after the fact.
+    capgemini_interview_open = bool(interview_doc and interview_doc.get("mode") in ("spark", "dave", "commit", "tcs")
                       and interview_doc["state"]["status"] == "in_progress")
     cached = None if capgemini_interview_open else await db.reports.find_one(dict(cache_query), {"_id": 0})
     if cached:
