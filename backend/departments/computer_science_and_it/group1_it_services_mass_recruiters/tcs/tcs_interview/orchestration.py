@@ -31,8 +31,20 @@ from fastapi import HTTPException
 from services.ai_service import GPT_MINI, GRADING_INJECTION_DEFENSE, tcs_key_point_flags_prompt
 
 from . import core
+from .banks import interview_puzzle_bank
 
 logger = logging.getLogger(__name__)
+
+
+def _seeded_real_puzzle_provider(interview_id: str) -> core.PuzzleProvider:
+    """Part 3: the real puzzle-provider, replacing core.py's Part-1 stub.
+    Ignores the `rng` argument core.PuzzleProvider's interface passes --
+    the real pick is seeded by `interview_id` alone (see
+    interview_puzzle_bank.pick_puzzle_for_interview's own docstring for
+    why), not by the per-start-call rng used for everything else."""
+    def _provider(tier: str, rng: random.Random) -> Dict[str, Any]:
+        return interview_puzzle_bank.puzzle_question_for_interview(tier, interview_id)
+    return _provider
 
 _SYSTEM_GRADER = ("You grade interview answers as an experienced engineer. Return only strict JSON.\n\n"
                   + GRADING_INJECTION_DEFENSE)
@@ -207,21 +219,28 @@ async def refresh_interview(*, db, now_utc, iso, interview: Dict[str, Any]) -> D
 async def start_interview(*, db, now_utc, new_id, iso, attempt: dict, attempt_id: Optional[str],
                           resume_projects: List[dict], user: Dict[str, Any], tier: str = "ninja",
                           tier_source: str = "oa_designated", company_id: str = "tcs-nqt",
-                          puzzle_provider: core.PuzzleProvider = core.stub_puzzle_provider) -> dict:
+                          puzzle_provider: Optional[core.PuzzleProvider] = None) -> dict:
     """Same call signature _start_spark_interview uses (server.py), so
     server.py's `_tier_start_fn` dispatch needs no special case for TCS.
 
-    `puzzle_provider` (STUB default, Part 1): Part 3 passes the real
-    banks/interview_puzzle_bank.py-backed provider here instead of relying
-    on the default -- see core.stub_puzzle_provider's own docstring."""
+    `puzzle_provider` (Part 3: real wiring, replacing Part 1's stub):
+    left as None by every real caller, which seeds the REAL
+    banks/interview_puzzle_bank.py-backed provider to THIS interview's own
+    id (see _seeded_real_puzzle_provider below) -- one puzzle per sitting,
+    reproducible on replay/resume because it is a pure function of
+    interview_id, not of wall-clock time. A test may still pass its own
+    puzzle_provider explicitly (e.g. core.stub_puzzle_provider, or a spy)
+    to bypass the real bank entirely."""
     now = now_utc().timestamp()
     rng = random.Random()
+    interview_id = new_id("intv")
     project = core.pick_project(resume_projects, rng)
-    phase_questions = core.build_phase_questions(tier, resume_projects, project, rng, puzzle_provider)
+    provider = puzzle_provider or _seeded_real_puzzle_provider(interview_id)
+    phase_questions = core.build_phase_questions(tier, resume_projects, project, rng, provider)
     first_phase = core.TCS_TIER_PHASE_ORDER[tier][0]
     first = phase_questions[first_phase][0]
     interview = {
-        "interview_id": new_id("intv"),
+        "interview_id": interview_id,
         "user_id": attempt["user_id"],
         "attempt_id": attempt_id,
         "company_id": company_id,

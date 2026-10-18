@@ -36,6 +36,7 @@ Tier mapping (OUR ESTIMATE): Digital = easy-medium, Prime = medium-hard.
 Puzzles are Digital/Prime ONLY -- "ninja" never appears in any
 `tier_tags` list in this file.
 """
+import random
 from typing import Any, Dict, List
 
 from . import puzzle_solvers as ps
@@ -1307,3 +1308,58 @@ def items_for_tier(tier: str) -> List[Dict[str, Any]]:
     """Never returns anything for "ninja" -- no item in this bank ever has
     "ninja" in its tier_tags (USER-STATED: puzzles are Digital/Prime only)."""
     return [p for p in INTERVIEW_PUZZLE_BANK if tier in p.get("tier_tags", [])]
+
+
+# ============================================================================
+# Part 3 wiring: one puzzle per sitting, seeded per interview
+# ============================================================================
+
+def pick_puzzle_for_interview(tier: str, interview_id: str) -> Dict[str, Any]:
+    """Deterministically picks exactly ONE puzzle for a given interview,
+    by tier. Seeded by `interview_id` alone (not by wall-clock time or any
+    other source of fresh randomness) -- calling this again with the same
+    (tier, interview_id) ALWAYS returns the same item, so a replayed/
+    resumed sitting (reload, closed tab, idle timeout) never sees a
+    different puzzle than it started with, even if this function were
+    ever called again outside of interview-start (e.g. future debug
+    tooling) rather than relying solely on the interview document's own
+    persisted phase_questions.
+
+    `random.Random(str)` seeding is used rather than Python's built-in
+    `hash()` deliberately: `hash()` on a str is randomised per-process by
+    PYTHONHASHSEED, while `random.Random`'s own seeding of a str/bytes
+    argument is NOT -- it is stable across processes and Python runs,
+    which is exactly the determinism this function promises."""
+    pool = items_for_tier(tier)
+    if not pool:
+        raise ValueError(f"interview_puzzle_bank has no items for tier {tier!r}")
+    # Sorted by id first so the pool's ORDER is stable regardless of how
+    # INTERVIEW_PUZZLE_BANK happens to be assembled -- the seed then
+    # determines the pick deterministically from that stable order.
+    stable_pool = sorted(pool, key=lambda p: p["id"])
+    rng = random.Random(f"tcs-interview-puzzle:{interview_id}")
+    return dict(rng.choice(stable_pool))
+
+
+def puzzle_question_for_interview(tier: str, interview_id: str) -> Dict[str, Any]:
+    """Shapes the chosen puzzle into the same {id, phase, topic, text,
+    key_points} shape every other TCS question uses (see core.py's
+    select_puzzle_questions/build_phase_questions), so the generic
+    orchestration.answer_interview grading path -- which already grades
+    ANY current question generically off its own `key_points`, through
+    the existing spend-controlled ai_service.tcs_key_point_flags_prompt
+    boundary -- needs no special case for the puzzle phase. `puzzle_meta`
+    carries the puzzle's own id/family/solution/follow_ups for reporting,
+    without being read by the grading path itself."""
+    puzzle = pick_puzzle_for_interview(tier, interview_id)
+    return {
+        "id": f"tcs-puzzle-{puzzle['id']}",
+        "phase": "puzzle",
+        "topic": "puzzle",
+        "text": puzzle["statement"],
+        "key_points": puzzle["rubric_key_points"],
+        "puzzle_meta": {
+            "puzzle_id": puzzle["id"], "family": puzzle["family"], "difficulty": puzzle["difficulty"],
+            "solution": puzzle["solution"], "follow_ups": puzzle["follow_ups"],
+        },
+    }
