@@ -65,15 +65,36 @@ _STATIC_BANK_ONLY_COMPANY_IDS = {
     if c.get("sections") and all(s.get("source") == "static_bank_only" for s in c["sections"])
 }
 
-# Companies with no interview phase at all (today: only TCS NQT). Checked at
-# the very top of /interview/start for BOTH start paths (attempt_id and
-# company_id) so a TCS attempt_id can no longer reach the generic interview
-# planner either -- before this (2026-10) nothing actually blocked that, it
-# just happened to never be exercised. Deliberately a separate set from
+# Companies with no interview phase at all. Checked at the very top of
+# /interview/start for BOTH start paths (attempt_id and company_id) so a
+# TCS attempt_id can no longer reach the generic interview planner either
+# -- before this (2026-10) nothing actually blocked that, it just happened
+# to never be exercised. Deliberately a separate set from
 # _STATIC_BANK_ONLY_COMPANY_IDS above: that one is about where OA questions
-# come from, this one is about whether a POST-OA interview exists; they
-# coincide for TCS today but are not the same concept.
-_NO_INTERVIEW_COMPANY_IDS = {"tcs-nqt"}
+# come from, this one is about whether a POST-OA interview exists.
+#
+# TCS NQT used to be a permanent, unconditional member of this set (its
+# interview didn't exist yet). It is now flag-gated instead (2026-10,
+# TCS_INTERVIEW_ENABLED) -- see _no_interview_company_ids() below, which
+# BOTH call sites of this set use instead of the set itself, so the flag is
+# read live rather than baked in at import time. The static set itself is
+# empty today (no company besides the now-flag-gated TCS lacks an interview
+# phase), but kept as a named, extensible set rather than deleted outright
+# in case a future company needs the same unconditional block.
+_NO_INTERVIEW_COMPANY_IDS: set = set()
+
+
+def _no_interview_company_ids() -> set:
+    """`_NO_INTERVIEW_COMPANY_IDS`, plus "tcs-nqt" whenever
+    TCS_INTERVIEW_ENABLED is off (the default) -- read live on every call,
+    same live-read philosophy as _auth_disabled()/tcs_interview_enabled(),
+    so flipping the env var takes effect immediately (no process restart,
+    no caching). With the flag on, "tcs-nqt" is no longer in this set at
+    all, and its interview becomes reachable."""
+    ids = set(_NO_INTERVIEW_COMPANY_IDS)
+    if not tcs_interview_enabled():
+        ids.add("tcs-nqt")
+    return ids
 from services import capgemini_tiers
 from services import tcs_tiers
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_recruitment_process import (
@@ -156,6 +177,17 @@ from departments.computer_science_and_it.group1_it_services_mass_recruiters.capg
     humanize as capgemini_humanize,
     pushback as capgemini_pushback,
     dsa_hints as capgemini_dsa_hints,
+)
+# TCS NQT interview (2026-10, TCS_INTERVIEW_ENABLED, default OFF -- see
+# tcs_interview_enabled() below): a brand-new module beside the Capgemini
+# interview package, not a refactor of it -- zero edits to any file under
+# departments/.../capgemini/ anywhere in this feature (confirmed by
+# `git diff <base>..HEAD -- backend/departments/*/capgemini/` being empty).
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs import (
+    tcs_interview,
+)
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_interview import (
+    orchestration as tcs_orchestration,
 )
 from collections import Counter
 
@@ -357,6 +389,19 @@ _DISABLE_AUTH_USER_SUB = "dev-no-auth|local"
 
 def _auth_disabled() -> bool:
     return os.environ.get("DISABLE_AUTH", "").strip().lower() in ("1", "true", "yes")
+
+
+# ---- TCS NQT interview feature flag (2026-10, default OFF) ----------------
+# Same exact env-var-reading convention as _auth_disabled() above (read live
+# on every call, never cached at import time; "1"/"true"/"yes" turn it on --
+# no "on"/"0" distinction, matching that function precisely rather than the
+# broader _FEATURE_FLAG_ON_VALUES set other flags in this file use). With
+# this OFF (the default), every new TCS interview hook below is a no-op and
+# tcs-nqt's /interview/start behaves EXACTLY as it did before this feature
+# existed (blocked, same "interview_not_available" response). ALL new TCS
+# interview behaviour in this file is gated behind this one flag.
+def tcs_interview_enabled() -> bool:
+    return os.environ.get("TCS_INTERVIEW_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 
 if _auth_disabled():
@@ -3641,10 +3686,22 @@ async def best_cleared_tier(user_id: str, company_id: str) -> Optional[str]:
 def _valid_interview_tiers(company_id: str) -> List[str]:
     """Tier NAMES an explicit tier= may name for this company's interview --
     empty for a company whose interview isn't tier-routed at all (every
-    company besides Capgemini today, including TCS, which has no interview
-    phase to route in the first place). Derived from is_spark/is_dave/
-    is_commit (so a tier core.py marks "not_designed" is correctly excluded
-    from this list too), never duplicated as a separate hardcoded list."""
+    company besides Capgemini and -- while TCS_INTERVIEW_ENABLED is on --
+    TCS). Derived from is_spark/is_dave/is_commit (so a tier core.py marks
+    "not_designed" is correctly excluded from this list too), never
+    duplicated as a separate hardcoded list.
+
+    TCS branch (2026-10, flag-gated): with TCS_INTERVIEW_ENABLED off, this
+    returns [] for "tcs-nqt" exactly as it always has (no interview to
+    route), so /interview/start's company_id path still 400s with
+    no_designated_tier/unknown_tier, same as before this feature existed.
+    With the flag on, every one of TCS_INTERVIEW_TIERS ("ninja", "digital",
+    "prime") is valid -- the OA's designated tier only PRE-SELECTS one of
+    these (use_designated=true); a student may equally choose any of the
+    three regardless of their own OA result, same permissiveness Capgemini
+    already has here for an explicit tier= with use_designated=false."""
+    if company_id == "tcs-nqt":
+        return list(tcs_interview.TCS_INTERVIEW_TIERS) if tcs_interview_enabled() else []
     if company_id != "capgemini":
         return []
     return [
@@ -3654,10 +3711,25 @@ def _valid_interview_tiers(company_id: str) -> List[str]:
 
 
 def _tier_start_fn(company_id: str, tier: Optional[str]):
-    """The Spark/Dave/Commit start function for this company+tier, or None
-    for a non-tier-routed company (generic interview) or an unrecognized/
-    not-yet-designed tier (also generic, or -- for the company_id start
-    path -- already rejected earlier as unknown_tier/no_designated_tier)."""
+    """The Spark/Dave/Commit/TCS start function for this company+tier, or
+    None for a non-tier-routed company (generic interview) or an
+    unrecognized/not-yet-designed tier (also generic, or -- for the
+    company_id start path -- already rejected earlier as unknown_tier/
+    no_designated_tier).
+
+    TCS branch (2026-10, flag-gated): returns None when
+    TCS_INTERVIEW_ENABLED is off, so this function's behaviour for
+    "tcs-nqt" is unchanged from before this feature existed. _start_tcs_
+    interview is never actually reachable with the flag off anyway --
+    _valid_interview_tiers above already returns [] for TCS in that case,
+    so /interview/start's company_id path 400s before this function is
+    even consulted -- but the explicit flag check here means this function
+    is also correct in isolation, not only correct as a side effect of
+    another gate."""
+    if company_id == "tcs-nqt":
+        if not tcs_interview_enabled() or not tier:
+            return None
+        return _start_tcs_interview if tier in tcs_interview.TCS_INTERVIEW_TIERS else None
     if company_id != "capgemini" or not tier:
         return None
     if capgemini_interview.is_spark(tier):
@@ -3715,9 +3787,10 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
             raise HTTPException(404, "Company not found")
         company_id = company["id"]
 
-    # Company without an interview phase at all (today: TCS) -- checked
-    # before any entitlement/guard work, for both start paths.
-    if company_id in _NO_INTERVIEW_COMPANY_IDS:
+    # Company without an interview phase at all (today: TCS, unless
+    # TCS_INTERVIEW_ENABLED is on) -- checked before any entitlement/guard
+    # work, for both start paths.
+    if company_id in _no_interview_company_ids():
         raise HTTPException(400, {
             "code": "interview_not_available",
             "message": "This company does not have an interview phase yet.",
@@ -3886,10 +3959,11 @@ async def list_my_interviews(user: Dict[str, Any] = Depends(require_user)):
     } for d in docs]
 
     companies_info = []
+    no_interview_ids = _no_interview_company_ids()
     for c in COMPANIES:
         companies_info.append({
             "company_id": c["id"],
-            "interview_available": c["id"] not in _NO_INTERVIEW_COMPANY_IDS,
+            "interview_available": c["id"] not in no_interview_ids,
             "designated_tier": await best_cleared_tier(user["user_id"], c["id"]),
         })
 
@@ -3907,6 +3981,8 @@ async def get_interview(interview_id: str, user: Dict[str, Any] = Depends(requir
         return _capgemini_tag_view(await _dave_refresh(doc), doc)
     if doc.get("mode") == "commit":
         return _capgemini_tag_view(await _commit_refresh(doc), doc)
+    if doc.get("mode") == "tcs":
+        return await _tcs_refresh(doc)
     return doc
 
 
@@ -3962,24 +4038,32 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
     interview = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
     if not interview:
         raise HTTPException(404, "Not found")
-    if interview.get("mode") in ("spark", "dave", "commit"):
+    if interview.get("mode") in ("spark", "dave", "commit", "tcs"):
         # Atomic claim BEFORE dispatching into the tier's own answer function
         # at all -- see _claim_turn_or_409's docstring. A genuine concurrent
         # double-submit on the same still-open question is rejected here with
         # zero model calls, rather than reaching _spark_answer/_dave_answer/
-        # _commit_answer's own grading/writer calls first and only losing
-        # later at persist time.
+        # _commit_answer/_tcs_answer's own grading calls first and only
+        # losing later at persist time. Generic by construction (keyed off
+        # current_question/turn_count, not mode), so TCS gets this guard
+        # for free, same as the other three.
         claim = await _claim_turn_or_409(interview, now_utc().timestamp())
         try:
             if interview["mode"] == "spark":
                 result = await _spark_answer(interview, body)
             elif interview["mode"] == "dave":
                 result = await _dave_answer(interview, body)
-            else:
+            elif interview["mode"] == "commit":
                 result = await _commit_answer(interview, body)
+            else:
+                result = await _tcs_answer(interview, body)
         finally:
             await _release_turn_claim(interview, claim)
-        return _capgemini_tag_view(result, interview)
+        # _capgemini_tag_view is a no-op for mode=="tcs" (it only acts on
+        # spark/dave/commit, by construction) -- skipped here rather than
+        # called-and-ignored, so TCS's own route path makes zero reference
+        # to anything named "capgemini".
+        return result if interview["mode"] == "tcs" else _capgemini_tag_view(result, interview)
     question = next((q for q in interview["questions"] if str(q.get("id")) == str(body.question_id)), None)
     if not question:
         raise HTTPException(404, "Question not found")
@@ -4004,6 +4088,43 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
                   "completed_at": iso(now_utc()) if status == "completed" else None}},
     )
     return {"grade": grade, "next_index": current_index, "status": status}
+
+
+# ---- TCS NQT interview (text, 45 minutes: 25 TR / 10 MR / 10 HR) ----------
+# (2026-10, TCS_INTERVIEW_ENABLED, default OFF.) Routes stay thin, same
+# philosophy as the Capgemini section below: these three functions are
+# mechanical trampolines into tcs_interview/orchestration.py (built as a
+# brand-new, self-contained module in an earlier commit; see that module's
+# own docstring for why the real DB-touching logic lives there and not
+# here) -- each one forwards this file's own module-level `db`/`now_utc`/
+# `new_id`/`iso`/`call_json_gpt` as explicit keyword arguments, since
+# orchestration.py cannot import server.py (server.py imports it) and so
+# cannot reach those as globals itself. Matches _start_spark_interview's
+# exact call signature (server.py's `_tier_start_fn` dispatch calls every
+# start function identically) so wiring it into that dispatch above was
+# mechanical.
+async def _start_tcs_interview(attempt: dict, attempt_id: Optional[str], resume_projects: List[dict],
+                               user: Dict[str, Any], *, tier: str = "ninja", tier_source: str = "oa_designated",
+                               company_id: str = "tcs-nqt") -> dict:
+    return await tcs_orchestration.start_interview(
+        db=db, now_utc=now_utc, new_id=new_id, iso=iso,
+        attempt=attempt, attempt_id=attempt_id, resume_projects=resume_projects, user=user,
+        tier=tier, tier_source=tier_source, company_id=company_id,
+    )
+
+
+async def _tcs_answer(interview: dict, body: "AnswerIn") -> dict:
+    return await tcs_orchestration.answer_interview(
+        db=db, now_utc=now_utc, iso=iso, call_json_gpt=call_json_gpt, interview=interview, body=body,
+    )
+
+
+async def _tcs_refresh(interview: dict) -> dict:
+    return await tcs_orchestration.refresh_interview(db=db, now_utc=now_utc, iso=iso, interview=interview)
+
+
+async def _tcs_finalize_if_expired(interview: dict) -> dict:
+    return await tcs_orchestration.finalize_if_expired(db=db, now_utc=now_utc, iso=iso, interview=interview)
 
 
 # ---- Capgemini Spark interview (text, 35 minutes) --------------------------
@@ -6501,6 +6622,12 @@ async def _finalize_interview_if_expired(interview_doc: Optional[dict]) -> Optio
     if interview_doc and interview_doc.get("mode") == "commit":
         # Same idempotent timeout-finalization, for an abandoned Commit interview.
         return await _commit_finalize_if_expired(interview_doc)
+    if interview_doc and interview_doc.get("mode") == "tcs":
+        # Same idempotent timeout-finalization, for an abandoned TCS interview --
+        # needed so the report-cache gate just above (capgemini_interview_open)
+        # correctly sees a timed-out status rather than a perpetually
+        # "in_progress" one for an interview nobody ever came back to.
+        return await _tcs_finalize_if_expired(interview_doc)
     return interview_doc
 
 
