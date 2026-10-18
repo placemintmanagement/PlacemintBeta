@@ -50,15 +50,23 @@ _TIER_TAGS_FOR_DIFFICULTY = {
 
 
 def _item(id_, title, statement, family, difficulty, solution, accepted_approaches,
-          rubric_key_points, common_wrong_answers, follow_ups, source, generated=False,
-          params=None) -> Dict[str, Any]:
+          rubric_key_points, common_wrong_answers, follow_ups, source, assumptions,
+          generated=False, params=None) -> Dict[str, Any]:
+    """`assumptions` (new field, puzzle-assumptions audit): a list of short
+    strings, one per load-bearing assumption the SOLUTION depends on --
+    every item must list every such assumption, and every one of them must
+    also be explicitly present in `statement` (never left implicit), so a
+    student is never asked to guess an unstated rule of the game (tested in
+    tests/test_interview_puzzle_bank.py)."""
+    if not assumptions:
+        raise ValueError(f"puzzle item {id_!r} must list at least one load-bearing assumption")
     return {
         "id": id_, "title": title, "statement": statement, "family": family,
         "difficulty": difficulty, "tier_tags": _TIER_TAGS_FOR_DIFFICULTY[difficulty],
         "solution": solution, "accepted_approaches": accepted_approaches,
         "rubric_key_points": rubric_key_points, "common_wrong_answers": common_wrong_answers,
-        "follow_ups": follow_ups, "source": source, "generated": generated,
-        "params": params or {},
+        "follow_ups": follow_ups, "source": source, "assumptions": assumptions,
+        "generated": generated, "params": params or {},
     }
 
 
@@ -79,10 +87,11 @@ def _generate_water_jugs() -> List[Dict[str, Any]]:
             title="Two Water Jugs",
             statement=(
                 f"You have two jugs with no measurement markings: one holds exactly {cap_a} litres, the "
-                f"other exactly {cap_b} litres. You also have unlimited access to water. Using only these "
-                f"two jugs (filling one completely, emptying one completely, or pouring from one into the "
-                f"other until either the source is empty or the destination is full), how would you end up "
-                f"with exactly {target} litre(s) in one of the jugs, and in how few such steps?"
+                f"other exactly {cap_b} litres, and both jugs start completely empty. You also have "
+                f"unlimited access to water. Using only these two jugs (filling one completely, emptying "
+                f"one completely, or pouring from one into the other until either the source is empty or "
+                f"the destination is full), how would you end up with exactly {target} litre(s) in one of "
+                f"the jugs, and in how few such steps?"
             ),
             family="water_jugs", difficulty=difficulty,
             solution=(
@@ -112,6 +121,10 @@ def _generate_water_jugs() -> List[Dict[str, Any]]:
                 "What is the smallest positive amount these two jugs could ever measure out exactly?",
             ],
             source="classic folklore puzzle family, original wording and parameters; solver-verified",
+            assumptions=[
+                "both jugs start completely empty before you begin",
+                f"the jugs have no measurement markings, only exact capacities of {cap_a} and {cap_b} litres",
+            ],
             generated=True, params={"cap_a": cap_a, "cap_b": cap_b, "target": target, "min_steps": steps},
         ))
     return items
@@ -129,11 +142,13 @@ def _generate_bridge_crossing() -> List[Dict[str, Any]]:
             id_=f"tcs-puz-bridge-{'-'.join(map(str, times))}",
             title="Crossing the Bridge by Torchlight",
             statement=(
-                f"{len(times)} people need to cross a narrow bridge at night. They have exactly one torch, "
-                f"and the bridge is only safe to cross with the torch in hand. At most two people can cross "
+                f"{len(times)} people all start together on the same side of a narrow bridge at night and "
+                f"need to get every one of them across to the far side. They have exactly one torch, and "
+                f"the bridge is only safe to cross with the torch in hand. At most two people can cross "
                 f"together at a time, and whenever two cross together they move at the slower person's "
-                f"pace. Someone must carry the torch back for the next crossing. Their individual crossing "
-                f"times are: {people_desc}. What is the minimum total time for all of them to get across?"
+                f"pace. Someone must carry the torch back for the next crossing, and each person's time "
+                f"below applies equally whether they are crossing to the far side or carrying the torch "
+                f"back: {people_desc}. What is the minimum total time for all of them to get across?"
             ),
             family="bridge_crossing", difficulty=difficulty,
             solution=(
@@ -167,6 +182,11 @@ def _generate_bridge_crossing() -> List[Dict[str, Any]]:
                 "How would the answer change if three people could cross the bridge at once instead of two?",
             ],
             source="classic folklore puzzle family, original wording and parameters; solver-verified",
+            assumptions=[
+                "everyone starts together on the same side of the bridge and all must get to the far side",
+                "each person's stated time applies equally whether crossing to the far side or carrying "
+                "the torch back",
+            ],
             generated=True, params={"times": times, "min_total_time": total},
         ))
     return items
@@ -220,6 +240,10 @@ def _generate_river_crossing() -> List[Dict[str, Any]]:
                 "Which of the three items is the 'problem' one, and why does it need an extra trip?",
             ],
             source="classic folklore puzzle, original wording; solver-verified",
+            assumptions=[
+                "the boat holds the farmer plus exactly one other item, and nothing can cross by itself",
+                "left alone without the farmer, the wolf would eat the goat and the goat would eat the cabbage",
+            ],
             generated=True, params={"min_trips": wgc[0]},
         ),
         _item(
@@ -260,6 +284,10 @@ def _generate_river_crossing() -> List[Dict[str, Any]]:
                 "Does the order in which you move people matter, or are there multiple equally valid plans?",
             ],
             source="classic folklore puzzle, original wording; solver-verified",
+            assumptions=[
+                "the boat holds at most two people and anyone present (missionary or cannibal) can row it",
+                "cannibals must never outnumber missionaries on a bank where missionaries are present",
+            ],
             generated=True, params={"min_trips": mc2[0]},
         ),
         _item(
@@ -298,6 +326,10 @@ def _generate_river_crossing() -> List[Dict[str, Any]]:
                 "before any missionary joins them? Why might that be necessary?",
             ],
             source="classic folklore puzzle, original wording; solver-verified",
+            assumptions=[
+                "the boat holds at most two people and anyone present can row it",
+                "cannibals must never outnumber missionaries on a bank where missionaries are present",
+            ],
             generated=True, params={"min_trips": mc3[0]},
         ),
     ]
@@ -353,6 +385,10 @@ def _generate_counterfeit_coin() -> List[Dict[str, Any]]:
                 "heavier or lighter than the rest?",
             ],
             source="classic folklore puzzle family, original wording and parameters; solver-verified",
+            assumptions=[
+                f"exactly one of the {n} coins is counterfeit and it is heavier than every genuine coin",
+                "all genuine coins weigh exactly the same as each other",
+            ],
             generated=True, params={"n_coins": n, "min_weighings": search_result},
         ))
     return items
@@ -407,6 +443,10 @@ def _generate_hundred_doors() -> List[Dict[str, Any]]:
                 "Without simulating anything, how many doors would be open if there were 500 doors instead?",
             ],
             source="classic folklore puzzle family, original wording and parameters; solver-verified",
+            assumptions=[
+                f"all {n} doors start closed before the first person walks through",
+                "the kth person toggles every door whose number is a multiple of k",
+            ],
             generated=True, params={"n_doors": n, "open_doors": sim},
         ))
     return items
@@ -443,6 +483,9 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
         follow_ups=["How would the answer change with 20 people instead of 10?",
                    "What if two specific people in the group refuse to shake hands with each other?"],
         source="classic folklore puzzle, original wording",
+        assumptions=[
+            "every person shakes hands with every other person exactly once, never twice",
+        ],
     ),
     _item(
         id_="tcs-puz-clock-overlap", title="Overlapping Clock Hands",
@@ -474,6 +517,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
         follow_ups=["At what time (besides 12:00) does the first overlap after 12:00 happen, roughly?",
                    "How many times do the hands point in exactly OPPOSITE directions in 12 hours?"],
         source="classic folklore puzzle, original wording",
+        assumptions=[
+            "the hour hand and minute hand start exactly together at 12:00",
+            "this is an ordinary analog 12-hour clock",
+        ],
     ),
     _item(
         id_="tcs-puz-two-coins", title="Two Coins, Thirty Cents",
@@ -498,6 +545,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
         follow_ups=["Can you think of another pair of coins and a similarly phrased true-but-misleading "
                    "clue about them?"],
         source="classic folklore puzzle, original wording",
+        assumptions=[
+            "the two coins add up to exactly 30 cents",
+            "only one of the two coins is guaranteed not to be a nickel",
+        ],
     ),
     _item(
         id_="tcs-puz-missing-number", title="The Erased Number",
@@ -521,6 +572,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
         follow_ups=["What if two numbers (not just one) were erased and you were only told the final "
                    "sum -- could you still always find them uniquely?"],
         source="classic folklore puzzle, original wording and numbers",
+        assumptions=[
+            "the numbers 1 to 20 are each written down exactly once before one is erased",
+            "the remaining 19 numbers add up to exactly 203",
+        ],
     ),
     _item(
         id_="tcs-puz-frog-well", title="The Frog in the Well",
@@ -551,6 +606,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
         follow_ups=["How would the answer change if the frog climbed 4 metres by day instead of 3?",
                    "What is the general rule for solving this kind of climb-and-slide-back problem?"],
         source="classic folklore puzzle, original wording and numbers",
+        assumptions=[
+            "the frog climbs 3 metres every day and slides back 2 metres every night",
+            "on the day it reaches or passes the top it climbs out immediately and does not slide back",
+        ],
     ),
     # ---- MEDIUM (14) ---------------------------------------------------------
     _item(
@@ -558,9 +617,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
         statement=(
             "You're standing in a room with two doors. One leads to freedom, the other leads nowhere "
             "good. Two guards stand there: one of them always tells the truth, the other always lies -- "
-            "but you don't know which guard is which, or which door is which. You're allowed to ask "
-            "exactly ONE yes/no question, directed at only ONE of the two guards. What question do you "
-            "ask to be sure of reaching the door to freedom?"
+            "but you don't know which guard is which, or which door is which. Both guards DO know which "
+            "door actually leads to freedom, and whichever guard you ask will answer your question. "
+            "You're allowed to ask exactly ONE yes/no question, directed at only ONE of the two guards. "
+            "What question do you ask to be sure of reaching the door to freedom?"
         ),
         family="two_guards", difficulty="medium",
         solution="Ask either guard: 'If I asked the OTHER guard whether this door leads to freedom, "
@@ -590,6 +650,11 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "which guard you're talking to?",
                    "Could you ask a different single question of the SAME guard that also works?"],
         source="classic folklore puzzle, original wording",
+        assumptions=[
+            "both guards know which door actually leads to freedom, even though only one of them tells the truth",
+            "whichever guard you ask will answer your question",
+            "you don't know which guard is which, or which door is which",
+        ],
     ),
     _item(
         id_="tcs-puz-light-switches", title="Three Switches, One Bulb",
@@ -627,14 +692,20 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "What other physical property (besides heat) could you use to encode extra "
                    "information if this were, say, a pair of bulbs instead?"],
         source="classic folklore puzzle, original wording",
+        assumptions=[
+            "exactly one of the three switches controls the bulb and the other two do nothing",
+            "you may flip the switches as much as you like while downstairs, but may check the bulb only once",
+        ],
     ),
     _item(
         id_="tcs-puz-burning-rope", title="Two Ropes, Forty-Five Minutes",
         statement=(
             "You have two ropes and a lighter. Each rope takes exactly 60 minutes to burn completely "
             "from one end to the other, but neither rope burns at a perfectly even rate along its "
-            "length (so you can't assume the halfway point burns at the 30-minute mark). How can you use "
-            "these two ropes and the lighter to measure exactly 45 minutes?"
+            "length (so you can't assume the halfway point burns at the 30-minute mark). You may light "
+            "a rope at either end, or at both ends at once, and you may light a rope's second end at any "
+            "later moment you choose. How can you use these two ropes and the lighter to measure exactly "
+            "45 minutes?"
         ),
         family="burning_rope", difficulty="medium",
         solution="Light rope A at BOTH ends at the same time, and light rope B at only ONE end, all at "
@@ -664,6 +735,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
         follow_ups=["How would you measure exactly 15 minutes using the same two ropes?",
                    "Could you measure exactly 20 minutes with these two ropes? Why or why not?"],
         source="classic folklore puzzle, original wording",
+        assumptions=[
+            "each rope takes exactly 60 minutes to burn completely, even though it burns unevenly along its length",
+            "a rope may be lit at either end, or at both ends at once, and a second end may be lit later",
+        ],
     ),
     _item(
         id_="tcs-puz-mislabeled-boxes", title="Three Mislabeled Boxes",
@@ -701,16 +776,22 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "What if only ONE label (not all three) were known to be wrong -- would one draw "
                    "still be enough?"],
         source="classic folklore puzzle, original wording",
+        assumptions=[
+            "every single label is wrong, so no box's label matches its actual contents",
+            "you may draw exactly one fruit from exactly one box before relabeling all three",
+        ],
     ),
     _item(
         id_="tcs-puz-monty-hall", title="The Three-Door Game Show",
         statement=(
-            "On a game show, there are three closed doors. Behind one is a car; behind the other two are "
-            "goats. You pick a door, say Door 1. Before opening it, the host -- who knows exactly where "
-            "the car is and always opens a door with a goat behind it -- opens one of the OTHER two "
-            "doors, revealing a goat. You're then given the choice to either stick with your original "
-            "pick or switch to the remaining unopened door. Should you switch, stick, or does it not "
-            "matter -- and what's your probability of winning the car either way?"
+            "On a game show, there are three closed doors, and the car is placed uniformly at random "
+            "behind one of them before you choose (each door equally likely). Behind one is the car; "
+            "behind the other two are goats. You pick a door, say Door 1. Before opening it, the host -- "
+            "who knows exactly where the car is and always opens one of the OTHER two doors, never your "
+            "own pick and never the door with the car, always revealing a goat -- opens one of those "
+            "other two doors. You're then given the choice to either stick with your original pick or "
+            "switch to the remaining unopened door. Should you switch, stick, or does it not matter -- "
+            "and what's your probability of winning the car either way?"
         ),
         family="monty_hall", difficulty="medium",
         solution="You should SWITCH. Switching wins the car with probability 2/3; sticking only wins "
@@ -736,14 +817,20 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "Does the answer change if the host sometimes opens a door at RANDOM, without "
                    "necessarily knowing where the car is?"],
         source="classic probability puzzle, original wording",
+        assumptions=[
+            "the car is placed uniformly at random behind one of the three doors before you choose",
+            "the host knows exactly where the car is and always opens a door with a goat behind it",
+            "the host never opens the door you originally picked, and never the door with the car",
+        ],
     ),
     _item(
         id_="tcs-puz-ant-triangle", title="Three Ants on a Triangle",
         statement=(
             "Three ants sit at the three corners of a triangle. At the same moment, each ant "
-            "independently picks a random direction -- either clockwise or counter-clockwise along the "
-            "triangle's edges -- and starts walking at the same speed toward the next corner. What is the "
-            "probability that NONE of the ants collide with each other along an edge?"
+            "independently picks a random direction -- clockwise or counter-clockwise along the "
+            "triangle's edges, each direction equally likely (50/50) -- and starts walking at the same "
+            "constant speed toward the next corner. What is the probability that NONE of the ants "
+            "collide with each other along an edge?"
         ),
         family="ant_collision", difficulty="medium",
         solution="1/4 (25%). There are 2 possible direction choices per ant, so 2^3 = 8 equally likely "
@@ -769,6 +856,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "Does the actual SPEED of the ants matter to this probability, or only their choice "
                    "of direction?"],
         source="classic probability puzzle, original wording",
+        assumptions=[
+            "each ant independently chooses clockwise or counter-clockwise with equal 50/50 probability",
+            "all three ants walk at the same constant speed along the triangle's edges",
+        ],
     ),
     _item(
         id_="tcs-puz-doubling-bridges", title="Doubling Money Across Toll Bridges",
@@ -803,6 +894,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
         follow_ups=["How would the answer change if there were 4 bridges instead of 3?",
                    "What's the general formula for the starting amount, given N bridges and a fixed toll t?"],
         source="classic folklore puzzle, original wording and numbers",
+        assumptions=[
+            "at each bridge, her money doubles first and then the fixed toll of 8 coins is charged",
+            "after crossing all 3 bridges and paying all 3 tolls she has exactly 0 coins left",
+        ],
     ),
     _item(
         id_="tcs-puz-fly-trains", title="The Fly Between Two Trains",
@@ -840,6 +935,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "Could you still solve this if the fly's speed also changed partway through?"],
         source="classic mathematical puzzle (often attributed to a famous mathematician's instant "
                "answer), original wording and numbers",
+        assumptions=[
+            "the two trains start 60 km apart and head directly toward each other",
+            "the fly flies continuously at a constant 90 km/h the entire time until the trains meet",
+        ],
     ),
     _item(
         id_="tcs-puz-horse-race-fastest", title="Finding the Fastest of 25 Horses",
@@ -873,6 +972,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "Now suppose you needed to find the top 3 fastest horses instead of just the fastest "
                    "one -- would 6 races still be enough?"],
         source="classic folklore interview puzzle, original wording and numbers",
+        assumptions=[
+            "horses race identically every time, with no randomness between repeated races",
+            "a race only reveals finishing order, never actual times, and at most 5 horses can race at once",
+        ],
     ),
     _item(
         id_="tcs-puz-weight-deficit-coins", title="Ten Bags, One Weighing",
@@ -909,6 +1012,11 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "potentially be counterfeit?",
                    "What's the largest number of bags this exact one-weighing trick could handle?"],
         source="classic folklore puzzle, original wording and numbers",
+        assumptions=[
+            "all the coins in exactly one of the 10 bags are counterfeit, each weighing exactly 9 grams "
+            "instead of 10",
+            "the digital scale may be used only once",
+        ],
     ),
     _item(
         id_="tcs-puz-knights-knaves", title="A Simple Knight and Knave",
@@ -943,6 +1051,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "Can you construct a statement A could make that would make it IMPOSSIBLE to "
                    "determine either A's or B's identity for certain?"],
         source="classic folklore puzzle, original wording",
+        assumptions=[
+            "every inhabitant is either a Knight who always tells the truth or a Knave who always lies, "
+            "with no middle ground",
+        ],
     ),
     _item(
         id_="tcs-puz-missing-dollar", title="The Missing Dollar",
@@ -984,6 +1096,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "Can you think of another everyday example where adding numbers from two different "
                    "'perspectives' of the same transaction creates a similar illusion?"],
         source="classic folklore puzzle, original wording and numbers",
+        assumptions=[
+            "the room cost $30, split evenly into $10 each by the three friends",
+            "the bellboy gives each friend $1 back (returning $3 total) and pockets the remaining $2",
+        ],
     ),
     _item(
         id_="tcs-puz-lily-pad", title="The Doubling Lily Pads",
@@ -1013,6 +1129,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "If the patch instead TRIPLED in size every day and reached full coverage on day 48, "
                    "on what day would it have been at half coverage?"],
         source="classic folklore puzzle, original wording and numbers",
+        assumptions=[
+            "the lily pad patch doubles in size every single day",
+            "the pond is completely covered on day 48",
+        ],
     ),
     _item(
         id_="tcs-puz-marble-jars", title="Maximizing Red Marbles Across Two Jars",
@@ -1056,6 +1176,11 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "What's the theoretical best possible probability achievable here, and does the "
                    "1-marble scheme get arbitrarily close to it as the total marble count grows?"],
         source="classic probability puzzle, original wording and numbers",
+        assumptions=[
+            "the picker chooses one of the two jars completely at random, then one marble from inside "
+            "that jar completely at random",
+            "neither jar may be left completely empty",
+        ],
     ),
     # ---- HARD (5) -------------------------------------------------------------
     _item(
@@ -1104,6 +1229,12 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "How would the strategy need to change if there were 3 possible hat colors instead "
                    "of just 2?"],
         source="classic folklore puzzle, original wording and numbers",
+        assumptions=[
+            "each prisoner can see the hats of everyone in front of them, but never their own",
+            "prisoners state their guess one at a time from the back of the line, loud enough for "
+            "everyone to hear",
+            "no other communication is allowed before or during, and they may agree on a strategy beforehand",
+        ],
     ),
     _item(
         id_="tcs-puz-egg-drop-100", title="Two Eggs, a Hundred Floors",
@@ -1148,6 +1279,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "Can you explain WHY the decreasing-by-1 step size is exactly what balances the worst "
                    "case, rather than decreasing by 2 or some other amount?"],
         source="classic folklore interview puzzle, original wording and numbers",
+        assumptions=[
+            "an egg that survives a drop can be reused; an egg that breaks cannot be reused",
+            "there is a single unknown threshold floor: eggs never break below it and always break at or above it",
+        ],
     ),
     _item(
         id_="tcs-puz-horse-race-top3", title="Finding the Top 3 of 25 Horses",
@@ -1191,6 +1326,10 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "How would the number of required races change if you needed the top 4 fastest horses "
                    "instead of the top 3?"],
         source="classic folklore interview puzzle, original wording and numbers",
+        assumptions=[
+            "the same no-stopwatch, no-randomness, 5-horses-per-race rules from the single-fastest-horse "
+            "version apply here too",
+        ],
     ),
     _item(
         id_="tcs-puz-poison-wine", title="1000 Bottles, One Poisoned, 10 Test Animals",
@@ -1234,12 +1373,21 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "10 animals?",
                    "How would the scheme need to change if TWO bottles (not just one) could be poisoned?"],
         source="classic folklore puzzle, original wording and numbers",
+        assumptions=[
+            "exactly one bottle out of the 1000 is poisoned",
+            "any animal that drinks even a tiny amount of the poisoned wine shows the symptom at exactly "
+            "the 24-hour mark, and animals that drink none never show it",
+            "every animal drinks at the very start and symptoms are observed only once, at the 24-hour deadline",
+        ],
     ),
     _item(
         id_="tcs-puz-blue-eyed-islanders", title="The Two Blue-Eyed Islanders",
         statement=(
             "On an island, everyone has either blue or brown eyes. Each person can see everyone else's "
-            "eye color, but never their own, and nobody is allowed to discuss eye color at all. One day, "
+            "eye color, but never their own, and nobody is allowed to discuss eye color at all. Every "
+            "islander is a perfect, instantaneous logician, and this is itself common knowledge -- "
+            "everyone knows that everyone else will immediately deduce and act on anything that becomes "
+            "logically certain. One day, "
             "a visitor publicly announces, to everyone at once: 'At least one of you has blue eyes.' (Every "
             "single islander already knew this was true just by looking around -- but now it has been "
             "said OUT LOUD, in front of everyone, making it what's called 'common knowledge'.) The island's "
@@ -1285,6 +1433,13 @@ _STATIC_ITEMS: List[Dict[str, Any]] = [
                    "visitor's statement is never actually said out loud, even though everyone already "
                    "individually knew it was true?"],
         source="classic common-knowledge logic puzzle, original wording",
+        assumptions=[
+            "every islander is a perfect, instantaneous logician, and this is itself common knowledge "
+            "among them",
+            "nobody is allowed to discuss eye color at all, and each person sees everyone else's eyes "
+            "but never their own",
+            "there are exactly 2 blue-eyed islanders",
+        ],
     ),
 ]
 

@@ -22,7 +22,42 @@ from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.
 REQUIRED_FIELDS = (
     "id", "title", "statement", "family", "difficulty", "tier_tags", "solution",
     "accepted_approaches", "rubric_key_points", "common_wrong_answers", "follow_ups", "source",
+    "assumptions",
 )
+
+# ---- assumptions-audit helpers ---------------------------------------------
+# Reasonable fuzzy/keyword matching (not exact-string, not a rubber stamp):
+# an assumption string is considered "reflected" in a statement if most of
+# its own significant (non-stopword, length>=4) words appear as substrings
+# somewhere in the statement text. Substring (not whole-word) containment on
+# purpose, so "uniform"/"uniformly", "random"/"randomly" etc. still match.
+import re as _re
+
+_STOPWORDS = {
+    "the", "a", "an", "is", "are", "to", "of", "and", "or", "in", "on", "at", "that", "this",
+    "with", "it", "as", "be", "by", "for", "from", "their", "its", "they", "them", "each",
+    "both", "must", "will", "can", "not", "never", "always", "before", "only", "any", "your",
+    "you", "these", "those", "than", "when", "while", "even", "either", "other", "same",
+    "exactly", "all", "used", "using", "about", "what", "how", "does", "would", "may", "might",
+    "have", "has", "had", "into", "out", "over", "once", "more", "some", "who", "whom", "there",
+    "being", "being.",
+}
+
+
+def _keywords(text):
+    words = _re.findall(r"[a-zA-Z]+", text.lower())
+    return [w for w in words if len(w) >= 4 and w not in _STOPWORDS]
+
+
+def _assumption_is_reflected(assumption, statement, threshold=0.6):
+    """True if `threshold` or more of the assumption's own significant
+    keywords appear (as substrings) in `statement`."""
+    statement_lower = statement.lower()
+    kws = _keywords(assumption)
+    if not kws:
+        return True  # no meaningful keywords to check (shouldn't happen for real assumptions)
+    matched = sum(1 for w in kws if w in statement_lower)
+    return (matched / len(kws)) >= threshold
 
 
 # ---- solver tests: hand-checked known cases --------------------------------
@@ -211,6 +246,46 @@ def test_by_id_and_items_for_tier_helpers():
         assert "digital" in p["tier_tags"]
     for p in ipb.items_for_tier("prime"):
         assert "prime" in p["tier_tags"]
+
+
+def test_every_item_has_a_nonempty_assumptions_list():
+    for p in ipb.INTERVIEW_PUZZLE_BANK:
+        assumptions = p.get("assumptions")
+        assert isinstance(assumptions, list) and len(assumptions) >= 1, (
+            f"{p['id']} must list at least one load-bearing assumption"
+        )
+        for a in assumptions:
+            assert isinstance(a, str) and a.strip(), f"{p['id']} has an empty assumption string"
+
+
+def test_every_assumption_is_substantively_reflected_in_its_own_statement():
+    """Every assumption an item lists must actually be WRITTEN into that
+    item's student-facing statement -- not merely known to the puzzle's
+    author. This is the regression gate for the puzzle-assumptions audit
+    (Monty Hall's car-placement uniformity, Two Guards' guard knowledge,
+    water jugs' empty start, etc.): if someone lists a new assumption but
+    forgets to actually add it to the statement text, this test catches it."""
+    failures = []
+    for p in ipb.INTERVIEW_PUZZLE_BANK:
+        for assumption in p["assumptions"]:
+            if not _assumption_is_reflected(assumption, p["statement"]):
+                failures.append((p["id"], assumption))
+    assert not failures, (
+        "assumption(s) listed but not reflected in the statement text: "
+        + "; ".join(f"{pid}: {a!r}" for pid, a in failures)
+    )
+
+
+def test_assumption_reflected_helper_actually_catches_an_unreflected_assumption():
+    """Sanity check on the checker itself (not a rubber stamp): an
+    assumption with no real relationship to the statement must be flagged
+    as NOT reflected, proving the keyword-overlap check has teeth."""
+    statement = "Three ants sit at the three corners of a triangle and start walking."
+    unrelated_assumption = "the counterfeit coin weighs exactly nine grams on a digital scale"
+    assert not _assumption_is_reflected(unrelated_assumption, statement)
+    # And a genuinely-reflected one (sharing the statement's own words) passes.
+    related_assumption = "three ants sit at the corners of a triangle"
+    assert _assumption_is_reflected(related_assumption, statement)
 
 
 def test_no_puzzle_has_an_unflagged_multiple_valid_answer():
