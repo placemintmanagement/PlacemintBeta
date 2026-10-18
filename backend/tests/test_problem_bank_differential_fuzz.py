@@ -30,6 +30,7 @@ for the per-problem reasoning) -- none of them has a legitimate
 correct everywhere here.
 """
 import random
+import subprocess
 
 import pytest
 
@@ -37,6 +38,48 @@ from banks import problem_bank
 from banks import problem_input_gen as pig
 
 FUZZ_TRIALS = 200
+
+# Root-caused (2026-10, flaky-test investigation): this file alone makes
+# FUZZ_TRIALS * len(FUZZ_TARGETS) = 200 * 58 = 11,600 fresh `python3`
+# subprocess spawns per run, via problem_bank._run_ref -- roughly 15-20x
+# the subprocess volume of a full bank hydration (~104 problems x a
+# handful of stored test_inputs each). problem_bank.py's own
+# _REF_TIMEOUT_DEFAULT docstring (banks/problem_bank.py, just above
+# _run_ref) already documents the exact mechanism: on this machine,
+# Windows Defender's real-time/IOAV protection scans each newly-written
+# file before exec, and _run_ref's write-then-exec pattern occasionally
+# (rarely -- 1 slow spawn out of ~800+ in that comment's own observation)
+# blocks a subprocess spawn past the 5-second default timeout even
+# though the reference solution itself runs in a fraction of a second
+# (confirmed directly: see this file's own history -- 20+ solo reruns of
+# every parametrization here, plus a standalone timing harness run
+# alongside concurrent CPU load, never saw a single _run_ref call take
+# more than ~0.3s). Because this file's subprocess volume is so much
+# larger than anywhere else that calls _run_ref, and because a full-suite
+# run spends many minutes with this module's subprocess-spawning running
+# concurrently with pytest-xdist's OTHER worker (pytest.ini pins
+# `-n 2 --dist loadscope`, not changed here), it is simply the single
+# place in the whole suite statistically most likely to have one spawn
+# out of its 11,600 land on one of Defender's rare scan-induced delays --
+# which is exactly why two different full-suite runs each saw a
+# DIFFERENT parametrization fail: it's whichever spawn happens to be
+# unlucky that run, not a property of any specific problem's reference
+# solution or checker (every trial's input is fully deterministic --
+# seeded from `random.Random(f"fuzz:{pid}")` -- so a real reference-vs-
+# checker disagreement would reproduce identically on every retry, while
+# a transient spawn-delay timeout would not).
+#
+# Hardened here, not by raising the shared PM_BANK_REF_TIMEOUT default
+# (that default is also used by real bank hydration elsewhere and 5s is
+# the right value there): a single subprocess.TimeoutExpired from
+# problem_bank._run_ref is retried exactly once before being treated as a
+# real failure. A genuine reference/checker disagreement is unaffected --
+# it raises AssertionError, not TimeoutExpired, and is never retried.
+def _run_ref_tolerant(ref: str, stdin: str):
+    try:
+        return problem_bank._run_ref(ref, stdin)
+    except subprocess.TimeoutExpired:
+        return problem_bank._run_ref(ref, stdin)
 
 
 def _min_platforms_small_random(rng: random.Random) -> str:
@@ -82,7 +125,7 @@ def test_differential_fuzz_reference_vs_checker(pid):
     rng = random.Random(f"fuzz:{pid}")
     for trial in range(FUZZ_TRIALS):
         stdin = random_input(rng)
-        ref_out = problem_bank._run_ref(ref, stdin)
+        ref_out = _run_ref_tolerant(ref, stdin)
         checker_out = str(checker(stdin)).strip()
         assert ref_out == checker_out, (
             f"{pid} trial {trial}/{FUZZ_TRIALS}: reference and checker disagree on "
