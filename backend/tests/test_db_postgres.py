@@ -170,3 +170,103 @@ def test_fetch_one_returns_first_row_or_none(monkeypatch):
     monkeypatch.setattr(db_postgres, "get_pool", lambda: empty_pool)
     row = asyncio.run(db_postgres.fetch_one("SELECT a FROM t WHERE false"))
     assert row is None
+
+
+# ---- transaction() ------------------------------------------------------------
+
+class _FakeTxnCursor:
+    def __init__(self):
+        self.executed = []
+
+    async def execute(self, sql, params=()):
+        self.executed.append((sql, tuple(params) if not isinstance(params, tuple) else params))
+
+    async def fetchone(self):
+        return {"ok": True}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeTxnBlock:
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        self._conn.txn_entered = True
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self._conn.txn_exited_with = exc_type
+        return False  # never swallow -- a caller's exception must still propagate
+
+
+class _FakeTxnConn:
+    def __init__(self):
+        self.txn_entered = False
+        self.txn_exited_with = "unset"
+        self.cursors = []
+
+    def transaction(self):
+        return _FakeTxnBlock(self)
+
+    def cursor(self):
+        cur = _FakeTxnCursor()
+        self.cursors.append(cur)
+        return cur
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeTxnPool:
+    def __init__(self):
+        self.conns = []
+
+    def connection(self):
+        conn = _FakeTxnConn()
+        self.conns.append(conn)
+        return conn
+
+
+def test_transaction_yields_cursor_inside_begin_commit_block(monkeypatch):
+    fake_pool = _FakeTxnPool()
+    monkeypatch.setattr(db_postgres, "get_pool", lambda: fake_pool)
+
+    async def run():
+        async with db_postgres.transaction() as cur:
+            await cur.execute("INSERT INTO t VALUES (%s)", (1,))
+            return await cur.fetchone()
+
+    result = asyncio.run(run())
+    assert result == {"ok": True}
+    conn = fake_pool.conns[0]
+    assert conn.txn_entered is True
+    assert conn.txn_exited_with is None  # clean exit, no exception
+    assert conn.cursors[0].executed == [("INSERT INTO t VALUES (%s)", (1,))]
+
+
+def test_transaction_propagates_exception_from_the_block():
+    async def run():
+        with pytest.raises(ValueError):
+            async with db_postgres.transaction() as cur:
+                raise ValueError("boom")
+
+    # Patched per-test since this one needs the pool available at call time.
+    import db_postgres as mod
+
+    fake_pool = _FakeTxnPool()
+    orig = mod.get_pool
+    mod.get_pool = lambda: fake_pool
+    try:
+        asyncio.run(run())
+        conn = fake_pool.conns[0]
+        assert conn.txn_exited_with is ValueError
+    finally:
+        mod.get_pool = orig

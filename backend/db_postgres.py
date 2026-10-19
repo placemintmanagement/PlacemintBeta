@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, List, Optional, Sequence
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, List, Optional, Sequence
 from urllib.parse import urlsplit
 
+from psycopg import AsyncCursor
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -136,3 +138,33 @@ async def fetch_all(sql: str, params: Sequence[Any] = ()) -> List[dict]:
 async def fetch_one(sql: str, params: Sequence[Any] = ()) -> Optional[dict]:
     rows = await fetch_all(sql, params)
     return rows[0] if rows else None
+
+
+@asynccontextmanager
+async def transaction() -> AsyncIterator[AsyncCursor]:
+    """Yields a dict_row cursor that runs inside a single Postgres
+    transaction on one pooled connection -- for repository functions that
+    need more than one statement to commit (or roll back) together as one
+    unit, e.g. inserting an `oa_attempts` row and its paired
+    `oa_attempt_keys` row, or a report/interview "finish" sequence that
+    deletes a stale cached report and writes the fresh state in its place
+    (see SUPABASE_MIGRATION_BRIEF.md's transaction-wrapper requirement).
+
+    Every pool connection already runs with autocommit=True (see
+    _connect_kwargs) so plain fetch_all/fetch_one calls each commit
+    immediately as their own implicit transaction -- that's correct for a
+    single statement, including an atomic single-statement
+    UPDATE ... RETURNING, but wrong when two or more statements must
+    succeed or fail as one unit. `conn.transaction()` (psycopg 3) opens an
+    explicit transaction block even on an autocommit connection: it BEGINs
+    on entry and COMMITs on a clean exit, or ROLLBACKs if the block raises
+    -- exactly the semantics callers need here. Nothing in this module
+    auto-retries; a caller that needs to react to a specific failure (e.g.
+    psycopg.errors.UniqueViolation from the oa_attempts race-fix index)
+    catches it around the `async with transaction() as cur:` block itself.
+    """
+    pool = get_pool()
+    async with pool.connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor() as cur:
+                yield cur
