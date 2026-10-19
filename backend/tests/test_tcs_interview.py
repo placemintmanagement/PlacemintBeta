@@ -551,3 +551,311 @@ def test_core_phase_covers_every_core_cs_subtopic(tcs_world, tier):
     stored = _stored(tcs_world, started["interview_id"])
     topics = {q["topic"] for q in stored["phase_questions"]["core"]}
     assert topics == {"oop", "dbms_sql", "networking", "os", "software_development"}
+
+
+# ---- time-filling adaptive interview flow (Item 2) -------------------------
+# Replaces the old fixed-question-count-per-phase model: each phase now
+# pre-selects up to a `max_questions` ceiling (core.TCS_PHASE_BUDGETS), and
+# the SAME grading call that scores an answer also decides whether to probe
+# deeper with a follow-up (core.TCS_MAX_FOLLOWUPS_PER_TIER caps consecutive
+# follow-ups per top-level question) -- see core.py's advance()/
+# follow_up_depth_allows/follow_up_time_budget_allows and orchestration.py's
+# answer_interview for the mechanics. No separate follow-up-generation
+# call; no change to the flag-OFF behaviour tested above.
+
+from fastapi import HTTPException as _HTTPException  # noqa: E402 (local, test-only import)
+
+
+def test_followup_is_served_from_the_same_grading_call_no_extra_ai_call(tcs_world):
+    tier = "digital"
+    started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    iid = started["interview_id"]
+    tcs_world.model.needs_follow_up_value = True
+    calls_before = len(tcs_world.model.calls)
+    view = _answer(tcs_world, iid, started["current_question"]["id"], "An answer about my project.")
+    assert len(tcs_world.model.calls) == calls_before + 1  # exactly one AI call, not two
+    assert view["phase"] == "project"  # still in project -- the follow-up, not the next phase
+    assert view["current_question"]["id"] == f"{started['current_question']['id']}-f1"
+
+
+@pytest.mark.parametrize("tier", core.TCS_INTERVIEW_TIERS)
+def test_followup_depth_never_exceeds_the_tiers_cap(tcs_world, tier):
+    cap = core.TCS_MAX_FOLLOWUPS_PER_TIER[tier]
+    started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    iid = started["interview_id"]
+    tcs_world.model.needs_follow_up_value = True  # always asks for one more, every single time
+    view = _get(tcs_world, iid)
+    base_id = view["current_question"]["id"]
+    depths_seen = []
+    for _ in range(cap + 3):  # try to push well past the cap
+        view = _answer(tcs_world, iid, view["current_question"]["id"], "A detailed project answer.")
+        qid = view["current_question"]["id"]
+        if qid.startswith(f"{base_id}-f"):
+            depths_seen.append(int(qid.rsplit("-f", 1)[1]))
+        else:
+            break  # moved off the base question entirely -- depth cap (or phase end) was hit
+    assert depths_seen == list(range(1, cap + 1)), (
+        f"{tier}: follow-up depth must stop exactly at its own cap ({cap}), got {depths_seen}"
+    )
+
+
+def test_followup_answer_is_graded_against_the_generic_followup_rubric(tcs_world):
+    tier = "digital"
+    started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    iid = started["interview_id"]
+    tcs_world.model.needs_follow_up_value = True
+    _answer(tcs_world, iid, started["current_question"]["id"], "An answer about my project.")
+    prompt = tcs_world.model.calls[-1]["prompt"]
+    assert "needs_follow_up" in prompt  # the follow-up slot was offered on THIS call
+
+    view = _get(tcs_world, iid)
+    tcs_world.model.needs_follow_up_value = False
+    _answer(tcs_world, iid, view["current_question"]["id"], "A deeper, specific answer to the follow-up.")
+    followup_prompt = tcs_world.model.calls[-1]["prompt"]
+    assert core.FOLLOWUP_KEY_POINTS[0]["statement"] in followup_prompt
+
+
+def test_fast_student_gets_strictly_more_total_turns_than_a_slow_student(tcs_world):
+    """Same tier/phase configuration; the only difference is how long each
+    answer takes on the fake clock. A fast student keeps being served MORE
+    pre-selected questions (up to each phase's max_questions) because they
+    never trip a phase's own time-budget overrun; a slow student trips it
+    almost immediately on every non-last phase and gets truncated down to
+    each phase's min_questions floor, then runs out of overall time."""
+    tier = "digital"
+    tcs_world.model.needs_follow_up_value = False
+
+    started_fast = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    _run_to_end(tcs_world, started_fast["interview_id"], latency_seconds=5)
+    fast_turns = len(_stored(tcs_world, started_fast["interview_id"])["turns"])
+
+    started_slow = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    _run_to_end(tcs_world, started_slow["interview_id"], latency_seconds=1200)  # 20 minutes/answer
+    slow_turns = len(_stored(tcs_world, started_slow["interview_id"])["turns"])
+
+    assert fast_turns > slow_turns > 0
+
+
+@pytest.mark.parametrize("tier", core.TCS_INTERVIEW_TIERS)
+@pytest.mark.parametrize("latency_seconds", [0, 90, 1200, 5000])
+def test_no_simulated_student_ever_exceeds_the_overall_deadline(tcs_world, tier, latency_seconds):
+    started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    iid = started["interview_id"]
+    _run_to_end(tcs_world, iid, latency_seconds=latency_seconds)
+    stored = _stored(tcs_world, iid)
+    assert stored["status"] in ("completed", "timed_out")
+    # Once finished (for any reason, including running out of the overall
+    # deadline), nothing further is ever accepted or graded -- the hard
+    # stop is real, not just a status label.
+    with pytest.raises(_HTTPException) as exc:
+        _answer(tcs_world, iid, "any-question-id", "too late")
+    assert exc.value.status_code == 409
+
+
+def test_core_phase_budget_is_unaffected_by_an_overrunning_earlier_phase_with_followups(tcs_world):
+    tier = "digital"
+    started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    iid = started["interview_id"]
+    core_len_at_start = len(_stored(tcs_world, iid)["phase_questions"]["core"])
+
+    # Force the FIRST phase (project) to run long via follow-ups, up to its
+    # own tier's depth cap.
+    tcs_world.model.needs_follow_up_value = True
+    view = _get(tcs_world, iid)
+    while view["phase"] == "project":
+        view = _answer(tcs_world, iid, view["current_question"]["id"], "An answer about my project.")
+    tcs_world.model.needs_follow_up_value = False
+
+    stored = _stored(tcs_world, iid)
+    assert len(stored["phase_questions"]["core"]) == core_len_at_start, (
+        "project's follow-up overrun must never change core's own, independently pre-selected list"
+    )
+
+    _run_to_end(tcs_world, iid)
+    final = _stored(tcs_world, iid)
+    core_turns = [t for t in final["turns"] if t["phase"] == "core"]
+    assert len(core_turns) >= core.TCS_PHASE_BUDGETS[tier]["core"]["min_questions"]
+
+
+def test_same_interview_id_gives_the_same_question_and_followup_sequence(monkeypatch):
+    """Determinism: re-seeding orchestration.start_interview's rng by
+    interview_id (not an unseeded random.Random()) means the WHOLE
+    sitting's pre-selected picks (project/coding/core, not just the
+    puzzle) are a pure function of interview_id -- forcing new_id to
+    return the SAME id twice, across two independent fake worlds, must
+    reproduce byte-identical phase_questions and the same resulting
+    turn sequence against the same scripted model/clock."""
+    from tcs_support import _make_tcs_world
+    fixed_id = "intv-determinism-fixture"
+
+    def run_once():
+        w = _make_tcs_world(monkeypatch)
+        monkeypatch.setattr(server, "new_id", lambda prefix: fixed_id)
+        w.model.needs_follow_up_value = True
+        started = _start(w, company_id="tcs-nqt", tier="digital")
+        assert started["interview_id"] == fixed_id
+        _run_to_end(w, fixed_id, latency_seconds=0)
+        stored = _stored(w, fixed_id)
+        turn_sequence = [(t["phase"], t["question_id"]) for t in stored["turns"]]
+        return turn_sequence, stored["phase_questions"]
+
+    seq_a, phase_questions_a = run_once()
+    seq_b, phase_questions_b = run_once()
+    assert seq_a == seq_b
+    assert phase_questions_a == phase_questions_b
+
+
+def test_resume_mid_sitting_after_a_followup_was_served(tcs_world):
+    tier = "digital"
+    started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    iid = started["interview_id"]
+    tcs_world.model.needs_follow_up_value = True
+    view = _answer(tcs_world, iid, started["current_question"]["id"], "An answer about my project.")
+    followup_id = view["current_question"]["id"]
+    assert followup_id.endswith("-f1")
+
+    # Simulate a reload/resume: fetch fresh, exactly like a reconnecting
+    # client would (no in-memory state reused from the call above).
+    resumed = _get(tcs_world, iid)
+    assert resumed["current_question"]["id"] == followup_id
+    assert resumed["phase"] == "project"
+
+    tcs_world.model.needs_follow_up_value = False
+    continued = _answer(tcs_world, iid, followup_id, "A deeper answer to the follow-up.")
+    assert continued["phase"] == "architecture"
+    stored = _stored(tcs_world, iid)
+    assert len(stored["turns"]) == 2
+
+
+def test_rolling_context_stays_bounded_with_followup_turns_mixed_in(tcs_world):
+    """Extends the fixed-count-era bounded-context guarantee to the new
+    variable-length flow: driving a REAL interview with follow-ups turned
+    on (so one phase accumulates many more turns than before this task)
+    must never make orchestration._rolling_context grow past the same
+    generous fixed cap the original test already checked."""
+    tier = "digital"
+    started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    iid = started["interview_id"]
+    tcs_world.model.needs_follow_up_value = True
+    view = _get(tcs_world, iid)
+    sizes = []
+    for _ in range(15):
+        if view["status"] != "in_progress":
+            break
+        view = _answer(tcs_world, iid, view["current_question"]["id"], "A detailed, specific answer.")
+        stored = _stored(tcs_world, iid)
+        ctx = orchestration._rolling_context(stored)
+        sizes.append(len(ctx) if ctx else 0)
+    assert sizes  # the loop actually ran
+    assert max(sizes) < 2000
+
+
+def test_tcs_interview_score_renormalizes_weights_when_a_phase_is_never_assessed():
+    """Direct unit test of the renormalization path (not just prose): a
+    phase with zero turns is marked not_assessed, excluded from scoring,
+    and the remaining phases'/communication's weights are renormalized to
+    still sum to 1.0 over that smaller set."""
+    tier = "digital"
+    turns = [
+        {"phase": "project", "topic": "project", "flags": {"key_point_0": True, core.EXTRA_SIGNAL: True}},
+        {"phase": "coding", "topic": "coding_discussion", "flags": {"key_point_0": True, core.EXTRA_SIGNAL: True}},
+        {"phase": "puzzle", "topic": "puzzle", "flags": {"key_point_0": True, core.EXTRA_SIGNAL: True}},
+        {"phase": "core", "topic": "oop", "flags": {"key_point_0": True, core.EXTRA_SIGNAL: True}},
+    ]  # "architecture" never reached at all -- zero turns for it
+    result = core.tcs_interview_score(tier, turns)
+    assert result["not_assessed"] == ["architecture"]
+    assert result["renormalized"] is True
+    assert round(sum(result["weights_used"].values()), 6) == 1.0
+    assert result["weights_used"]["architecture"] == 0.0
+    assert "coverage_note" in result and "architecture" in result["coverage_note"].lower()
+
+
+def test_tcs_interview_score_normal_all_assessed_case_is_unaffected():
+    for tier in core.TCS_INTERVIEW_TIERS:
+        turns = [
+            {"phase": phase, "topic": phase if phase != "core" else "oop",
+             "flags": {"key_point_0": True, core.EXTRA_SIGNAL: True}}
+            for phase in core.TCS_TIER_PHASE_ORDER[tier]
+        ]
+        result = core.tcs_interview_score(tier, turns)
+        assert result["not_assessed"] == []
+        assert result["renormalized"] is False
+        assert result["weights_used"] == core.TCS_PHASE_WEIGHTS[tier]
+        assert "coverage_note" not in result
+        assert round(sum(result["weights_used"].values()), 6) == 1.0
+
+
+def test_end_to_end_not_assessed_phase_when_a_student_stalls_before_the_last_phase(tcs_world, monkeypatch):
+    """A real (fake-AI, fake-clock) sitting that stalls long enough right
+    before its LAST phase ends up with that phase marked not_assessed in
+    the persisted tcs_score, renormalized weights summing to 1.0, and the
+    note surfaced in the actual report text (interview_summary), never
+    silently omitted."""
+    tier = "ninja"
+    started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+    iid = started["interview_id"]
+    view = _get(tcs_world, iid)
+    while view["status"] == "in_progress" and view["phase"] != "core":
+        view = _answer(tcs_world, iid, view["current_question"]["id"], "A clear, specific answer.")
+    assert view["phase"] == "core"
+
+    tcs_world.clock.t += 31 * 60  # blow the entire 30-minute ninja deadline before answering core at all
+    with pytest.raises(_HTTPException) as exc:
+        _answer(tcs_world, iid, view["current_question"]["id"], "Too late.")
+    assert exc.value.detail["code"] == "time_up"
+
+    stored = _stored(tcs_world, iid)
+    assert stored["status"] == "timed_out"
+    score = stored["tcs_score"]
+    assert score["not_assessed"] == ["core"]
+    assert score["renormalized"] is True
+    assert round(sum(score["weights_used"].values()), 6) == 1.0
+
+    captured = []
+    report = _report_by_interview_id(tcs_world, iid, monkeypatch, captured)
+    assert "tcs_coverage_note" in report["interview_summary"]
+    assert "core" in report["interview_summary"]["tcs_coverage_note"].lower()
+
+
+# ---- coding-discussion phase: separate pools by tier -----------------------
+
+def test_digital_and_prime_coding_pools_are_tier_separated_not_shared():
+    from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_interview.banks.coding_discussion import (
+        CODING_DISCUSSION_QUESTIONS,
+    )
+    digital_pool = {q["id"] for q in CODING_DISCUSSION_QUESTIONS if "digital" in q.get("tier_tags", [])}
+    prime_pool = {q["id"] for q in CODING_DISCUSSION_QUESTIONS if "prime" in q.get("tier_tags", [])}
+    assert "tcs-code-3" in prime_pool and "tcs-code-3" not in digital_pool, (
+        "Prime's own deeper-follow-up item must never be drawable for Digital"
+    )
+    assert "tcs-code-2" in digital_pool and "tcs-code-2" not in prime_pool
+
+
+@pytest.mark.parametrize("tier", core.TCS_INTERVIEW_TIERS)
+def test_questions_per_sitting_fast_typical_slow(tcs_world, tier, capsys):
+    """Real, measured (not estimated) total-turn counts per tier at three
+    simulated answer speeds, against the actual orchestration/core code --
+    feeds the Item-2 task report's 3x3 data table. fast/typical/slow are
+    purely a difference in per-answer wall-clock latency on the fake
+    clock (follow-ups off for fast/typical, on for slow) -- see
+    test_fast_student_gets_strictly_more_total_turns_than_a_slow_student
+    for the direct fast-vs-slow comparison this generalizes across tiers."""
+    results = {}
+    for speed_name, latency, follow_up in (("fast", 5, False), ("typical", 300, False), ("slow", 1200, True)):
+        started = _start(tcs_world, company_id="tcs-nqt", tier=tier)
+        tcs_world.model.needs_follow_up_value = follow_up
+        _run_to_end(tcs_world, started["interview_id"], latency_seconds=latency)
+        results[speed_name] = len(_stored(tcs_world, started["interview_id"])["turns"])
+    with capsys.disabled():
+        print(f"\n[questions-per-sitting] {tier}: fast={results['fast']} "
+              f"typical={results['typical']} slow={results['slow']}")
+    assert results["fast"] >= results["typical"] >= results["slow"] > 0
+
+
+def test_prime_never_draws_digitals_exclusive_item_and_vice_versa(tcs_world):
+    rng = __import__("random").Random(0)
+    for _ in range(25):
+        digital_draw = {q["id"] for q in core.select_coding_questions("digital", rng)}
+        assert "tcs-code-3" not in digital_draw
+        prime_draw = {q["id"] for q in core.select_coding_questions("prime", rng)}
+        assert "tcs-code-2" not in prime_draw

@@ -121,6 +121,23 @@ def _verdict(raw: Any, fallback: str) -> str:
     return " ".join(text.split())[:300] if isinstance(text, str) and text.strip() else fallback
 
 
+_FOLLOWUP_TEXT_CAP = 300  # OUR ESTIMATE: a follow-up question is meant to be ONE short sentence
+
+
+def _follow_up_text(raw: Any) -> Optional[str]:
+    """None unless the SAME grading call's response both asked for a
+    follow-up AND supplied real question text -- a model that sets
+    needs_follow_up=true but leaves follow_up_question empty (or vice
+    versa) is treated as "no follow-up", never half-trusted."""
+    if not isinstance(raw, dict) or raw.get("needs_follow_up") is not True:
+        return None
+    text = raw.get("follow_up_question")
+    if not isinstance(text, str):
+        return None
+    cleaned = " ".join(text.split())[:_FOLLOWUP_TEXT_CAP]
+    return cleaned or None
+
+
 def _log_rejections(interview_id: str, question_id: str, rejections: List[Dict[str, Any]]) -> None:
     for r in rejections:
         logger.warning("tcs interview %s question %s: flag %r rejected (%s)",
@@ -230,10 +247,19 @@ async def start_interview(*, db, now_utc, new_id, iso, attempt: dict, attempt_id
     reproducible on replay/resume because it is a pure function of
     interview_id, not of wall-clock time. A test may still pass its own
     puzzle_provider explicitly (e.g. core.stub_puzzle_provider, or a spy)
-    to bypass the real bank entirely."""
+    to bypass the real bank entirely.
+
+    `rng` (time-filling adaptive flow -- determinism): seeded by
+    `interview_id` alone, same pattern _seeded_real_puzzle_provider already
+    used for the puzzle pick -- so EVERY pre-selected pick for this sitting
+    (project's inferred question, the coding/core draws, not just the
+    puzzle) is a pure, reproducible function of interview_id, never of
+    wall-clock time or call order. Re-deriving a sitting's own
+    phase_questions from its stored interview_id always reproduces exactly
+    what was persisted at start time."""
     now = now_utc().timestamp()
-    rng = random.Random()
     interview_id = new_id("intv")
+    rng = random.Random(f"tcs-interview:{interview_id}")
     project = core.pick_project(resume_projects, rng)
     provider = puzzle_provider or _seeded_real_puzzle_provider(interview_id)
     phase_questions = core.build_phase_questions(tier, resume_projects, project, rng, provider)
@@ -296,10 +322,25 @@ async def answer_interview(*, db, now_utc, iso, call_json_gpt, interview: Dict[s
     phase = state["phase"]
 
     bank_q = _current_bank_question(interview)
-    key_points = bank_q.get("key_points", [])
+    is_followup = bool(current.get("is_followup"))
+    key_points = core.FOLLOWUP_KEY_POINTS if is_followup else bank_q.get("key_points", [])
     extra_signal = core.EXTRA_SIGNAL
     context = _rolling_context(interview)
-    prompt = tcs_key_point_flags_prompt(current["prompt"], key_points, model_answer, extra_signal, context)
+
+    # Time-filling adaptive flow: this SAME grading call also decides
+    # whether to probe deeper -- but only offered when the tier's own
+    # follow-up depth cap AND this phase's own time budget both still
+    # allow one (see core.follow_up_depth_allows/follow_up_time_budget_
+    # allows' own docstrings for the non-last-vs-last-phase asymmetry).
+    # Never offered on an already-maxed-out depth, so a model that (bugged
+    # or not) keeps asking for "just one more" follow-up is hard-capped
+    # regardless of what it returns.
+    depth = state.get("followup_depth", 0)
+    allow_follow_up = (core.follow_up_depth_allows(tier, depth)
+                       and core.follow_up_time_budget_allows(tier, phase, state, now))
+
+    prompt = tcs_key_point_flags_prompt(current["prompt"], key_points, model_answer, extra_signal, context,
+                                        allow_follow_up=allow_follow_up)
     raw = await _tcs_call(call_json_gpt, prompt, _SYSTEM_GRADER, GRADING_TEMPERATURE, usage, f"grade_{phase}")
     flags, rejections = core.normalize_key_point_flags(raw, len(key_points), model_answer, extra_signal)
     verdict = _verdict(raw, "Your answer is recorded.")
@@ -309,7 +350,18 @@ async def answer_interview(*, db, now_utc, iso, call_json_gpt, interview: Dict[s
     turns.append(turn)
     _log_rejections(interview.get("interview_id"), current["id"], rejections)
 
-    nxt = core.advance(tier, _stage_questions(interview), state, now)
+    follow_up_text = _follow_up_text(raw) if allow_follow_up else None
+    if follow_up_text:
+        # Serve the follow-up: the engine stays on this SAME top-level
+        # question (state["index"] untouched), only followup_depth moves
+        # -- core.advance() is not called this turn, so no extra top-level
+        # question/phase is consumed by this follow-up.
+        new_depth = depth + 1
+        state["followup_depth"] = new_depth
+        nxt = core.make_followup_question(bank_q["id"], phase, follow_up_text, new_depth)
+    else:
+        state["followup_depth"] = 0
+        nxt = core.advance(tier, _stage_questions(interview), state, now)
 
     phase_summaries = dict(interview.get("phase_summaries") or {})
     if nxt is None or nxt["phase"] != phase:

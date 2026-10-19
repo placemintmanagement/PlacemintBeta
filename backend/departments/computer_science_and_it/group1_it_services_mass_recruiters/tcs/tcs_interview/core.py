@@ -116,25 +116,38 @@ PHASE_LABELS = {
 # earlier phase's overrun.
 TCS_PHASE_BUDGETS: Dict[str, Dict[str, Dict[str, int]]] = {
     "ninja": {  # OUR ESTIMATE (sums to 30)
-        "project": {"minutes": 8, "min_questions": 1},
-        "coding":  {"minutes": 9, "min_questions": 1},
-        "core":    {"minutes": 13, "min_questions": 5},
+        "project": {"minutes": 8, "min_questions": 1, "max_questions": 1},
+        "coding":  {"minutes": 9, "min_questions": 1, "max_questions": 3},
+        "core":    {"minutes": 13, "min_questions": 5, "max_questions": 8},
     },
     "digital": {  # OUR ESTIMATE (sums to 60)
-        "project":      {"minutes": 10, "min_questions": 1},
-        "architecture": {"minutes": 8, "min_questions": 1},
-        "coding":       {"minutes": 18, "min_questions": 2},
-        "puzzle":       {"minutes": 6, "min_questions": 1},
-        "core":         {"minutes": 18, "min_questions": 5},
+        "project":      {"minutes": 10, "min_questions": 1, "max_questions": 1},
+        "architecture": {"minutes": 8, "min_questions": 1, "max_questions": 1},
+        "coding":       {"minutes": 18, "min_questions": 2, "max_questions": 4},
+        "puzzle":       {"minutes": 6, "min_questions": 1, "max_questions": 1},
+        "core":         {"minutes": 18, "min_questions": 5, "max_questions": 9},
     },
     "prime": {  # OUR ESTIMATE (sums to 60)
-        "project":      {"minutes": 7, "min_questions": 1},
-        "architecture": {"minutes": 10, "min_questions": 1},
-        "coding":       {"minutes": 18, "min_questions": 2},
-        "puzzle":       {"minutes": 7, "min_questions": 1},
-        "core":         {"minutes": 18, "min_questions": 5},
+        "project":      {"minutes": 7, "min_questions": 1, "max_questions": 1},
+        "architecture": {"minutes": 10, "min_questions": 1, "max_questions": 1},
+        "coding":       {"minutes": 18, "min_questions": 2, "max_questions": 4},
+        "puzzle":       {"minutes": 7, "min_questions": 1, "max_questions": 1},
+        "core":         {"minutes": 18, "min_questions": 5, "max_questions": 9},
     },
 }
+# `max_questions` (new, time-filling adaptive flow -- OUR ESTIMATE): the
+# ceiling on how many TOP-LEVEL questions a phase pre-selects (still
+# selected once, up front, in build_phase_questions -- core.py stays pure,
+# no bank access mid-interview). `min_questions` remains the floor
+# advance() already enforced before its overrun-skip could trigger; the
+# actual number of questions a given sitting asks, between those two
+# bounds, now genuinely depends on how fast the candidate answers (see
+# advance()'s own docstring -- unchanged mechanics, just a bigger
+# pre-selected list to draw from for coding/core). project/architecture/
+# puzzle keep max==min==1 (each is a single tailored question with no bank
+# of alternates) -- their own extra time, if any remains, is filled by
+# FOLLOW-UPS (TCS_MAX_FOLLOWUPS_PER_TIER), not by asking a second distinct
+# top-level question.
 
 # ---- Core-CS sub-mix (OUR ESTIMATE; sums to 1.0 per tier) ------------------
 TCS_CORE_SUBMIX: Dict[str, Dict[str, float]] = {
@@ -162,6 +175,25 @@ TCS_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
 }
 
 EXTRA_SIGNAL = "communication_clarity"  # piggybacked onto every question's grading call
+
+# ---- Follow-up depth cap, per tier (OUR ESTIMATE) --------------------------
+# A cap on CONSECUTIVE follow-ups within one top-level question, never a
+# count of top-level questions. The grading call itself decides whether a
+# follow-up is warranted (see orchestration.py's answer_interview and
+# ai_service.tcs_key_point_flags_prompt's `allow_follow_up`) -- this cap
+# just bounds how many times in a row that can happen on the SAME question
+# before the engine moves on regardless.
+TCS_MAX_FOLLOWUPS_PER_TIER: Dict[str, int] = {"ninja": 1, "digital": 2, "prime": 3}  # OUR ESTIMATE
+
+# Generic rubric for grading a FOLLOW-UP answer. The follow-up question text
+# itself is freshly generated per-answer by the model (never pre-written),
+# so it has no bank-authored key_points of its own -- this one generic point
+# is what every follow-up answer is graded against, piggybacked with the
+# same EXTRA_SIGNAL (communication_clarity) as every other turn.
+FOLLOWUP_KEY_POINTS: List[Dict[str, Any]] = [
+    kp("directly and substantively addresses the specific follow-up question just asked, with real "
+       "reasoning or detail, not just repeating the earlier answer"),
+]
 
 
 def _clean(value: Any, limit: int = 120) -> str:
@@ -309,11 +341,22 @@ _CODING_DIFFICULTY_FOR_TIER = {"ninja": "easy", "digital": "medium", "prime": "m
 
 
 def select_coding_questions(tier: str, rng: random.Random) -> List[Dict[str, Any]]:
+    """Draws from a pool filtered by BOTH difficulty and `tier_tags` (new,
+    time-filling adaptive flow) -- Digital and Prime no longer share one
+    identical pool with equal odds: Prime's own "deeper follow-up framing"
+    item is tier_tags=["prime"] only, so it can never be drawn for Digital.
+    Pre-selects up to this tier's `max_questions` (not just `min_questions`)
+    so a fast-answering sitting has real extra top-level questions to draw
+    into, not just follow-ups -- see TCS_PHASE_BUDGETS' own comment."""
     difficulty = _CODING_DIFFICULTY_FOR_TIER.get(tier, "easy")
-    n = TCS_PHASE_BUDGETS[tier]["coding"]["min_questions"]
-    pool = [q for q in CODING_DISCUSSION_QUESTIONS if q.get("difficulty") == difficulty]
-    if len(pool) < n:
-        pool = CODING_DISCUSSION_QUESTIONS  # safety fallback, should not trigger with a healthy bank
+    n = TCS_PHASE_BUDGETS[tier]["coding"]["max_questions"]
+    pool = [q for q in CODING_DISCUSSION_QUESTIONS
+            if q.get("difficulty") == difficulty and tier in q.get("tier_tags", [])]
+    if not pool:
+        # Safety fallback only: should not trigger with a healthy, correctly
+        # tier-tagged bank -- never silently falls back to sharing Digital's
+        # and Prime's pools when each tier's OWN tagged pool is non-empty.
+        pool = [q for q in CODING_DISCUSSION_QUESTIONS if q.get("difficulty") == difficulty]
     n = min(n, len(pool))
     chosen = [dict(q) for q in rng.sample(pool, n)]
     for q in chosen:
@@ -383,7 +426,7 @@ def _draw(bank: List[Dict[str, Any]], n: int, tier: str, rng: random.Random) -> 
 
 
 def select_core_questions(tier: str, rng: random.Random) -> List[Dict[str, Any]]:
-    total = TCS_PHASE_BUDGETS[tier]["core"]["min_questions"]
+    total = TCS_PHASE_BUDGETS[tier]["core"]["max_questions"]
     counts = _allocate_counts(TCS_CORE_SUBMIX[tier], total)
     questions: List[Dict[str, Any]] = []
     for topic, n in counts.items():
@@ -439,6 +482,7 @@ def new_state(tier: str, now: float) -> Dict[str, Any]:
         "deadline_at": now + TCS_TIER_DURATION_SECONDS[tier],
         "phase_started_at": {first_phase: now},
         "index": 0,  # index within the CURRENT phase's question list
+        "followup_depth": 0,  # consecutive follow-ups already served on the CURRENT question
     }
 
 
@@ -507,6 +551,45 @@ def advance(tier: str, phase_questions: Dict[str, List[Dict[str, Any]]], state: 
     state["phase_started_at"][nxt] = now
     q = phase_questions[nxt][0]
     return _client_question(q, nxt)
+
+
+# ---- Follow-ups (time-filling adaptive flow) -------------------------------
+# These three helpers are the only pieces core.py needs to support
+# follow-ups -- deciding WHETHER a follow-up is warranted is the grading
+# call's job (orchestration.py + ai_service.tcs_key_point_flags_prompt's
+# `allow_follow_up`), never core.py's; core.py only bounds HOW MANY in a
+# row (depth cap) and WHEN they're still allowed at all (time budget),
+# and shapes the resulting client-facing question. Pure, no AI/DB here.
+
+def follow_up_depth_allows(tier: str, depth: int) -> bool:
+    return depth < TCS_MAX_FOLLOWUPS_PER_TIER[tier]
+
+
+def follow_up_time_budget_allows(tier: str, phase: str, state: Dict[str, Any], now: float) -> bool:
+    """Same asymmetry advance()'s own overrun-skip already relies on: a
+    NON-LAST phase's follow-ups are bounded by ITS OWN minutes budget (so
+    an earlier phase's follow-ups can never eat into what comes after --
+    the same protection that already covers extra top-level questions);
+    the LAST phase (core, every tier) has nothing after it to protect, so
+    its follow-ups are bounded only by the overall interview deadline
+    (checked separately, on every submit, by is_expired)."""
+    phase_order = TCS_TIER_PHASE_ORDER[tier]
+    is_last_phase = phase_order.index(phase) + 1 >= len(phase_order)
+    if is_last_phase:
+        return True
+    elapsed_minutes = (now - state["phase_started_at"][phase]) / 60.0
+    return elapsed_minutes < TCS_PHASE_BUDGETS[tier][phase]["minutes"]
+
+
+def make_followup_question(base_question_id: str, phase: str, follow_up_text: str, depth: int) -> Dict[str, Any]:
+    """Client-shaped, same as _client_question -- `id` is unique per depth
+    (base id + "-f{depth}") so a resumed/reloaded sitting always re-submits
+    against the exact follow-up it was actually shown, never a stale one.
+    `is_followup` lets orchestration.py's grading path pick
+    FOLLOWUP_KEY_POINTS instead of the base question's own key_points; it
+    is simply ignored by client_view's own whitelist projection."""
+    return {"id": f"{base_question_id}-f{depth}", "stage": STAGE_NAME, "phase": phase,
+            "prompt": follow_up_text, "is_followup": True}
 
 
 # ---- Element flags (normalised; never trusted raw) -------------------------
@@ -589,7 +672,7 @@ def core_score(turns: List[Dict[str, Any]], tier: str) -> Dict[str, Any]:
     submix = TCS_CORE_SUBMIX[tier]
     not_reached = [d for d in submix if d not in dims]
     total = sum(submix[d] * dims.get(d, 0.0) for d in submix)
-    return {"dimensions": dims, "score": round(total, 4), "not_reached": not_reached}
+    return {"dimensions": dims, "score": round(total, 4), "not_reached": not_reached, "reached": bool(core_turns)}
 
 
 def communication_score(turns: List[Dict[str, Any]]) -> float:
@@ -598,13 +681,57 @@ def communication_score(turns: List[Dict[str, Any]]) -> float:
 
 
 def tcs_interview_score(tier: str, turns: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Hard-stop-at-deadline fallback (OUR ESTIMATE): if the OVERALL
+    interview deadline is reached before a phase was ever reached at all
+    (zero turns in it -- `reached` is False), that phase is marked
+    "not_assessed" in the report and excluded from scoring entirely,
+    rather than silently counted as a 0, which would otherwise drag the
+    weighted average down for something the candidate never even got a
+    chance to attempt. Weights are RENORMALIZED across only the phases
+    that WERE actually assessed, so they still sum to 1.0 over that
+    subset -- `coverage_note` states this in plain English for the
+    report (never silently omitted). The ordinary, all-phases-assessed
+    case (expected for almost every well-behaved sitting, given the
+    phase/time budgets) is completely unaffected: not_assessed is empty,
+    renormalized is False, weights_used equals TCS_PHASE_WEIGHTS[tier]
+    exactly, and `interview` is computed exactly as before this fallback
+    existed."""
     phases: Dict[str, Any] = {}
     for phase in TCS_TIER_PHASE_ORDER[tier]:
         phases[phase] = core_score(turns, tier) if phase == "core" else _simple_phase_score(turns, phase)
     comm = communication_score(turns)
+    comm_assessed = bool(turns)
     weights = TCS_PHASE_WEIGHTS[tier]
-    total = sum(weights[p] * phases[p]["score"] for p in phases) + weights["communication"] * comm
-    return {"phases": phases, "communication": comm, "interview": round(total, 4)}
+
+    not_assessed = [p for p in phases if not phases[p]["reached"]]
+    if not comm_assessed:
+        not_assessed.append("communication")
+
+    renormalized = bool(not_assessed)
+    if renormalized:
+        remaining_weight = sum(w for k, w in weights.items() if k not in not_assessed)
+        weights_used = {k: (w / remaining_weight if k not in not_assessed and remaining_weight > 0 else 0.0)
+                        for k, w in weights.items()}
+    else:
+        weights_used = dict(weights)
+
+    total = sum(weights_used[p] * phases[p]["score"] for p in phases)
+    if comm_assessed:
+        total += weights_used["communication"] * comm
+
+    result = {
+        "phases": phases, "communication": comm, "interview": round(total, 4),
+        "not_assessed": not_assessed, "renormalized": renormalized, "weights_used": weights_used,
+    }
+    if renormalized:
+        labels = ", ".join(PHASE_LABELS.get(p, p) for p in not_assessed)
+        assessed_count = len(weights) - len(not_assessed)
+        result["coverage_note"] = (
+            f"The interview deadline was reached before the following phase(s) could be assessed: "
+            f"{labels}. Scoring weights were renormalized across the {assessed_count} phase(s)/signal(s) "
+            f"that WERE assessed, so they still sum to 1.0 over that smaller set."
+        )
+    return result
 
 
 # ---- Closing message (fixed template, emitted by code, never a model) -----

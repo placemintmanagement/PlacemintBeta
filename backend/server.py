@@ -6675,6 +6675,16 @@ def _build_interview_summary(interview_doc: Optional[dict]) -> dict:
     }
     if hints_enabled():
         summary["hints_used"] = interview_doc.get("hints_used", 0)
+    # TCS-only (this key is never set by Spark/Dave/Commit, which never
+    # populate "tcs_score" -- so this is a no-op for every other mode,
+    # byte-identical to before this existed): when the interview deadline
+    # was reached before a phase was ever started, core.tcs_interview_score
+    # renormalizes weights across the phases that WERE assessed and
+    # explains that in plain English via `coverage_note` -- surfaced here
+    # so the report text states it, never silently omits it.
+    tcs_score = interview_doc.get("tcs_score")
+    if isinstance(tcs_score, dict) and tcs_score.get("coverage_note"):
+        summary["tcs_coverage_note"] = tcs_score["coverage_note"]
     return summary
 
 
