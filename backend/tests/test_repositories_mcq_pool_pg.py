@@ -74,6 +74,30 @@ def test_pop_up_to_zero_count_short_circuits(monkeypatch):
     assert calls["n"] == 0
 
 
+def test_count_by_company_and_section_groups_and_sorts(monkeypatch):
+    """Gap fix (SUPABASE_CUTOVER_PLAN.md punch-list #1): mcq_pool_pg used to
+    have no equivalent of pool_stats()'s `pool_counts` aggregation -- this is
+    the new GROUP BY replacement for Mongo's $group/$project/$sort pipeline."""
+    captured = {}
+
+    async def fake_fetch_all(sql, params=()):
+        captured["sql"] = sql
+        return [
+            {"company_name": "TCS", "section_key": "aptitude", "count": 3},
+            {"company_name": "TCS", "section_key": "reasoning", "count": 1},
+        ]
+
+    monkeypatch.setattr(pg, "fetch_all", fake_fetch_all)
+    rows = asyncio.run(pg.count_by_company_and_section())
+    assert "GROUP BY company_name, section_key" in captured["sql"]
+    assert "ORDER BY company_name, section_key" in captured["sql"]
+    assert "FROM mcq_pool" in captured["sql"]
+    assert rows == [
+        {"company_name": "TCS", "section_key": "aptitude", "count": 3},
+        {"company_name": "TCS", "section_key": "reasoning", "count": 1},
+    ]
+
+
 def test_get_all_stats_sorted_readout(monkeypatch):
     captured = {}
 

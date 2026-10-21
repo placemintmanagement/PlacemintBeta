@@ -70,6 +70,25 @@ async def pop_up_to(company_name: str, section_key: str, count: int) -> List[dic
     return out
 
 
+async def count_by_company_and_section() -> List[dict]:
+    """Mirrors mcq_pool.py's `pool_stats()`'s `pool_counts` half: `_db.mcq_pool
+    .aggregate([{"$group": {"_id": {"c": "$company_name", "k": "$section_key"},
+    "count": {"$sum": 1}}}, {"$project": ...}, {"$sort": {"company_name": 1,
+    "section_key": 1}}])`. This is the Step-1 gap flagged in
+    SUPABASE_CUTOVER_PLAN.md's punch list item #1: `get_all_stats()` below
+    only ever covered the `mcq_pool_stats` half of `pool_stats()`'s return
+    value -- this is the missing `pool_counts` half, a single `GROUP BY`
+    query replacing Mongo's 3-stage `$group`/`$project`/`$sort` pipeline.
+    Returns rows shaped `{"company_name": ..., "section_key": ...,
+    "count": ...}`, matching the Mongo pipeline's own `$project`ed shape
+    exactly so callers don't need to reshape the result."""
+    return await fetch_all(
+        "SELECT company_name, section_key, count(*) AS count "
+        "FROM mcq_pool GROUP BY company_name, section_key "
+        "ORDER BY company_name, section_key"
+    )
+
+
 async def get_all_stats() -> List[dict]:
     """Read-only admin readout -- mirrors mcq_pool.py's `pool_stats()`:
     `_db.mcq_pool_stats.find({}, {"_id": 0})`. Sorted by

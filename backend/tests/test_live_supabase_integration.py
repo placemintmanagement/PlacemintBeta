@@ -278,6 +278,30 @@ def test_capgemini_bank_pg_shapes():
 # 3. mcq_pool_pg.pop_one -- REAL concurrency, scratch row only
 # ---------------------------------------------------------------------------
 
+def test_mcq_pool_pg_count_by_company_and_section_live():
+    """Live proof for the gap fix in mcq_pool_pg.count_by_company_and_section
+    (SUPABASE_CUTOVER_PLAN.md punch-list #1): real GROUP BY against the real
+    326-row mcq_pool bank, confirming group totals sum to the known total and
+    every group key is a real (company_name, section_key) pair actually
+    present in the bank -- a mocked test can assert the SQL shape but not
+    that a real GROUP BY/ORDER BY against the live schema returns sane data."""
+
+    async def body():
+        rows = await mcq_pool_pg.count_by_company_and_section()
+        assert rows, "expected at least one (company_name, section_key) group in the live mcq_pool bank"
+        total = sum(r["count"] for r in rows)
+        assert total == CONTENT_BANK_EXPECTED_COUNTS["mcq_pool"]
+        for r in rows:
+            assert set(r.keys()) == {"company_name", "section_key", "count"}
+            assert r["count"] > 0
+        # Sorted by (company_name, section_key), matching pool_stats()'s own
+        # Python-side sort of the equivalent Mongo pipeline's output.
+        keys = [(r["company_name"], r["section_key"]) for r in rows]
+        assert keys == sorted(keys)
+
+    run(body)
+
+
 def test_mcq_pool_pop_one_atomic_under_real_concurrency():
     scratch_company = "__live_verify_scratch__"
     scratch_section = "__live_verify_scratch__"
