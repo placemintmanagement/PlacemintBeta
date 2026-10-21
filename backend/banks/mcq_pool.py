@@ -38,11 +38,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from repositories import mcq_pool_pg
 from services.ai_service import (
     call_json, HAIKU, SONNET,
     mcq_prompt, topic_mcq_prompt, aptitude_topic_mix_prompt,
@@ -103,6 +105,14 @@ def init(db) -> None:
     _db = db
 
 
+def _db_backend() -> str:
+    # Same exact env-var-reading convention as server.py's db_backend() --
+    # read live, never cached at import time. Defined locally (not imported
+    # from server.py) so this module never has to import server.py (circular
+    # import -- server.py imports this module at startup).
+    return os.environ.get("DB_BACKEND", "mongo").strip().lower()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -130,6 +140,16 @@ async def pop_from_pool(company_name: str, section_key: str, section_name: str, 
     (company_name, section_key). Returns however many were available.
     """
     record_activity()
+    if _db_backend() == "supabase":
+        rows = await mcq_pool_pg.pop_up_to(company_name, section_key, count)
+        return [{
+            "id": f"q{i+1}",
+            "prompt": r["prompt"],
+            "options": r["options"],
+            "correct_index": r["correct_index"],
+            "explanation": r.get("explanation") or "",
+            "difficulty": r.get("difficulty") or "Medium",
+        } for i, r in enumerate(rows)]
     if _db is None:
         return []
     out: List[dict] = []
@@ -710,11 +730,57 @@ def stop_worker() -> None:
 
 # ---- Admin readouts ---------------------------------------------------------
 
+def _shape_stats_row(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Derived-field shaping shared by pool_stats()'s per-row readout --
+    extracted so the supabase branch below can reuse the exact same
+    computation the mongo branch inlines in its own loop (same formula, same
+    rounding), without duplicating it. Returns a NEW dict (never mutates the
+    row it's given)."""
+    doc = dict(doc)
+    tg = doc.get("total_generated", 0)
+    accepted = doc.get("outcome_accepted", 0)
+    dropped_no_gt = doc.get("outcome_dropped_no_ground_truth", 0)
+    dropped_conflict = doc.get("outcome_dropped_explanation_conflict", 0)
+    dropped_expfail = doc.get("outcome_dropped_explanation_failure", 0)
+    by_exec = doc.get("source_execution", 0)
+    by_solvers = doc.get("source_solver_agreement", 0)
+    doc["acceptance_rate_pct"] = round((accepted / tg) * 100, 2) if tg else 0.0
+    doc["dropped_no_ground_truth_pct"] = round((dropped_no_gt / tg) * 100, 2) if tg else 0.0
+    doc["dropped_explanation_conflict_pct"] = round((dropped_conflict / tg) * 100, 2) if tg else 0.0
+    doc["dropped_explanation_failure_pct"] = round((dropped_expfail / tg) * 100, 2) if tg else 0.0
+    doc["from_execution"] = by_exec
+    doc["from_solver_agreement"] = by_solvers
+    return doc
+
+
 async def pool_stats() -> Dict[str, Any]:
     """Founder-only readout — new-pipeline metrics tell you WHERE questions are
     being dropped (no ground truth vs. explanation-flagged conflict) and WHICH
     ground-truth source (execution vs. solver-agreement) is producing them.
     """
+    if _db_backend() == "supabase":
+        # Gap fix (SUPABASE_CUTOVER_PLAN.md punch-list #1): mcq_pool_pg used
+        # to have no equivalent of the pool_counts aggregation below --
+        # mcq_pool_pg.count_by_company_and_section() is the fix, a direct
+        # GROUP BY replacement for Mongo's $group/$project/$sort pipeline.
+        pool_rows = await mcq_pool_pg.count_by_company_and_section()
+        pool = [
+            {"company_name": r["company_name"], "section_key": r["section_key"], "count": r["count"]}
+            for r in pool_rows
+        ]
+        stats_rows = await mcq_pool_pg.get_all_stats()
+        stats = [_shape_stats_row(r) for r in stats_rows]
+        stats.sort(key=lambda d: (d.get("company_name", ""), d.get("section_key", "")))
+        return {
+            "buffer_target": POOL_BUFFER,
+            "pipeline": "3-stage: generate-stem-only -> execute-or-two-solvers -> explanation-with-conflict-flag",
+            "generator_model": HAIKU[1],
+            "solver_a_model": SONNET[1],
+            "solver_b_model": HAIKU[1],
+            "explanation_model": SONNET[1],
+            "pool_counts": pool,
+            "stats": stats,
+        }
     if _db is None:
         return {"pool_counts": [], "stats": []}
     pool = []

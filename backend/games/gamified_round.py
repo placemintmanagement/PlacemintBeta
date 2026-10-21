@@ -37,11 +37,13 @@ Three MongoDB collections, one code-level registry (game_types.py):
       case is 36 attempts total).
 """
 from __future__ import annotations
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 from . import game_types
 from . import motion_challenge
+from repositories import puzzle_bank_pg
 
 _db = None  # set by init(db)
 
@@ -49,6 +51,20 @@ _db = None  # set by init(db)
 def init(db) -> None:
     global _db
     _db = db
+
+
+def _db_backend() -> str:
+    # Same exact env-var-reading convention as server.py's db_backend() --
+    # read live, never cached at import time. Defined locally to avoid a
+    # circular import with server.py.
+    #
+    # Design note: every dispatch below forks ONLY the puzzle_bank/
+    # gamified_round_config reads -- game_session (repetition-tracking via
+    # get_seen_puzzle_ids, live_checks, motionChallengeMoves, grading
+    # breakdowns) stays on Mongo via `_db` regardless of DB_BACKEND. It is
+    # user-state, not one of Step 1's seven content banks, so it is
+    # deliberately untouched by this cutover -- see SUPABASE_CUTOVER_PLAN.md.
+    return os.environ.get("DB_BACKEND", "mongo").strip().lower()
 
 
 def _now_iso() -> str:
@@ -65,6 +81,8 @@ def strip_answer(puzzle_doc: dict) -> dict:
 
 
 async def get_config(company: str) -> Optional[dict]:
+    if _db_backend() == "supabase":
+        return await puzzle_bank_pg.get_config(company)
     if _db is None:
         return None
     return await _db.gamified_round_config.find_one({"company": company}, {"_id": 0})
@@ -97,6 +115,9 @@ async def sample_puzzles(company: str, game_type: str, user_id: str, count: int)
     if _db is None or count <= 0:
         return []
     seen = await get_seen_puzzle_ids(user_id, game_type)
+    if _db_backend() == "supabase":
+        docs = await puzzle_bank_pg.sample_puzzles(company, game_type, list(seen), count)
+        return [strip_answer(d) for d in docs]
     cursor = _db.puzzle_bank.find(
         {"gameType": game_type, "companyTags": company, "puzzle_id": {"$nin": list(seen)}},
         {"_id": 0},
@@ -159,7 +180,10 @@ async def check_answer(
     session = await _db.game_session.find_one({"session_id": session_id})
     if not session:
         return empty
-    doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_id}, {"_id": 0})
+    if _db_backend() == "supabase":
+        doc = await puzzle_bank_pg.get_by_id(puzzle_id)
+    else:
+        doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_id}, {"_id": 0})
     if not doc:
         return {**empty, "runningScore": session.get("running_score", 0)}
 
@@ -215,9 +239,12 @@ async def grade_session(session_id: str, game_type: str, answers: Dict[str, dict
     if not session:
         return empty
     puzzle_ids = (session.get("puzzleIdsByType") or {}).get(game_type, [])
-    docs = await _db.puzzle_bank.find(
-        {"puzzle_id": {"$in": puzzle_ids}}, {"_id": 0}
-    ).to_list(length=len(puzzle_ids) or 1)
+    if _db_backend() == "supabase":
+        docs = await puzzle_bank_pg.get_by_ids(puzzle_ids)
+    else:
+        docs = await _db.puzzle_bank.find(
+            {"puzzle_id": {"$in": puzzle_ids}}, {"_id": 0}
+        ).to_list(length=len(puzzle_ids) or 1)
     by_id = {d["puzzle_id"]: d for d in docs}
 
     raw_score = 0
@@ -327,7 +354,10 @@ async def get_grid_challenge_phase(
     session = await _db.game_session.find_one({"session_id": session_id})
     if not session:
         raise ValueError("session not found")
-    doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_id}, {"_id": 0})
+    if _db_backend() == "supabase":
+        doc = await puzzle_bank_pg.get_by_id(puzzle_id)
+    else:
+        doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_id}, {"_id": 0})
     if not doc or doc.get("gameType") != "grid_challenge":
         raise ValueError("grid_challenge puzzle not found")
 
@@ -381,7 +411,10 @@ async def check_grid_challenge_answer(
     session = await _db.game_session.find_one({"session_id": session_id})
     if not session:
         return empty
-    doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_id}, {"_id": 0})
+    if _db_backend() == "supabase":
+        doc = await puzzle_bank_pg.get_by_id(puzzle_id)
+    else:
+        doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_id}, {"_id": 0})
     if not doc or doc.get("gameType") != "grid_challenge":
         return {**empty, "runningScore": session.get("running_score", 0)}
 
@@ -451,7 +484,10 @@ async def grade_grid_challenge_session(session_id: str) -> dict:
     puzzle_ids = (session.get("puzzleIdsByType") or {}).get("grid_challenge") or []
     if not puzzle_ids:
         return empty
-    doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_ids[0]}, {"_id": 0})
+    if _db_backend() == "supabase":
+        doc = await puzzle_bank_pg.get_by_id(puzzle_ids[0])
+    else:
+        doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_ids[0]}, {"_id": 0})
     if not doc or doc.get("gameType") != "grid_challenge":
         return empty
 
@@ -558,7 +594,10 @@ async def _motion_challenge_load(attempt_id: str, section_key: str, puzzle_id: s
     served = (session.get("puzzleIdsByType") or {}).get("motion_challenge") or []
     if puzzle_id not in served:
         raise PermissionError("puzzle_id was not served to this session")
-    doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_id}, {"_id": 0})
+    if _db_backend() == "supabase":
+        doc = await puzzle_bank_pg.get_by_id(puzzle_id)
+    else:
+        doc = await _db.puzzle_bank.find_one({"puzzle_id": puzzle_id}, {"_id": 0})
     if not doc or doc.get("gameType") != "motion_challenge":
         raise PermissionError("motion_challenge puzzle not found")
     return session_id, session, doc
@@ -694,9 +733,12 @@ async def grade_motion_challenge_session(session_id: str) -> dict:
     puzzle_ids = (session.get("puzzleIdsByType") or {}).get("motion_challenge") or []
     if not puzzle_ids:
         return empty
-    docs = await _db.puzzle_bank.find(
-        {"puzzle_id": {"$in": puzzle_ids}}, {"_id": 0}
-    ).to_list(length=len(puzzle_ids))
+    if _db_backend() == "supabase":
+        docs = await puzzle_bank_pg.get_by_ids(puzzle_ids)
+    else:
+        docs = await _db.puzzle_bank.find(
+            {"puzzle_id": {"$in": puzzle_ids}}, {"_id": 0}
+        ).to_list(length=len(puzzle_ids))
     by_id = {d["puzzle_id"]: d for d in docs}
 
     type_entry = game_types.GAME_TYPES.get("motion_challenge", {})

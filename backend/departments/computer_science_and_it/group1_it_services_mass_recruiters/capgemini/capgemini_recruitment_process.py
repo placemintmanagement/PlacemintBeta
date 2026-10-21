@@ -137,12 +137,14 @@ NOT import today. See the sibling company files' docstrings for the same
 mechanisms wrapped safely where no such cycle exists.
 """
 from __future__ import annotations
+import os
 import random
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from companies import get_company
+from repositories import capgemini_bank_pg
 from services.ai_service import call_json_gpt, wrap_untrusted, GRADING_INJECTION_DEFENSE, flag_suspicious_grading
 
 
@@ -172,6 +174,53 @@ def init(db) -> None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _db_backend() -> str:
+    # Same exact env-var-reading convention as server.py's db_backend() --
+    # read live, never cached at import time. Defined locally (not imported
+    # from server.py) to avoid a circular import, same reasoning this
+    # module's own docstring already gives for why server.py's shared
+    # mechanisms aren't wrapped here (server.py imports this module for the
+    # Round 1 dispatch).
+    return os.environ.get("DB_BACKEND", "mongo").strip().lower()
+
+
+# ---- Content-bank pool fetches (added 2026-10, DB_BACKEND cutover) ---------
+# Extracted from what used to be 6 inline `db.capgemini_round1_bank.find(...)`
+# call sites plus 1 inline `db.capgemini_round2_bank.find(...)` call site,
+# directly in server.py's _generate_section_questions -- these were the one
+# content-bank exception not already behind a module boundary like the other
+# five banks (mcq_static_bank/mcq_pool/puzzle_bank/gamified_round_config all
+# have their own banks/*.py or games/*.py module). See
+# SUPABASE_CUTOVER_PLAN.md's gap #4: extracting these first is what lets the
+# DB_BACKEND fork live in one place instead of being added ad hoc at 7 inline
+# call sites in server.py.
+
+async def fetch_round1_pool(section: str, tts_status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Fetches the full capgemini_round1_bank pool for `section` (optionally
+    narrowed to `tts_status`, Section 5's listening-clip readiness gate --
+    only clips with tts_status == "generated" may ever be served). Mirrors
+    `db.capgemini_round1_bank.find({"section": section[, "tts_status":
+    tts_status]}, {"_id": 0}).to_list(None)`."""
+    if _db_backend() == "supabase":
+        return await capgemini_bank_pg.list_round1_by_section(section, tts_status=tts_status)
+    if _db is None:
+        return []
+    query: Dict[str, Any] = {"section": section}
+    if tts_status is not None:
+        query["tts_status"] = tts_status
+    return await _db.capgemini_round1_bank.find(query, {"_id": 0}).to_list(None)
+
+
+async def fetch_round2_pool() -> List[Dict[str, Any]]:
+    """Fetches the full capgemini_round2_bank pool (Round 2 AI Literacy).
+    Mirrors `db.capgemini_round2_bank.find({}, {"_id": 0}).to_list(None)`."""
+    if _db_backend() == "supabase":
+        return await capgemini_bank_pg.list_round2_all()
+    if _db is None:
+        return []
+    return await _db.capgemini_round2_bank.find({}, {"_id": 0}).to_list(None)
 
 
 async def get_seen_ids(user_id: str, section: str) -> set:

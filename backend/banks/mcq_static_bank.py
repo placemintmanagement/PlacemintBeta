@@ -17,9 +17,12 @@ simpler than hashing regeneratable procedural content.
 """
 from __future__ import annotations
 import math
+import os
 import random
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+
+from repositories import mcq_static_bank_pg
 
 # The 10 canonical topics (matches ai_service.TOPIC_INSTRUCTIONS /
 # mcq_pool.TOPIC_KEY_MAP's topic_key values exactly, plus "puzzles" and
@@ -72,6 +75,27 @@ def init(db) -> None:
     _db = db
 
 
+def _db_backend() -> str:
+    # Same exact env-var-reading convention as server.py's db_backend() --
+    # read live, never cached at import time. Defined locally to avoid a
+    # circular import with server.py.
+    #
+    # Design note (resolves SUPABASE_CUTOVER_PLAN.md gap #3): every function
+    # below that dispatches to Postgres under DB_BACKEND=supabase forks ONLY
+    # the raw bank-content read (the actual mcq_static_bank rows) -- per-user
+    # seen-tracking (get_seen_ids/mark_seen just below, which read/write the
+    # `mcq_static_bank_seen` collection) stays on Mongo via `_db` regardless
+    # of DB_BACKEND. mcq_static_bank_seen is NOT one of Step 1's seven
+    # content banks -- it's user state (the eventual `question_seen` table),
+    # explicitly Step 3 scope, not touched by this cutover at all. This is
+    # why the reuse/least-recently-seen sort (which the plan's gap #3 worried
+    # couldn't be covered without pulling question_seen_pg forward) works
+    # fully under supabase mode here: seen_at data keeps coming from the same
+    # untouched Mongo collection it always has, only the candidate ROWS being
+    # sorted/excluded now come from mcq_static_bank_pg instead of Mongo.
+    return os.environ.get("DB_BACKEND", "mongo").strip().lower()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -119,8 +143,22 @@ async def sample_static(user_id: str, topic: str, count: int, rng: Optional[rand
     keyed on an attempt_id, same convention as sample_static_with_reuse's
     own `rng`). Omitted, a FRESH random.Random() is used -- genuinely
     random every call, deliberately never the shared global `random`
-    module, so no caller's state can leak in or out."""
-    if _db is None or count <= 0:
+    module, so no caller's state can leak in or out. NOTE: under
+    DB_BACKEND=supabase, `rng` is NOT honored (see _db_backend()'s
+    docstring note) -- mcq_static_bank_pg.sample_random_by_topic always
+    draws via Postgres's own `ORDER BY random()`, which has no way to
+    accept a Python-seeded generator. Every other caller (everyone except
+    TCS's own seeded draw) never passed a seeded rng to begin with, so this
+    only matters for that one deterministic-replay use case."""
+    if count <= 0:
+        return []
+    if _db_backend() == "supabase":
+        seen = await get_seen_ids(user_id, topic)
+        rows = await mcq_static_bank_pg.sample_random_by_topic(topic, count, exclude_ids=list(seen))
+        items = [_item_from_doc(r) for r in rows]
+        await mark_seen(user_id, topic, [it["id"] for it in items])
+        return items
+    if _db is None:
         return []
     seen = await get_seen_ids(user_id, topic)
     id_docs = await _db.mcq_static_bank.find(
@@ -186,13 +224,25 @@ async def sample_static_with_reuse(
     calls without passing an explicit rng. (The one caller that always
     passes a seeded rng -- TCS's own draw -- is unaffected in spirit: it
     was already deterministic and stays deterministic.)"""
-    if _db is None or count <= 0:
+    if count <= 0:
         return [], 0, max(count, 0)
     items = await sample_static(user_id, topic, count, rng=rng)
     short = count - len(items)
     if short <= 0:
         return items, 0, 0
     served = {it["id"] for it in items}
+    if _db_backend() == "supabase":
+        doc = await _db.mcq_static_bank_seen.find_one({"user_id": user_id, "topic": topic}) if _db is not None else None
+        seen_at = (doc or {}).get("seen_at") or {}
+        rows = await mcq_static_bank_pg.list_by_topic(topic, exclude_ids=list(served))
+        candidates = [_item_from_doc(r) for r in rows]
+        (rng or random.Random()).shuffle(candidates)
+        candidates.sort(key=lambda it: seen_at.get(it["id"], ""))
+        reused = candidates[:short]
+        await mark_seen(user_id, topic, [it["id"] for it in reused])
+        return items + reused, len(reused), short - len(reused)
+    if _db is None:
+        return items, 0, short
     doc = await _db.mcq_static_bank_seen.find_one({"user_id": user_id, "topic": topic}) or {}
     seen_at = doc.get("seen_at") or {}
     candidates = await _db.mcq_static_bank.find(
@@ -252,7 +302,30 @@ async def _draw_bucket(
     the end, so a document that's fetched here but then discarded (e.g.
     superseded by a later, more successful bucket) is never wrongly
     marked seen."""
-    if want <= 0 or _db is None:
+    if want <= 0:
+        return [], 0
+    if _db_backend() == "supabase":
+        seen = await get_seen_ids(user_id, topic)
+        rows = await mcq_static_bank_pg.sample_random_by_topic(
+            topic, want, difficulty=difficulty, exclude_ids=list(seen | excluded),
+        )
+        items = [_item_from_doc(r) for r in rows]
+        short = want - len(items)
+        if short <= 0:
+            return items, 0
+        got_ids = {it["id"] for it in items}
+        doc = await _db.mcq_static_bank_seen.find_one({"user_id": user_id, "topic": topic}) if _db is not None else None
+        seen_at = (doc or {}).get("seen_at") or {}
+        candidate_rows = await mcq_static_bank_pg.list_by_topic(
+            topic, difficulty=difficulty, exclude_ids=list(got_ids | excluded),
+        )
+        candidates = [_item_from_doc(r) for r in candidate_rows]
+        if rng is not None:
+            rng.shuffle(candidates)
+        candidates.sort(key=lambda it: seen_at.get(it["id"], ""))
+        reused_items = candidates[:short]
+        return items + reused_items, len(reused_items)
+    if _db is None:
         return [], 0
     base_query: Dict[str, Any] = {"topic": topic}
     if difficulty is not None:
@@ -355,6 +428,8 @@ async def topic_bank_size(topic: str) -> int:
     """Total question count for `topic`, seen or unseen, across every
     candidate -- used for feasibility checks (e.g. TCS's static-only draw)
     and the bank-readiness report. No LLM call, no seen-state involved."""
+    if _db_backend() == "supabase":
+        return await mcq_static_bank_pg.count_by_topic(topic)
     if _db is None:
         return 0
     return await _db.mcq_static_bank.count_documents({"topic": topic})

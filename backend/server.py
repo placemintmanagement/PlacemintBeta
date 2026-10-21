@@ -404,6 +404,25 @@ def tcs_interview_enabled() -> bool:
     return os.environ.get("TCS_INTERVIEW_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 
+# ---- DB_BACKEND switch (Supabase cutover, Step 1: read-only content banks) --
+# Same exact env-var-reading convention as _auth_disabled()/tcs_interview_
+# enabled() above: read live on every call, never cached at import time, so
+# flipping this in the environment and restarting is the only way to change
+# it -- no in-process state to go stale. Unlike those two booleans, this is a
+# three-way-fork string, not an on/off flag: "mongo" (the default) or
+# "supabase". Any value other than exactly "supabase" is treated as "mongo"
+# (fails closed to the existing, proven behavior), matching _auth_disabled()'s
+# "omission is what keeps it off" philosophy. See SUPABASE_CUTOVER_PLAN.md for
+# the full design -- this function and the matching helper copied into each
+# bank module (banks/mcq_pool.py, banks/mcq_static_bank.py,
+# games/gamified_round.py, and the Capgemini recruitment-process module) are
+# the single switch Step 1's dispatch functions branch on. A plain restart
+# with DB_BACKEND unset is BYTE-IDENTICAL to today's behavior -- every
+# dispatch function's "mongo" branch is the original, untouched code path.
+def db_backend() -> str:
+    return os.environ.get("DB_BACKEND", "mongo").strip().lower()
+
+
 if _auth_disabled():
     logger.warning("=" * 70)
     logger.warning("AUTH IS COMPLETELY DISABLED (DISABLE_AUTH=1). Every request is the same")
@@ -1464,18 +1483,10 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         # above) -- otherwise reading_comp's passage-level items especially
         # would get overwritten with synthetic q1/q2 ids that don't match
         # anything downstream.
-        grammar_pool = await db.capgemini_round1_bank.find(
-            {"section": "grammar_correction"}, {"_id": 0},
-        ).to_list(None)
-        business_pool = await db.capgemini_round1_bank.find(
-            {"section": "business_writing"}, {"_id": 0},
-        ).to_list(None)
-        situational_pool = await db.capgemini_round1_bank.find(
-            {"section": "situational_response"}, {"_id": 0},
-        ).to_list(None)
-        reading_pool = await db.capgemini_round1_bank.find(
-            {"section": "reading_comprehension"}, {"_id": 0},
-        ).to_list(None)
+        grammar_pool = await capgemini_recruitment_process.fetch_round1_pool("grammar_correction")
+        business_pool = await capgemini_recruitment_process.fetch_round1_pool("business_writing")
+        situational_pool = await capgemini_recruitment_process.fetch_round1_pool("situational_response")
+        reading_pool = await capgemini_recruitment_process.fetch_round1_pool("reading_comprehension")
         # Section 5 (listening_comprehension) -- wired 2026-08, after Groq
         # TTS generation. ONLY clips with tts_status == "generated" are ever
         # fetched here -- a clip with no real audio yet must never reach a
@@ -1488,9 +1499,9 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         # confirmed via 300 real draws against this exact pool before wiring,
         # 0 failures -- so this is safe to ship now rather than waiting for
         # every clip to finish generating.
-        listening_pool = await db.capgemini_round1_bank.find(
-            {"section": "listening_comprehension", "tts_status": "generated"}, {"_id": 0},
-        ).to_list(None)
+        listening_pool = await capgemini_recruitment_process.fetch_round1_pool(
+            "listening_comprehension", tts_status="generated",
+        )
         # Section 6 (spoken_simulation) -- wired 2026-08. Single query for
         # both item_types (draw_section6_questions splits by item_type
         # itself, same "hand it the whole pool" contract every other
@@ -1499,9 +1510,7 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         # TEXT the candidate reads/responds to; the candidate's own spoken
         # response is what gets recorded, not something pre-generated that
         # could be "not ready yet".
-        spoken_pool = await db.capgemini_round1_bank.find(
-            {"section": "spoken_simulation"}, {"_id": 0},
-        ).to_list(None)
+        spoken_pool = await capgemini_recruitment_process.fetch_round1_pool("spoken_simulation")
 
         # Cross-attempt repetition fix (2026-09, Phase 0 migration): each
         # draw call now gets this candidate's already-seen ids for that
@@ -1559,7 +1568,7 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         # decision (where in Round 2, what count/weight) can be made
         # separately without ever having shipped un-wired dispatch code in
         # between, same precedent as Section 5 before its own wiring pass.
-        ai_literacy_pool = await db.capgemini_round2_bank.find({}, {"_id": 0}).to_list(None)
+        ai_literacy_pool = await capgemini_recruitment_process.fetch_round2_pool()
         ai_literacy_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "ai_literacy")
         ai_literacy_items = capgemini_recruitment_process.draw_section7_questions(
             ai_literacy_pool, strip=False, exclude_ids=ai_literacy_seen,
@@ -7192,20 +7201,29 @@ async def _startup():
     debugging_bank.init(db)
     ai_assisted_bank.init(db)
     capgemini_recruitment_process.init(db)
-    try:
-        await db.mcq_pool.create_index([("company_name", 1), ("section_key", 1), ("verified", 1)])
-        await db.mcq_pool_stats.create_index([("company_name", 1), ("section_key", 1)], unique=True)
-        await db.review_deck.create_index([("user_id", 1), ("added_at", -1)])
-        await db.review_deck.create_index([("user_id", 1), ("source_attempt_id", 1), ("section_key", 1), ("question_id", 1)], unique=True)
-        await db.mcq_static_bank.create_index([("topic", 1), ("question_id", 1)], unique=True)
-        await db.mcq_static_bank_seen.create_index([("user_id", 1), ("topic", 1)], unique=True)
-        await db.gamified_round_config.create_index([("company", 1)], unique=True)
-        await db.puzzle_bank.create_index([("gameType", 1), ("puzzle_id", 1)], unique=True)
-        await db.puzzle_bank.create_index([("gameType", 1), ("companyTags", 1)])
-        await db.game_session.create_index([("session_id", 1)], unique=True)
-        await db.game_session.create_index([("user_id", 1), ("gameType", 1)])
-    except Exception as e:  # pragma: no cover
-        logger.warning("mcq_pool index create failed: %s", e)
+    # Index creation is Mongo-specific setup -- under DB_BACKEND=supabase the
+    # equivalent indexes are already declared in supabase/schema.sql (applied
+    # by the product owner, never by this backend), so this whole block is
+    # simply skipped rather than ported. Note this does NOT gate the init()
+    # calls above: those wire the Mongo handle banks/games modules still need
+    # for user-data reads/writes (seen-tracking, game_session, etc.) that
+    # Step 1 deliberately leaves on Mongo regardless of DB_BACKEND -- see
+    # SUPABASE_CUTOVER_PLAN.md.
+    if db_backend() == "mongo":
+        try:
+            await db.mcq_pool.create_index([("company_name", 1), ("section_key", 1), ("verified", 1)])
+            await db.mcq_pool_stats.create_index([("company_name", 1), ("section_key", 1)], unique=True)
+            await db.review_deck.create_index([("user_id", 1), ("added_at", -1)])
+            await db.review_deck.create_index([("user_id", 1), ("source_attempt_id", 1), ("section_key", 1), ("question_id", 1)], unique=True)
+            await db.mcq_static_bank.create_index([("topic", 1), ("question_id", 1)], unique=True)
+            await db.mcq_static_bank_seen.create_index([("user_id", 1), ("topic", 1)], unique=True)
+            await db.gamified_round_config.create_index([("company", 1)], unique=True)
+            await db.puzzle_bank.create_index([("gameType", 1), ("puzzle_id", 1)], unique=True)
+            await db.puzzle_bank.create_index([("gameType", 1), ("companyTags", 1)])
+            await db.game_session.create_index([("session_id", 1)], unique=True)
+            await db.game_session.create_index([("user_id", 1), ("gameType", 1)])
+        except Exception as e:  # pragma: no cover
+            logger.warning("mcq_pool index create failed: %s", e)
     # The pool worker pre-generates MCQs with the LLM. It is on by default
     # (existing behaviour). Set MCQ_POOL_WORKER_ENABLED=0 (or false/no/off) to disable it.
     if mcq_pool_worker_enabled():
