@@ -6,8 +6,11 @@ The genuine concurrent-pop-can-never-double-serve guarantee is a property
 of the real SQL statement (DELETE ... WHERE pool_id = (SELECT ... LIMIT 1)
 RETURNING *) running against a real Postgres row-locking engine -- it
 cannot be verified with a mocked fetch_one, only against live Supabase.
-See this task's report for why: SUPABASE_DB_URL isn't set in backend/.env
-yet, so that concurrency test is pending, not skipped by choice."""
+That real-concurrency proof now lives in
+tests/test_live_supabase_integration.py's
+test_mcq_pool_pop_one_atomic_under_real_concurrency (skipped unless
+SUPABASE_DB_URL is set), run against a scratch row inserted and deleted by
+the test itself -- never against the real 326 seeded mcq_pool rows."""
 from __future__ import annotations
 
 import asyncio

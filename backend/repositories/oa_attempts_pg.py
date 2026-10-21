@@ -178,17 +178,38 @@ async def update_attempt_progress(attempt_id: str, **fields: Any) -> Optional[di
 
 async def set_hidden_answer_key(attempt_id: str, section_key: str, question_id: str, key_data: Any) -> None:
     """Mirrors `_store_hidden_answer_key` (server.py:1021-1029): sets
-    `answer_keys[section_key][question_id] = key_data` via jsonb_set,
-    creating the intermediate `section_key` object if it doesn't exist yet
-    (`jsonb_set(..., true)` -- `create_missing`). This is the ONLY way
-    anything writes to oa_attempt_keys outside of create_attempt's initial
-    empty row -- an internal, grading-side call, never reachable from a
-    client-facing response."""
+    `answer_keys[section_key][question_id] = key_data`, creating the
+    intermediate `section_key` object if it doesn't exist yet. This is the
+    ONLY way anything writes to oa_attempt_keys outside of create_attempt's
+    initial empty row -- an internal, grading-side call, never reachable
+    from a client-facing response.
+
+    Live-verification correction: a single `jsonb_set(answer_keys,
+    ARRAY[section_key, question_id], key_data, true)` (the original form of
+    this statement) does NOT create a missing intermediate path element --
+    Postgres's `create_missing` flag only ever creates the LAST element of
+    `path` if absent; if a non-last element (here, `section_key`) is
+    missing, jsonb_set is a silent no-op and returns `answer_keys`
+    unchanged (confirmed directly against live Postgres, not from docs
+    alone -- every brand-new attempt starts with `answer_keys = '{}'`, so
+    the very first call for any `section_key` was silently swallowed,
+    and every subsequent call for that same never-created `section_key`
+    silently swallowed too; mocked tests only ever asserted this
+    statement's SQL text, never executed it, so this never surfaced until
+    a real Postgres run). Fixed by nesting two single-level jsonb_sets: the
+    inner one builds `{question_id: key_data}` merged onto whatever that
+    section already holds (`COALESCE(answer_keys -> section_key, '{}')`,
+    so sibling question_ids under the same section are preserved), and the
+    outer one sets that whole object as `answer_keys[section_key]` -- a
+    single-level jsonb_set on an existing top-level object, which Postgres
+    creates correctly."""
     await fetch_one(
         "UPDATE oa_attempt_keys SET answer_keys = "
-        "jsonb_set(answer_keys, %s::text[], %s::jsonb, true) WHERE attempt_id = %s "
+        "jsonb_set(answer_keys, ARRAY[%s]::text[], "
+        "jsonb_set(COALESCE(answer_keys -> %s, '{}'::jsonb), ARRAY[%s]::text[], %s::jsonb, true), "
+        "true) WHERE attempt_id = %s "
         "RETURNING attempt_id",
-        ([section_key, question_id], Jsonb(key_data), attempt_id),
+        (section_key, section_key, question_id, Jsonb(key_data), attempt_id),
     )
 
 

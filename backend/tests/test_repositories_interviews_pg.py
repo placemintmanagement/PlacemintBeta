@@ -2,10 +2,12 @@
 fetch_one directly. Covers the plain-interview and Capgemini-style
 (Spark/Dave/Commit/TCS) flat-dict split, the in-progress lookup, and the
 optimistic-concurrency (turn_count-guarded) update used by the Capgemini
-interview modes. NOTE: this module depends on the not-yet-applied
-`supabase/003_interviews_missing_columns.sql` migration (company_id +
-data columns) -- these are mocked unit tests only, not a live check that
-the real table has those columns yet."""
+interview modes. These are mocked unit tests only -- the live check that
+`supabase/003_interviews_missing_columns.sql` (company_id + data columns)
+has actually been applied, and that this module's Capgemini/TCS-shaped
+`data` round-trips correctly against the real table, lives in
+tests/test_live_supabase_integration.py instead (skipped unless
+SUPABASE_DB_URL is set)."""
 from __future__ import annotations
 
 import asyncio

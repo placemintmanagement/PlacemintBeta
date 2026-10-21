@@ -201,8 +201,16 @@ def test_set_and_get_hidden_answer_key_use_jsonb_path_ops(monkeypatch):
     monkeypatch.setattr(pg, "fetch_one", fake_fetch_one)
     asyncio.run(pg.set_hidden_answer_key("oa1", "grid", "q1", {"answer": 3}))
     assert "jsonb_set(answer_keys" in captured["sql"]
-    assert captured["params"][0] == ["grid", "q1"]
-    assert captured["params"][1].obj == {"answer": 3}
+    # Two nested single-level jsonb_sets (see set_hidden_answer_key's
+    # docstring -- a single two-level jsonb_set silently no-ops against
+    # live Postgres when section_key doesn't exist yet, confirmed by a
+    # live run): outer sets answer_keys[section_key], inner builds
+    # {question_id: key_data} merged onto that section's existing content.
+    assert captured["params"][0] == "grid"      # outer path element (section_key)
+    assert captured["params"][1] == "grid"      # COALESCE(answer_keys -> section_key, ...)
+    assert captured["params"][2] == "q1"        # inner path element (question_id)
+    assert captured["params"][3].obj == {"answer": 3}
+    assert captured["params"][4] == "oa1"       # attempt_id
 
     async def fake_fetch_one_get(sql, params=()):
         captured["sql"] = sql

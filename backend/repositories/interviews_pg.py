@@ -10,7 +10,7 @@ concurrency `update_one({"interview_id": ..., "turn_count": expected},
 persist and its Dave/Commit/TCS near-duplicates, ~4446-4455, ~4808-4815,
 ~5377-5384).
 
-IMPORTANT -- depends on a column schema.sql doesn't have yet: real
+IMPORTANT -- depended on a column schema.sql didn't originally have: real
 `db.interviews` documents carry a `company_id` field queried directly
 (not derivable from `company_name`) and, for the Capgemini interview
 modes, a long tail of fields (tier, tier_source, candidate_name, mode,
@@ -18,16 +18,17 @@ state, turn_count, current_question, project, project_text,
 dsa_problem_id, dsa_flags, turns, usage, flag_review, spark_score) with
 no promoted column and no catch-all jsonb column to fall back to --
 every other user-data table in schema.sql has a `data` jsonb column for
-exactly this, `interviews` does not. See
-`supabase/003_interviews_missing_columns.sql` (NOT yet run against the
-live project -- additive, for the product owner to review and run
-themselves per this repo's ground rules) for the proposed
-`company_id text` + `data jsonb` columns this module is written against.
-Until that migration runs, insert_interview/update_interview's `data`
-writes will fail against the live table with "column data does not
-exist" -- this module is complete and unit-tested against mocks, but not
-live-verified (SUPABASE_DB_URL was absent for this phase regardless, so
-no live run happened either way -- see the phase report).
+exactly this, `interviews` originally did not. `supabase/
+003_interviews_missing_columns.sql` (adding `company_id text` +
+`data jsonb not null default '{}'` + an `interviews_company_idx` index)
+has since been reviewed and run by the product owner against the live
+project -- confirmed present live (see
+tests/test_live_supabase_integration.py's
+test_interviews_schema_has_company_id_and_data_columns, which checks
+information_schema directly rather than assuming). This module's
+Capgemini/TCS-shaped `data` round-trip is now live-verified too (see
+that same test file's test_interviews_pg_live_roundtrip_with_
+capgemini_shaped_data).
 """
 from __future__ import annotations
 
