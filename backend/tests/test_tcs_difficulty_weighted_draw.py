@@ -42,6 +42,7 @@ from banks import mcq_static_bank
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs import (
     tcs_recruitment_process as tcs,
 )
+from supabase_dispatch_fake_support import use_backend
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
@@ -263,13 +264,20 @@ def _seen_doc(user_id, topic, seen_ids):
     ("reasoning", 6, 3),
     ("verbal", 25, 10),  # TCS-shaped count, but via Capgemini/everyone's GENERIC path
 ])
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
 def test_capgemini_path_sample_mixed_static_part_same_contract_as_baseline(
-    seed, topic, count, seen_n, baseline_mcq_static_bank, live_mcq_static_bank,
+    seed, topic, count, seen_n, baseline_mcq_static_bank, live_mcq_static_bank, monkeypatch, backend,
 ):
     """No longer byte-identical BY DESIGN (this follow-up task's whole
     point: Capgemini's draw is now genuinely randomized) -- the CONTRACT
     still must match exactly: same total served, same live_n, no
-    duplicates, every id genuinely from this topic's bank."""
+    duplicates, every id genuinely from this topic's bank.
+
+    Parametrized over `backend` -- baseline_mcq_static_bank is a frozen
+    copy from BASELINE_COMMIT (predates DB_BACKEND entirely); live_mcq_
+    static_bank IS banks.mcq_static_bank, which forks on DB_BACKEND, so
+    "supabase" proves this contract holds dispatched through
+    repositories/mcq_static_bank_pg.py (faked below) too."""
     bank_docs = _bank_docs(topic, 40)
     bank_ids = {d["question_id"] for d in bank_docs}
     seen_ids = [f"{topic}-{i}" for i in range(seen_n)]
@@ -282,6 +290,7 @@ def test_capgemini_path_sample_mixed_static_part_same_contract_as_baseline(
     )
 
     live_mcq_static_bank.init(_FakeDb([dict(d) for d in bank_docs], [_seen_doc(user_id, topic, seen_ids)]))
+    use_backend(monkeypatch, backend)
     random.seed(seed)  # inert for the live module now -- kept only so baseline's own draw is reproducible
     after_items, after_live_n = asyncio.run(
         live_mcq_static_bank.sample_mixed_static_part(user_id, topic, count)
@@ -299,12 +308,14 @@ def test_capgemini_path_sample_mixed_static_part_same_contract_as_baseline(
     ("oops", 10, 6, 0),   # Capgemini R2 Technical's real shape -- fresh
     ("dbms", 5, 8, 2),    # returning candidate + shortfall -- exercises reuse
 ])
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
 def test_capgemini_path_sample_static_with_reuse_same_contract_as_baseline(
-    seed, topic, bank_n, count, seen_n, baseline_mcq_static_bank, live_mcq_static_bank,
+    seed, topic, bank_n, count, seen_n, baseline_mcq_static_bank, live_mcq_static_bank, monkeypatch, backend,
 ):
     """Same deliberate relaxation as the sample_mixed_static_part test
     above: exact sequence is no longer expected to match; reused/unfilled
-    counts, total served, and no-duplicates must."""
+    counts, total served, and no-duplicates must. Parametrized over
+    `backend` -- same reasoning as that test."""
     bank_docs = _bank_docs(topic, bank_n)
     bank_ids = {d["question_id"] for d in bank_docs}
     seen_ids = [f"{topic}-{i}" for i in range(seen_n)]
@@ -317,6 +328,7 @@ def test_capgemini_path_sample_static_with_reuse_same_contract_as_baseline(
     )
 
     live_mcq_static_bank.init(_FakeDb([dict(d) for d in bank_docs], [_seen_doc(user_id, topic, seen_ids)]))
+    use_backend(monkeypatch, backend)
     random.seed(seed)
     a_items, a_reused, a_unfilled = asyncio.run(
         live_mcq_static_bank.sample_static_with_reuse(user_id, topic, count)
@@ -364,8 +376,10 @@ def test_bucket_targets_rounds_to_exactly_count(count, mix, expected):
 
 # ---- 4. sample_static_difficulty_weighted_with_reuse: core behavior -------
 
-def test_weighted_draw_no_duplicates_within_one_call():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_weighted_draw_no_duplicates_within_one_call(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed(db, "aptitude", 30, "Easy")
     _seed(db, "aptitude", 30, "Medium")
     _seed(db, "aptitude", 30, "Hard")
@@ -379,8 +393,10 @@ def test_weighted_draw_no_duplicates_within_one_call():
     assert len({it["id"] for it in items}) == 20
 
 
-def test_weighted_draw_hits_exact_bucket_targets_when_bank_has_plenty():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_weighted_draw_hits_exact_bucket_targets_when_bank_has_plenty(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed(db, "aptitude", 50, "Easy")
     _seed(db, "aptitude", 50, "Medium")
     _seed(db, "aptitude", 50, "Hard")
@@ -397,8 +413,10 @@ def test_weighted_draw_hits_exact_bucket_targets_when_bank_has_plenty():
     assert metadata["fallback"] == []  # plenty of each bucket -- no fallback needed
 
 
-def test_weighted_draw_recycles_least_recently_seen_within_a_thin_bank():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_weighted_draw_recycles_least_recently_seen_within_a_thin_bank(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     # Only 3 Medium questions total -- count=3 with the Foundation mix
     # forces every bucket's shortfall to funnel into this one Medium pool,
     # then exhaust it; a second draw must recycle, least-recently-seen first.
@@ -424,8 +442,10 @@ def test_weighted_draw_recycles_least_recently_seen_within_a_thin_bank():
     assert [it["id"] for it in items2][-1] == ids[0]
 
 
-def test_weighted_draw_falls_back_to_nearest_difficulty_and_records_it():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_weighted_draw_falls_back_to_nearest_difficulty_and_records_it(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     # Only Medium exists -- Easy and Hard buckets must fall back to Medium.
     _seed(db, "aptitude", 20, "Medium")
     items, _reused, unfilled, metadata = asyncio.run(
@@ -444,12 +464,14 @@ def test_weighted_draw_falls_back_to_nearest_difficulty_and_records_it():
         assert entry["to"] == "Medium"
 
 
-def test_weighted_draw_never_returns_fewer_than_the_flat_draw_would():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_weighted_draw_never_returns_fewer_than_the_flat_draw_would(monkeypatch, backend):
     """The ultimate "no regression" guarantee: however lopsided the
     difficulty mix of a bank is, the weighted draw's total served must
     equal min(count, topic_bank_size) -- exactly what the OLD flat draw
     would achieve, via the global safety net."""
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed(db, "aptitude", 7, "Hard")  # single difficulty, smaller than count
     items, _reused, unfilled, _metadata = asyncio.run(
         mcq_static_bank.sample_static_difficulty_weighted_with_reuse(
@@ -461,12 +483,14 @@ def test_weighted_draw_never_returns_fewer_than_the_flat_draw_would():
     assert len({it["id"] for it in items}) == 7
 
 
-def test_weighted_draw_distribution_lands_at_target_mix_across_many_fresh_users():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_weighted_draw_distribution_lands_at_target_mix_across_many_fresh_users(monkeypatch, backend):
     """"Many draws land near the target mix" -- aggregate the difficulty
     composition across 25 independent fresh users' draws (a generous bank,
     no recycling/fallback in play) and confirm the aggregate proportions
     are within a few points of the Advanced mix's 15/45/40."""
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed(db, "reasoning", 400, "Easy")
     _seed(db, "reasoning", 400, "Medium")
     _seed(db, "reasoning", 400, "Hard")
@@ -491,13 +515,15 @@ def test_weighted_draw_distribution_lands_at_target_mix_across_many_fresh_users(
     assert abs(fractions["Hard"] - 0.40) < 0.03
 
 
-def test_weighted_draw_unseen_pool_is_actually_shuffled_not_insertion_order():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_weighted_draw_unseen_pool_is_actually_shuffled_not_insertion_order(monkeypatch, backend):
     """The real fix for the "every fresh user gets the identical first N
     questions" bug: two DIFFERENT seeded rngs drawing from the same ample,
     single-difficulty bank must (with overwhelming probability) choose a
     different first item -- unlike sample_static's bare cursor order,
     which is always the same regardless of who's asking."""
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed(db, "verbal", 200, "Medium")
     items_a, *_ = asyncio.run(
         mcq_static_bank.sample_static_difficulty_weighted_with_reuse(
@@ -519,8 +545,10 @@ def _tcs_sections():
     return [{**s, "questions": []} for s in cfg["sections"]]
 
 
-def test_foundation_and_advanced_hit_their_target_bucket_mix():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_foundation_and_advanced_hit_their_target_bucket_mix(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     for topic in ("aptitude", "verbal", "reasoning"):
         _seed(db, topic, 200, "Easy")
         _seed(db, topic, 200, "Medium")
@@ -541,12 +569,33 @@ def test_foundation_and_advanced_hit_their_target_bucket_mix():
         assert counts == targets, f"{key}: expected {targets}, got {counts}"
 
 
-def test_advanced_sub_topics_hit_the_advanced_mix():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_advanced_sub_topics_hit_the_advanced_mix(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
+    # Topic-prefixed ids: this test's own final assertion dedups ids ACROSS
+    # aptitude's and reasoning's draws combined (advanced_items spans both
+    # topics) -- _seed()'s default id scheme ("easy-0", "medium-0", ...)
+    # is NOT topic-qualified, so without a prefix, "aptitude" and
+    # "reasoning" each get a doc literally named question_id="easy-0", etc.
+    # Under DB_BACKEND=mongo this never surfaced: _draw_bucket's mongo path
+    # shuffles with a per-(attempt_id, topic)-SEEDED rng, so the exact items
+    # drawn are fixed and this particular seed combination happens not to
+    # collide. Under DB_BACKEND=supabase, the real repositories/
+    # mcq_static_bank_pg.py (and this file's fake of it) draw via `ORDER BY
+    # random()`-equivalent with NO caller-supplied seed (a genuine,
+    # documented production behavior, not a test-fake shortcoming -- see
+    # mcq_static_bank.sample_static's own docstring) -- a GENUINELY random
+    # draw occasionally picks the same literal id string from both topics'
+    # pools, which the dedup check below then (correctly, by its own
+    # literal reading) flags as a duplicate, even though they're two
+    # different real documents that merely share an ambiguous test id.
+    # Prefixing by topic removes the ambiguity at the source instead of
+    # relying on a lucky seed.
     for topic in ("aptitude", "verbal", "reasoning"):
-        _seed(db, topic, 200, "Easy")
-        _seed(db, topic, 200, "Medium")
-        _seed(db, topic, 200, "Hard")
+        _seed(db, topic, 200, "Easy", prefix=f"{topic}-")
+        _seed(db, topic, 200, "Medium", prefix=f"{topic}-")
+        _seed(db, topic, 200, "Hard", prefix=f"{topic}-")
 
     sections = _tcs_sections()
     by_key = {s["key"]: s for s in sections}
@@ -562,7 +611,8 @@ def test_advanced_sub_topics_hit_the_advanced_mix():
     assert len({q["id"] for q in advanced_items}) == 15
 
 
-def test_raw_draw_one_topic_primitive_is_unchanged():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_raw_draw_one_topic_primitive_is_unchanged(monkeypatch, backend):
     """The non-weighted _draw_one_topic primitive -- what every existing
     direct-call test in test_tcs_zero_ai.py exercises -- keeps its exact
     old 2-tuple signature and flat (non-difficulty-aware) behavior; it is
@@ -572,6 +622,7 @@ def test_raw_draw_one_topic_primitive_is_unchanged():
     assert [p.name for p in sig.parameters.values()] == ["attempt_id", "user_id", "topic", "count"]
 
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     ids = _seed(db, "aptitude", 5, "Medium")
     items, unfilled = asyncio.run(tcs._draw_one_topic("att-1", "u1", "aptitude", 5))
     assert unfilled == 0
