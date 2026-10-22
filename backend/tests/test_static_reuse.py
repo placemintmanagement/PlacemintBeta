@@ -1,5 +1,15 @@
 """Static-only Capgemini draw: no LLM call, least-recently-seen reuse, shortfall warning.
-Uses an in-memory fake db (no Mongo, no network)."""
+Uses an in-memory fake db (no Mongo, no network).
+
+Every test below is parametrized over DB_BACKEND ("mongo"/"supabase") --
+see supabase_dispatch_fake_support.py's module docstring for why: without
+this, a GLOBAL DB_BACKEND=supabase (set when running the full suite against
+real Postgres) would silently redirect sb.sample_static_with_reuse's calls
+into repositories/mcq_static_bank_pg.py with no real Postgres underneath,
+erroring instead of exercising the reuse/recycling behavior this file
+actually checks. The "supabase" param installs a fake that reads from the
+SAME fake Mongo db these tests already build, so the real assertions below
+run for real under both backends."""
 import asyncio
 import logging
 import re
@@ -8,6 +18,7 @@ import pytest
 
 import server
 from banks import mcq_static_bank as sb
+from supabase_dispatch_fake_support import use_backend
 
 
 class _Cursor:
@@ -88,17 +99,20 @@ def _bank(topic, n):
     } for i in range(n)]
 
 
-def _use(monkeypatch, db):
+def _use(monkeypatch, db, backend="mongo"):
     monkeypatch.setattr(sb, "_db", db)
+    use_backend(monkeypatch, backend)
 
 
-def test_fresh_user_gets_unseen_questions_without_reuse(monkeypatch):
-    _use(monkeypatch, _FakeDb(_bank("dsa", 5)))
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_fresh_user_gets_unseen_questions_without_reuse(monkeypatch, backend):
+    _use(monkeypatch, _FakeDb(_bank("dsa", 5)), backend)
     items, reused, unfilled = asyncio.run(sb.sample_static_with_reuse("u1", "dsa", 3))
     assert len(items) == 3 and reused == 0 and unfilled == 0
 
 
-def test_exhausted_topic_reuses_least_recently_seen(monkeypatch):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_exhausted_topic_reuses_least_recently_seen(monkeypatch, backend):
     seen = [{
         "user_id": "u1", "topic": "dsa",
         "question_ids": [f"dsa-{i:03d}" for i in range(5)],
@@ -110,22 +124,24 @@ def test_exhausted_topic_reuses_least_recently_seen(monkeypatch):
             "dsa-004": "2026-01-05T00:00:00+00:00",  # newest
         },
     }]
-    _use(monkeypatch, _FakeDb(_bank("dsa", 5), seen))
+    _use(monkeypatch, _FakeDb(_bank("dsa", 5), seen), backend)
     items, reused, unfilled = asyncio.run(sb.sample_static_with_reuse("u1", "dsa", 3))
     assert len(items) == 3 and reused == 3 and unfilled == 0
     assert [it["id"] for it in items] == ["dsa-000", "dsa-001", "dsa-002"]
 
 
-def test_bank_smaller_than_request_reports_unfilled(monkeypatch):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_bank_smaller_than_request_reports_unfilled(monkeypatch, backend):
     seen = [{"user_id": "u1", "topic": "dsa", "question_ids": ["dsa-000", "dsa-001"]}]
-    _use(monkeypatch, _FakeDb(_bank("dsa", 2), seen))
+    _use(monkeypatch, _FakeDb(_bank("dsa", 2), seen), backend)
     items, reused, unfilled = asyncio.run(sb.sample_static_with_reuse("u1", "dsa", 3))
     assert len(items) == 2 and reused == 2 and unfilled == 1
 
 
-def test_static_only_draw_never_calls_llm_and_logs_shortfall(monkeypatch, caplog):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_static_only_draw_never_calls_llm_and_logs_shortfall(monkeypatch, caplog, backend):
     seen = [{"user_id": "u1", "topic": "dsa", "question_ids": [f"dsa-{i:03d}" for i in range(5)]}]
-    _use(monkeypatch, _FakeDb(_bank("dsa", 5), seen))
+    _use(monkeypatch, _FakeDb(_bank("dsa", 5), seen), backend)
 
     def _boom(*args, **kwargs):
         raise AssertionError("LLM called on the static-only path")
@@ -151,21 +167,23 @@ def test_pool_worker_flag_defaults_on_and_accepts_off_values():
         assert server.mcq_pool_worker_enabled(off) is False, off
 
 
-def test_legacy_seen_entries_without_seen_at_sort_as_oldest(monkeypatch):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_legacy_seen_entries_without_seen_at_sort_as_oldest(monkeypatch, backend):
     # dsa-000 and dsa-001 were served before seen_at existed; dsa-002 has a timestamp.
     seen = [{
         "user_id": "u1", "topic": "dsa", "question_ids": ["dsa-000", "dsa-001", "dsa-002"],
         "seen_at": {"dsa-002": "2026-02-01T00:00:00+00:00"},
     }]
-    _use(monkeypatch, _FakeDb(_bank("dsa", 3), seen))
+    _use(monkeypatch, _FakeDb(_bank("dsa", 3), seen), backend)
     items, reused, unfilled = asyncio.run(sb.sample_static_with_reuse("u1", "dsa", 2))
     assert reused == 2 and unfilled == 0
     assert {it["id"] for it in items} == {"dsa-000", "dsa-001"}
 
 
-def test_reuse_never_returns_a_question_twice_in_one_draw(monkeypatch):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_reuse_never_returns_a_question_twice_in_one_draw(monkeypatch, backend):
     seen = [{"user_id": "u1", "topic": "dsa", "question_ids": [f"dsa-{i:03d}" for i in range(4)]}]
-    _use(monkeypatch, _FakeDb(_bank("dsa", 4), seen))
+    _use(monkeypatch, _FakeDb(_bank("dsa", 4), seen), backend)
     items, _, _ = asyncio.run(sb.sample_static_with_reuse("u1", "dsa", 4))
     ids = [it["id"] for it in items]
     assert len(ids) == len(set(ids)) == 4
