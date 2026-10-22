@@ -39,6 +39,37 @@ network blocking the port, not anything on the Supabase or app side.
    regular pytest tests, not a separate runner. They skip themselves
    automatically (not an error, not a failure) if `SUPABASE_DB_URL` isn't set.
 
+### PowerShell (Windows)
+
+The commands above are bash syntax. On a Windows machine running PowerShell
+(the product owner's own setup), use this instead -- PowerShell has no
+inline `VAR=value command` prefix form, so `DB_BACKEND=supabase python -m
+pytest` (bash syntax) silently does NOT set the env var in PowerShell; it
+must be set as its own statement first.
+
+Run just the live integration file (from `backend/`):
+```powershell
+python -m pytest tests/test_live_supabase_integration.py -v
+```
+
+Run the FULL suite for real against Postgres (not self-skipped), now that
+`SUPABASE_DB_URL` is set in `backend/.env`:
+```powershell
+$env:DB_BACKEND = "supabase"
+python -m pytest -v
+```
+
+**Important**: `$env:DB_BACKEND` persists for the rest of this PowerShell
+session (and any other process you launch from it), not just this one
+command. Once you're done running the Postgres-backed suite, unset it
+before doing anything else in this shell -- otherwise every later `pytest`
+run (and anything else that reads `DB_BACKEND`) in this same window keeps
+reading "supabase" instead of the default:
+```powershell
+Remove-Item Env:DB_BACKEND
+```
+Closing the PowerShell window entirely also clears it, if that's easier.
+
 ## What it covers
 
 Schema sanity (the `interviews` migration's columns/index actually exist),
