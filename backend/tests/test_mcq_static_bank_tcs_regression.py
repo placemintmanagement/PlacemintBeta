@@ -53,6 +53,8 @@ from pathlib import Path
 
 import pytest
 
+from supabase_dispatch_fake_support import use_backend
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
 
@@ -195,14 +197,22 @@ def _seen_doc(user_id: str, topic: str, seen_ids: list) -> dict:
     ("reasoning", 6, 3),   # returning candidate, partial seen history
     ("verbal", 25, 10),    # TCS-shaped count, but via the GENERIC path
 ])
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
 def test_sample_mixed_static_part_same_contract_as_head(
-    seed, topic, count, seen_n, head_mcq_static_bank, live_mcq_static_bank,
+    seed, topic, count, seen_n, head_mcq_static_bank, live_mcq_static_bank, monkeypatch, backend,
 ):
     """HEAD and the live module no longer draw the identical SEQUENCE (the
     live module's sample_static is now genuinely randomized -- that's the
     deliberate point of this change), but the CONTRACT must match: same
     total served, same live_n backfill need, no duplicates, and every
-    served id genuinely belongs to this topic's bank."""
+    served id genuinely belongs to this topic's bank.
+
+    Parametrized over `backend` -- head_mcq_static_bank is a frozen copy
+    from BASELINE_COMMIT (predates DB_BACKEND entirely, so it's unaffected
+    either way); live_mcq_static_bank IS banks.mcq_static_bank, which forks
+    on DB_BACKEND, so "supabase" here proves this same contract holds when
+    its draw is dispatched through repositories/mcq_static_bank_pg.py
+    (faked below to read the SAME live_db fixture) instead of Mongo."""
     bank_docs = _bank_docs(topic, 40)
     bank_ids = {d["question_id"] for d in bank_docs}
     seen_ids = [f"{topic}-{i}" for i in range(seen_n)]
@@ -217,6 +227,7 @@ def test_sample_mixed_static_part_same_contract_as_head(
 
     live_db = _FakeDb([dict(d) for d in bank_docs], [_seen_doc(user_id, topic, seen_ids)])
     live_mcq_static_bank.init(live_db)
+    use_backend(monkeypatch, backend)
     random.seed(seed)
     after_items, after_live_n = asyncio.run(
         live_mcq_static_bank.sample_mixed_static_part(user_id, topic, count)
@@ -239,13 +250,15 @@ def test_sample_mixed_static_part_same_contract_as_head(
     ("dbms", 5, 8, 2),     # returning candidate + shortfall -- exercises reuse
     ("cn", 3, 6, 0),       # bank smaller than count even unseen -- unfilled path
 ])
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
 def test_sample_static_with_reuse_same_contract_as_head_when_rng_omitted(
-    seed, topic, bank_n, count, seen_n, head_mcq_static_bank, live_mcq_static_bank,
+    seed, topic, bank_n, count, seen_n, head_mcq_static_bank, live_mcq_static_bank, monkeypatch, backend,
 ):
     """Same deliberate relaxation as test_sample_mixed_static_part_same_
     contract_as_head above: the live module's draw is no longer the exact
     same SEQUENCE as HEAD's (genuinely randomized now), but reused/unfilled
-    counts, total served, and no-duplicates must still match exactly."""
+    counts, total served, and no-duplicates must still match exactly.
+    Parametrized over `backend` -- same reasoning as that test."""
     # Every real production call site (the static_only branch of
     # _generate_extra_topics) omits `rng` -- exactly like this test.
     bank_docs = _bank_docs(topic, bank_n)
@@ -262,6 +275,7 @@ def test_sample_static_with_reuse_same_contract_as_head_when_rng_omitted(
 
     live_db = _FakeDb([dict(d) for d in bank_docs], [_seen_doc(user_id, topic, seen_ids)])
     live_mcq_static_bank.init(live_db)
+    use_backend(monkeypatch, backend)
     random.seed(seed)
     a_items, a_reused, a_unfilled = asyncio.run(
         live_mcq_static_bank.sample_static_with_reuse(user_id, topic, count)
@@ -299,7 +313,8 @@ def test_sample_static_signature_gained_only_an_optional_trailing_rng_kwarg():
 
 # ---- 4. the mongomock_motor .limit() bug this diff actually fixes ---------
 
-def test_limit_bug_this_diff_fixes_is_real_and_fixed(live_mcq_static_bank):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_limit_bug_this_diff_fixes_is_real_and_fixed(live_mcq_static_bank, monkeypatch, backend):
     """Originally documented WHY sample_static() needed .limit() at all:
     without it, mongomock_motor's to_list(length=count) silently ignores
     `length` and returns the WHOLE matching set, over-filling the section.
@@ -314,7 +329,16 @@ def test_limit_bug_this_diff_fixes_is_real_and_fixed(live_mcq_static_bank):
     chooses to return. This test (with `_BuggyColl.find` updated to accept
     the new `projection` arg sample_static's id-only query passes) is kept
     as a regression guard for that structural guarantee, not for .limit()
-    itself."""
+    itself.
+
+    Parametrized over `backend`: under "supabase", sample_static's dispatch
+    never touches `_BuggyColl.find()` with `.limit()` at all -- it goes
+    through the fake repositories/mcq_static_bank_pg.py install below
+    instead, which is immune to this bug by construction. Kept parametrized
+    (rather than skipped for "supabase") because the actual guarantee this
+    test checks -- "sample_static always returns exactly `count` items
+    regardless of backend quirks" -- is exactly as true, and exactly as
+    worth proving, under supabase."""
     class _OverReturningCursor:
         """Simulates the exact mongomock_motor bug: to_list(length=N) returns
         more than N if .limit() was never called first."""
@@ -353,6 +377,7 @@ def test_limit_bug_this_diff_fixes_is_real_and_fixed(live_mcq_static_bank):
 
     docs = _bank_docs("aptitude", 10)
     live_mcq_static_bank.init(_BuggyDb(docs))
+    use_backend(monkeypatch, backend)
     items = asyncio.run(live_mcq_static_bank.sample_static("u1", "aptitude", 3))
     assert len(items) == 3, (
         f"expected exactly 3 items (the requested count) even with an "
