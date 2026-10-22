@@ -13,6 +13,18 @@ subagents, no scheduled checks.
 
 Style: sync test functions calling asyncio.run(...), matching every other
 file in this suite (no pytest-asyncio in this repo -- see pytest.ini).
+
+Tests that draw real mcq_static_bank content (via tcs._draw_one_topic,
+tcs.draw_tcs_foundation_and_advanced, tcs.check_tcs_static_feasibility, or
+the full _generate_tcs_sections_bg flow) are parametrized over DB_BACKEND
+("mongo"/"supabase") -- see supabase_dispatch_fake_support.py's module
+docstring for why: those calls fork on DB_BACKEND inside
+banks/mcq_static_bank.py, so without this a GLOBAL DB_BACKEND=supabase
+would silently redirect them into repositories/mcq_static_bank_pg.py with
+no real Postgres underneath, erroring instead of proving the recycling/
+sibling-borrow/feasibility behavior this file checks. Tests that never
+touch a content bank (the coding-profile, AIForbiddenError, and structural
+guard tests below) are left exactly as they were.
 """
 import asyncio
 
@@ -26,6 +38,7 @@ from services.ai_service import AIForbiddenError, forbid_ai_calls, call_json, ca
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs import (
     tcs_recruitment_process as tcs,
 )
+from supabase_dispatch_fake_support import use_backend
 
 
 def _mcq_doc(topic, qid, difficulty="Medium"):
@@ -66,7 +79,8 @@ def _tcs_sections():
 
 # ---- 1. Full attempt, end to end, zero AI calls ----------------------------
 
-def test_full_tcs_attempt_completes_with_zero_ai_calls(monkeypatch):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_full_tcs_attempt_completes_with_zero_ai_calls(monkeypatch, backend):
     """Covers generation (start), all 5 sections submitted in order, coding
     with faked sandbox results, the result (oa_review), and the report --
     with BOTH call_json and call_json_gpt patched to raise on any call.
@@ -77,6 +91,7 @@ def test_full_tcs_attempt_completes_with_zero_ai_calls(monkeypatch):
     oa_review, final_report) goes through the REAL, unmodified server
     functions."""
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     monkeypatch.setattr(server, "call_json", _raising_call_json)
     monkeypatch.setattr(server, "call_json_gpt", _raising_call_json_gpt)
     monkeypatch.setattr(server, "_lang_run_tests", lambda language, code, tests: (len(tests), []))
@@ -133,8 +148,10 @@ def test_full_tcs_attempt_completes_with_zero_ai_calls(monkeypatch):
 
 # ---- 2. Recycling: least-recently-seen first, no in-attempt duplicates ----
 
-def test_thin_bank_recycles_least_recently_seen_first():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_thin_bank_recycles_least_recently_seen_first(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     ids = _seed_topic(db, "aptitude", 3)  # smaller than one attempt's "numerical" need (20)
 
     # First draw: all 3 unseen, served + marked seen.
@@ -152,16 +169,20 @@ def test_thin_bank_recycles_least_recently_seen_first():
     assert [q["id"] for q in items2][-1] == ids[0]
 
 
-def test_no_duplicate_questions_within_one_attempt():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_no_duplicate_questions_within_one_attempt(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed_topic(db, "aptitude", 5)
     items, unfilled = asyncio.run(tcs._draw_one_topic("att-1", "u1", "aptitude", 5))
     assert unfilled == 0
     assert len({q["id"] for q in items}) == 5  # no duplicates even drawing the whole bank at once
 
 
-def test_unseen_preferred_over_seen():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_unseen_preferred_over_seen(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     ids = _seed_topic(db, "aptitude", 5)
     asyncio.run(mcq_static_bank.mark_seen("u1", "aptitude", [ids[0], ids[1]]))
     items, unfilled = asyncio.run(tcs._draw_one_topic("att-1", "u1", "aptitude", 3))
@@ -173,8 +194,10 @@ def test_unseen_preferred_over_seen():
 
 # ---- 3. Sibling-borrow on Advanced, BLOCKED when there's no sibling -------
 
-def test_advanced_sibling_borrow_covers_a_shortfall_and_logs_it():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_advanced_sibling_borrow_covers_a_shortfall_and_logs_it(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     # "aptitude" bank too small for Advanced's own need (10) -- "reasoning"
     # (the sibling sub-topic in the SAME "advanced" section) has plenty.
     _seed_topic(db, "aptitude", 4)
@@ -202,8 +225,10 @@ def test_advanced_sibling_borrow_covers_a_shortfall_and_logs_it():
     assert len({q["id"] for q in advanced_items}) == len(advanced_items)
 
 
-def test_foundation_section_blocks_when_bank_too_small_no_sibling_exists():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_foundation_section_blocks_when_bank_too_small_no_sibling_exists(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed_topic(db, "aptitude", 5)  # "numerical" needs 20 -- no sibling in its own section
     sections = _tcs_sections()
     by_key = {s["key"]: s for s in sections}
@@ -217,8 +242,10 @@ def test_foundation_section_blocks_when_bank_too_small_no_sibling_exists():
     assert exc.value.topic == "aptitude"
 
 
-def test_check_static_feasibility_catches_a_too_small_bank():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_check_static_feasibility_catches_a_too_small_bank(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed_topic(db, "aptitude", 5)   # too small (numerical 20 + advanced 10 = 30 needed)
     _seed_topic(db, "verbal", 50)
     _seed_topic(db, "reasoning", 50)
@@ -227,8 +254,10 @@ def test_check_static_feasibility_catches_a_too_small_bank():
     assert "aptitude" in reason
 
 
-def test_check_static_feasibility_passes_with_generous_banks():
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_check_static_feasibility_passes_with_generous_banks(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     _seed_topic(db, "aptitude", 60)
     _seed_topic(db, "verbal", 60)
     _seed_topic(db, "reasoning", 60)
@@ -237,8 +266,10 @@ def test_check_static_feasibility_passes_with_generous_banks():
 
 # ---- 4. Double start / client cannot influence seen history ---------------
 
-def test_double_generation_does_not_redraw_or_double_mark_seen(monkeypatch):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_double_generation_does_not_redraw_or_double_mark_seen(monkeypatch, backend):
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     monkeypatch.setattr(server, "call_json", _raising_call_json)
     monkeypatch.setattr(server, "call_json_gpt", _raising_call_json_gpt)
     _seed_topic(db, "aptitude", 60)
