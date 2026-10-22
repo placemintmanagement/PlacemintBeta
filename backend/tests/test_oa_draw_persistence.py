@@ -38,13 +38,24 @@ once, then "reload" (GET /oa/{attempt_id}) and "resume" (a second GET,
 simulating a later page revisit) repeatedly -- the served question ids
 must be byte-identical every time, and the underlying stored doc must
 never change.
+
+Both tests are parametrized over DB_BACKEND ("mongo"/"supabase") -- see
+supabase_dispatch_fake_support.py's module docstring for why: the real
+content-draw calls here go through mcq_static_bank.py's sample_static/
+sample_static_with_reuse, which fork on DB_BACKEND -- without this
+parametrization, a GLOBAL DB_BACKEND=supabase would silently redirect them
+into repositories/mcq_static_bank_pg.py with no real Postgres underneath
+in this unit test, erroring instead of proving the draw-once/persist
+contract this file exists to check.
 """
 import asyncio
 
+import pytest
 from mongomock_motor import AsyncMongoMockClient
 
 import server
 from banks import mcq_static_bank, mcq_pool, problem_bank
+from supabase_dispatch_fake_support import use_backend
 
 
 def _mcq_doc(topic, qid):
@@ -80,11 +91,13 @@ async def _reload_question_ids(attempt_id, user, section_key):
     return [q["id"] for q in section["questions"]]
 
 
-def test_a_pooled_mcq_section_is_drawn_once_then_only_reread_on_reload(monkeypatch):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_a_pooled_mcq_section_is_drawn_once_then_only_reread_on_reload(monkeypatch, backend):
     """Caller shape: server.py:1603 (plain pooled-key mcq section, inside
     _generate_section_questions) -- the most common shape, used by nearly
     every company's basic aptitude/verbal/reasoning section."""
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     monkeypatch.setattr(server, "call_json", _raising_call_json)
     monkeypatch.setattr(server, "call_json_gpt", _raising_call_json)
     # Generous static bank (bigger than count) so the 90/10 split's live
@@ -130,7 +143,8 @@ def test_a_pooled_mcq_section_is_drawn_once_then_only_reread_on_reload(monkeypat
     assert [q["id"] for q in restored["sections"][0]["questions"]] == generated_ids
 
 
-def test_capgemini_round2_technical_extra_topics_section_persists_once(monkeypatch):
+@pytest.mark.parametrize("backend", ["mongo", "supabase"])
+def test_capgemini_round2_technical_extra_topics_section_persists_once(monkeypatch, backend):
     """Caller shape: server.py:979 (_generate_extra_topics, static_only=True
     -- Capgemini Round 2 Technical), reached via _generate_section_questions's
     "capgemini_round2_technical" branch. Zero live-pool dependency by
@@ -138,6 +152,7 @@ def test_capgemini_round2_technical_extra_topics_section_persists_once(monkeypat
     call_json/mcq_pool at all, same precedent as
     test_static_reuse.py's static-only test."""
     db = _fresh_db()
+    use_backend(monkeypatch, backend)
     monkeypatch.setattr(server, "call_json", _raising_call_json)
     monkeypatch.setattr(server, "call_json_gpt", _raising_call_json)
     monkeypatch.setattr(server.mcq_pool, "pop_from_pool", _raising_call_json)
