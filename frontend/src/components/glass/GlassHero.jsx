@@ -170,7 +170,7 @@ export default function GlassHero() {
             {PHASES.map((p, i) => (
               <div key={p.key} className={`gl-row${live && i === si ? " on" : ""}`}>
                 {p.title}
-                <span aria-hidden="true">&nearr;</span>
+                <span aria-hidden="true">&#8599;</span>
               </div>
             ))}
           </div>

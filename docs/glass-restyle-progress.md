@@ -34,11 +34,17 @@ SWE not-live; the 2 generic/placeholder backend entries — `product-general`,
 the single shared source; `ChooseCompanySection.jsx` now imports it too (no behavior change,
 dedup only — that component is currently feature-flagged off anyway).
 
-Hero avatar row / chips / search all browse-preview the hero copy as you move through them;
-selecting a **live** company (Enter in search, click an avatar twice / click a chip, or
-"View <company>" inside the hero) navigates to `/company/:id`. Non-live (Microsoft SWE) is
-always rendered disabled with a "Rolling out next" state, never navigates — matches
-`ChooseCompanySection`'s existing convention.
+Where browsing ends and navigation begins (judgment call, as the task invited): the hero's own
+avatar row ("preparing for" switcher) is pure browse-preview — clicking an avatar restyles the
+hero's caption/profile/readiness without navigating, same register as the reference. The
+top-right "current selection" pill is the hero's real navigate affordance: it renders as an
+actual `<Link to="/company/:id">…View plan →` for a live company (live-updated as you browse the
+avatars), or plain disabled text ("Rolling out next") for Microsoft SWE. The nav's company
+search (`CompanyFinder.jsx`, the reference's one shared search field) commits immediately on
+Enter/click, same as the "Crack interviews at" chip grid (plain `<Link>` per live company,
+disabled div for Microsoft SWE) — both of those are explicit "pick a company" UI, so they
+navigate straight away rather than preview-then-commit. A visitor can always reach a real
+`/company/:id` page through at least three of these paths.
 
 ### Honesty-rule decision (hero demo)
 **Chosen: qualitative/abstract, not "Preview"-labeled percentages.** The reference's radar
@@ -63,10 +69,41 @@ Scoped to `.glass-landing` only (CSS vars + `@media (prefers-color-scheme: dark)
 or any other page. Manual toggle added to `GlassNav`. Status: see "Done" below.
 
 ## Done
-- (fill in as committed)
+- `cb4a94d` — progress log + plan.
+- `169c6b5` — full landing rebuild: nav, hero state machine, crack-interviews chips, what-you-get
+  picker, four phases, IDE mock, report section, FAQ, footer, `data/companies.js`,
+  `glass.css`. `yarn build` clean, all 67 existing tests still pass.
+- Fixed a bug caught via Playwright screenshot review: `&nearr;` (the phase-row arrow glyph)
+  didn't decode in JSX and rendered as literal text, unlike `&rarr;`/`&middot;`/`&times;`
+  elsewhere, which did — replaced with the numeric reference `&#8599;` (always decodes,
+  no dependency on the parser's named-entity table). Verified via Playwright text extraction
+  post-fix.
+- Verified with Playwright: no horizontal overflow at 390px
+  (`document.documentElement.scrollWidth === clientWidth === 390`); dark mode toggle flips
+  `.glass-landing[data-theme]` without touching `/login`'s background (confirms the scoping
+  holds); `/login` and `/company/:id` render in the untouched original teal design, confirming
+  the logged-in/auth app is unaffected.
 
 ## Next
-- (fill in)
+- Nothing blocking; the build is feature-complete against the task's section list. If there's
+  time left: consider porting the reference's exact `i1`–`i6` decorative SVG background tiles
+  into the "What you get" preview card (currently a generated `color-mix` gradient instead —
+  same visual register, less literal) and double-checking color contrast (AA) on the glass
+  panels' white-on-translucent text at every opacity used, which wasn't separately audited
+  beyond eyeballing the screenshots.
 
 ## Issues / notes
-- (fill in)
+- The hero's left "prep plan" panel's 4 phase rows and the bottom "Your four phases" segmented
+  strip currently derive their copy from `components/PhaseStrip.jsx`'s exported `PHASES`
+  (already-real site copy) rather than re-declaring it — if that file's copy changes, the hero
+  picks it up automatically (intentional, not a loose end).
+- `docs/glass-restyle-reference.html` is left untracked (matches how it was found in the
+  worktree) — it's the design reference asset, not shipped product code.
+- Old teal-design landing components (`HeroV2.jsx`, `FaqSection.jsx`, `WhatYouGetSection.jsx`,
+  `IDEMockup.jsx`, `InsideYourReportSection.jsx`, `ClosingCTASection.jsx`,
+  `StartPractisingSection.jsx`, `DifferentiatorCards.jsx`, `DepartmentCard.jsx`,
+  `CrackInterviewsSection.jsx`) are no longer imported anywhere but were intentionally left in
+  the tree, not deleted, so the change stays reversible and reviewable as a diff against
+  `Landing.jsx` rather than a destructive rewrite. `ChooseCompanySection.jsx` is also now
+  unused (it was already feature-flagged off before this task) but still compiles and its own
+  tests/usages (none) are unaffected.
