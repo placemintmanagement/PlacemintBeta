@@ -54,7 +54,15 @@
 
 .glass-landing * { box-sizing: border-box; }
 .glass-landing button, .glass-landing input { font: inherit; color: inherit; }
-.glass-landing button { cursor: pointer; border: 0; background: none; padding: 0; }
+/* :where() keeps this reset's specificity at just `.glass-landing` (one
+   class) instead of `.glass-landing button` (class+type) -- a plain
+   `.gl-tile`/`.gl-opt`/etc. single-class rule further down this file is
+   otherwise LESS specific than "class + element" and silently loses its
+   own `background` to this reset regardless of source order (found live:
+   every colored button -- topic tiles, feature-picker options, several
+   others -- rendered with no background at all because of exactly this).
+   Same technique Tailwind's own preflight already uses for this reason. */
+.glass-landing :where(button) { cursor: pointer; border: 0; background: none; padding: 0; }
 .glass-landing button:focus-visible,
 .glass-landing summary:focus-visible,
 .glass-landing a:focus-visible,
