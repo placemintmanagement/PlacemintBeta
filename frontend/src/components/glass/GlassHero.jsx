@@ -173,12 +173,22 @@ const GlassHero = forwardRef(function GlassHero(_props, ref) {
             <small>{CANDIDATE_ROLE} &middot; Your prep plan</small>
           </div>
           <div>
-            {PHASES.map((p, i) => (
-              <div key={p.key} className={`gl-row${live && i === si ? " on" : ""}`}>
-                {p.title}
-                <span aria-hidden="true">&#8599;</span>
-              </div>
-            ))}
+            {PHASES.map((p, i) => {
+              // When the demo isn't running, default-highlight the
+              // Interview row instead of showing all four as flat/equal --
+              // the hero photo itself (headset on, "Not recording" pill)
+              // already reads as "ready for an interview", so this row
+              // should match that story even before "Start practice" is
+              // clicked. Once live, the real per-phase highlight (i===si)
+              // takes over as before.
+              const on = live ? i === si : p.key === "interview";
+              return (
+                <div key={p.key} className={`gl-row${on ? " on" : ""}`}>
+                  {p.title}
+                  <span aria-hidden="true">&#8599;</span>
+                </div>
+              );
+            })}
           </div>
           <div className="gl-tiles">
             {TOPIC_TILES.map((t, i) => (
