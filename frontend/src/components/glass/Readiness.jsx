@@ -70,7 +70,7 @@ export default function Readiness({ interviewActive = false }) {
           const [dx, dy] = pt(i, r * SHAPE[i]);
           return (
             <g key={label}>
-              <text x={lx} y={ly + 3} textAnchor="middle" fontSize="8.5" fill="#fff" opacity={interviewActive ? 1 : 0.8}>
+              <text x={lx} y={ly + 3} textAnchor="middle" fontSize="11" fill="#fff" opacity={interviewActive ? 1 : 0.8}>
                 {label}
               </text>
               <circle cx={dx} cy={dy} r={interviewActive ? 3.2 : 2.4} fill={interviewActive ? "#FFC428" : "rgba(255,196,40,.85)"} />
