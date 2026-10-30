@@ -318,7 +318,7 @@
    cards over the photo, not a grid column squeezing it. */
 .gl-right {
   /* Same content-sized approach as .gl-left, mirrored to the right edge. */
-  position: absolute; right: 22px; top: 92px; width: 232px; max-height: calc(100% - 250px);
+  position: absolute; right: 22px; top: 92px; width: 280px; max-height: calc(100% - 250px);
   display: flex; flex-direction: column; gap: 16px; align-items: flex-end; overflow-y: auto; z-index: 2;
   scrollbar-width: none; -ms-overflow-style: none;
 }

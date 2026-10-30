@@ -78,9 +78,6 @@ export default function Readiness({ interviewActive = false }) {
           );
         })}
       </svg>
-      <p style={{ margin: "6px 0 0", fontSize: 11, opacity: 0.75 }}>
-        Shape only — not a score. What an adaptive interview looks at.
-      </p>
     </div>
   );
 }
