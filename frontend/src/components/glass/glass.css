@@ -368,7 +368,7 @@
    shared --gl-* tokens) and a soft --tc-tinted glow shadow so each card
    reads as lit from its own colour instead of sitting flat on the photo. */
 .gl-seg {
-  flex: 1 1 240px; border-radius: 28px; padding: 8px 20px 8px 8px; display: flex; align-items: center; gap: 14px;
+  flex: 1 1 240px; border-radius: 28px; padding: 16px 24px 16px 12px; display: flex; align-items: center; gap: 14px;
   opacity: 0.96; transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
   background: linear-gradient(135deg, color-mix(in srgb, var(--tc) 55%, #fff 45%) 0%, var(--tc) 70%, color-mix(in srgb, var(--tc) 85%, #000 15%) 100%);
   filter: saturate(1.45);
@@ -381,7 +381,7 @@
 }
 .gl-seg.on { opacity: 1; transform: translateY(-3px); box-shadow: 0 0 0 3px var(--gl-y), 0 14px 26px rgba(0, 0, 0, 0.3); }
 .gl-seg-swatch {
-  width: 54px; height: 54px; border-radius: 18px; flex: none; display: grid; place-items: center;
+  width: 62px; height: 62px; border-radius: 18px; flex: none; display: grid; place-items: center;
   background: linear-gradient(145deg, color-mix(in srgb, var(--tc) 55%, #000 45%) 0%, color-mix(in srgb, var(--tc) 85%, #000 15%) 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -6px 10px rgba(0, 0, 0, 0.25);
   color: #fff;
