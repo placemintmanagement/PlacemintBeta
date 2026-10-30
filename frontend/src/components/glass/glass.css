@@ -478,7 +478,7 @@
    mix on #0c0c0c) -- the one card worth that treatment since it's the
    section's single hero card, not a repeated tile. */
 .gl-dept-featured {
-  display: block; border-radius: 28px; padding: 28px 32px 24px; color: #fff; transition: transform 0.15s;
+  display: block; border-radius: 28px; padding: 40px 36px; color: #fff; transition: transform 0.15s; min-height: 340px;
   background:
     radial-gradient(45% 55% at 5% 10%, rgba(161, 216, 193, 0.5), transparent),
     radial-gradient(45% 55% at 100% 0, rgba(172, 215, 220, 0.5), transparent),
@@ -488,13 +488,21 @@
 }
 .gl-dept-featured:hover { transform: translateY(-3px); }
 .gl-dept-featured-in { height: 100%; }
-.gl-dept-featured b { display: block; font-weight: 500; font-size: 26px; margin: 20px 0 8px; letter-spacing: -0.01em; color: #fff; }
-.gl-dept-featured p { margin: 0 0 20px; color: rgba(255, 255, 255, 0.72); font-size: 16px; }
+.gl-dept-featured b { display: block; font-weight: 500; font-size: 26px; margin: 24px 0 10px; letter-spacing: -0.01em; color: #fff; }
+.gl-dept-featured p { margin: 0 0 28px; color: rgba(255, 255, 255, 0.72); font-size: 16px; }
+.gl-dept-featured .gl-btn { padding: 15px 28px; font-size: 16px; }
+/* Same single-hue frame as .gl-bento-card, keyed off each card's own
+   --tc, instead of a flat dashed border. */
 .gl-dept-soon {
-  border-radius: 24px; padding: 24px; background: color-mix(in srgb, var(--gl-card) 60%, transparent);
-  border: 1px dashed var(--gl-line);
+  border-radius: 24px; padding: 3px;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.6), transparent 50%),
+    radial-gradient(75% 95% at 100% 0, var(--tc), transparent),
+    radial-gradient(75% 95% at 0 100%, color-mix(in srgb, var(--tc) 65%, var(--gl-y) 35%), transparent);
 }
-.gl-dept-soon-in { height: 100%; }
+.gl-dept-soon-in {
+  border-radius: 21px; padding: 24px; height: 100%;
+  background: color-mix(in srgb, var(--gl-card) 88%, transparent);
+}
 .gl-dept-soon-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .gl-dept-pill {
   display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 4px 10px;
