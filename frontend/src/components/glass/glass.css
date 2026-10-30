@@ -467,17 +467,7 @@
 .gl-sec { max-width: 1200px; margin: 0 auto; padding: 76px 22px; }
 .gl-sec-wide { max-width: 1480px; }
 .gl-h2 { font-size: clamp(30px, 4.6vw, 54px); font-weight: 300; letter-spacing: -0.03em; line-height: 1.05; margin: 0 0 14px; }
-/* Text stays its normal inherited color (black on light sections,
-   white on dark ones) per feedback -- a flat amber fill was tried
-   first, but the ask was for the existing multi-color gradient combo
-   (same pink/blue/mint/yellow mix as .gl-ide/.gl-dk/.gl-rep) as a
-   highlighter-style underline behind the bold words instead of
-   recoloring the glyphs themselves. */
-.gl-h2 b {
-  font-weight: 600;
-  background: linear-gradient(90deg, var(--gl-pink), var(--gl-blue), var(--gl-mint), var(--gl-y));
-  background-size: 100% 0.32em; background-repeat: no-repeat; background-position: 0 92%;
-}
+.gl-h2 b { font-weight: 600; }
 .gl-sub { color: var(--gl-muted); max-width: 52ch; margin: 0 0 32px; font-size: 17px; }
 
 /* chip grid ("Crack interviews at") */
