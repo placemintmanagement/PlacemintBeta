@@ -262,7 +262,6 @@ const GlassHero = forwardRef(function GlassHero(_props, ref) {
               <button type="button" aria-label="Dismiss note" onClick={() => setNoteDismissed(true)}>&times;</button>
             </div>
           )}
-          <h3>Your four phases</h3>
           <div className="gl-segs">
             {PHASES.map((p, i) => {
               const Icon = p.icon;
