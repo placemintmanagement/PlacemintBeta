@@ -11,7 +11,7 @@ import { Building2, Code2, MessageSquareText, ArrowRight } from "lucide-react";
  */
 const CARDS = [
   { key: "company", icon: Building2, title: "Practice by company", desc: "Browse every company and pick the one you're prepping for.", to: "/#companies", tc: "--gl-mint" },
-  { key: "oa", icon: Code2, title: "Mock Online Assessment", desc: "Real sectional structure, cutoffs and timing, not a generic quiz.", to: "/signup", tc: "--gl-pink" },
+  { key: "oa", icon: Code2, title: "Mock Online Assessment", desc: "Real sectional structure, cutoffs and timing, not a generic quiz.", to: "/signup", tc: "--gl-pink", photo: "/photos/starting-point-oa.jpg" },
   { key: "interview", icon: MessageSquareText, title: "Adaptive Interview", desc: "Follows up on vague answers, just like a real interviewer.", to: "/signup", tc: "--gl-sand" },
 ];
 
@@ -29,7 +29,16 @@ export default function GlassStartingPoints() {
           const Icon = c.icon;
           return (
             <Link key={c.key} to={c.to} className="gl-sp-card" style={{ "--tc": `var(${c.tc})` }}>
-              <span className="gl-sp-tile"><Icon size={40} /></span>
+              <span className="gl-sp-tile">
+                {c.photo ? (
+                  <>
+                    <img src={c.photo} alt="" aria-hidden="true" />
+                    <span className="gl-sp-badge"><Icon size={18} /></span>
+                  </>
+                ) : (
+                  <Icon size={40} />
+                )}
+              </span>
               <b>{c.title}</b>
               <p>{c.desc}</p>
               <span className="gl-sp-go">
