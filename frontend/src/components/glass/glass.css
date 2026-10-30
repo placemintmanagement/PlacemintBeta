@@ -522,19 +522,20 @@
 }
 /* No panel, no gradient scrim either -- a first pass replaced the boxed
    panel with a bottom gradient, but that still read as "a box" (a visibly
-   darkened rectangle bounded by the card's rounded corners). Text now
-   sits directly on the raw illustration with nothing behind it, legible
-   purely via a stacked multi-layer text-shadow (a tight dark line right
-   against the glyphs + a soft wide blur) instead of darkening any region
-   of the card itself. */
+   darkened rectangle bounded by the card's rounded corners). A second
+   pass used a wide (28px) blurred text-shadow for legibility instead --
+   but across two lines of text that blur overlaps and merges into a
+   solid dark blob, which STILL reads as a box, just drawn a different
+   way. Shadow is now tight (2px blur max, no wide halo) -- a crisp dark
+   edge right on the glyphs, not a region behind them. */
 .gl-fc-tx { margin-top: auto; padding: 4px 6px 2px; position: relative; z-index: 1; }
 .gl-fc-tx h4 {
   margin: 0 0 6px; font-size: 20px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.1;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 2px 14px rgba(0, 0, 0, 0.8), 0 0 28px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 .gl-fc-tx p {
   margin: 0; font-size: 14px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 2px 14px rgba(0, 0, 0, 0.8), 0 0 28px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
 /* four phases (dark split panel) */
