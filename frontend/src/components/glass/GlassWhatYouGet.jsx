@@ -5,75 +5,23 @@ import { FileCheck2, MessageSquareText, ShieldCheck, Layers, Code2, RefreshCw } 
  * "What you get" interactive picker (reference section #get). Copy for all
  * six options is carried over verbatim from the site's existing bento
  * section + WhatYouGetSection.jsx (Landing.jsx, teal design) -- not the
- * mockup's placeholder text. The reference's own FT array defines a
- * title/description/illustration per option but its script never actually
- * renders them anywhere (only the option buttons' own highlight state and
- * the "Feature X of 6" counter update) -- a clear gap in the reference, not
- * a deliberate behavior, so this implementation wires the preview card the
- * data obviously intends: picking an option swaps the big card's title,
- * description and background tint below the grid.
+ * mockup's placeholder text. Picking an option just highlights it and
+ * advances the "Feature X of 6" counter -- no preview card below (removed
+ * per feedback: a per-option illustration/title/desc card was tried here,
+ * but the ask is for the grid to be self-explanatory, nothing changes
+ * below it on click).
  */
 const FEATURES = [
-  {
-    key: "resume",
-    name: "Resume checker",
-    title: "Resume checker, free forever",
-    desc: "Uploads once, gets analysed against this company & this role. Strengths, weaknesses, fit score, projects extracted. No credit card needed.",
-    icon: FileCheck2,
-    tc: "--gl-pink",
-    bg: "gl-fc-i1",
-  },
-  {
-    key: "interview",
-    name: "Adaptive interview",
-    title: "Adaptive interview",
-    desc: "One question at a time, planned for the company you chose and drawing on your resume when one is attached. A short verdict follows each answer.",
-    icon: MessageSquareText,
-    tc: "--gl-blue",
-    bg: "gl-fc-i2",
-  },
-  {
-    key: "cutoffs",
-    name: "Sectional cutoffs",
-    title: "Sectional cutoffs, honest verdicts",
-    desc: "Where a company sets a cutoff for each section, missing one means not ready. Where it uses a blended score, we show your weakest section.",
-    icon: ShieldCheck,
-    tc: "--gl-sand",
-    bg: "gl-fc-i3",
-  },
-  {
-    key: "report",
-    name: "One report",
-    title: "One report, not four",
-    desc: "The final report ties resume, OA, and interview into a single narrative, written by our premium AI tier, the one place we don't downgrade.",
-    icon: Layers,
-    tc: "--gl-mint",
-    bg: "gl-fc-i4",
-  },
-  {
-    key: "coding",
-    name: "Coding rounds",
-    title: "LeetCode-style coding rounds",
-    desc: "Split-panel IDE, dark editor on a light page. 2 visible tests. 3 hidden tests unlocked on Submit. Write in Python, JS, C, C++, Java.",
-    icon: Code2,
-    tc: "--gl-blue",
-    bg: "gl-fc-i5",
-  },
-  {
-    key: "fresh",
-    name: "Fresh questions",
-    title: "Fresh questions every run",
-    desc: "Generated and execution-verified, so there are no memorised answer sheets.",
-    icon: RefreshCw,
-    tc: "--gl-y",
-    bg: "gl-fc-i6",
-  },
+  { key: "resume", name: "Resume checker", icon: FileCheck2, tc: "--gl-pink" },
+  { key: "interview", name: "Adaptive interview", icon: MessageSquareText, tc: "--gl-blue" },
+  { key: "cutoffs", name: "Sectional cutoffs", icon: ShieldCheck, tc: "--gl-sand" },
+  { key: "report", name: "One report", icon: Layers, tc: "--gl-mint" },
+  { key: "coding", name: "Coding rounds", icon: Code2, tc: "--gl-blue" },
+  { key: "fresh", name: "Fresh questions", icon: RefreshCw, tc: "--gl-y" },
 ];
 
 export default function GlassWhatYouGet() {
   const [k, setK] = useState(0);
-  const f = FEATURES[k];
-  const Icon = f.icon;
 
   return (
     <section className="gl-sec" id="get">
@@ -107,19 +55,11 @@ export default function GlassWhatYouGet() {
                   className={`gl-opt${i === k ? " on" : ""}`}
                   onClick={() => setK(i)}
                 >
-                  <b style={{ color: `var(${o.tc})` }}><OIcon size={22} /></b>
+                  <b style={{ "--oc": `var(${o.tc})` }}><OIcon size={19} /></b>
                   {o.name}
                 </button>
               );
             })}
-          </div>
-
-          <div className={`gl-fc ${f.bg}`}>
-            <span className="gl-fc-g"><Icon size={20} /></span>
-            <div className="gl-fc-tx">
-              <h4>{f.title}</h4>
-              <p>{f.desc}</p>
-            </div>
           </div>
         </div>
       </div>
