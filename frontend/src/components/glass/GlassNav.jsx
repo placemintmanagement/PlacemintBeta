@@ -2,6 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { Sun, Moon } from "lucide-react";
 import CompanyFinder from "./CompanyFinder";
+import GlassLogoMark from "./GlassLogoMark";
 import { useAuth } from "../../auth";
 import { TID } from "../../testIds";
 
@@ -13,7 +14,8 @@ export default function GlassNav({ theme, onToggleTheme, onPreviewCompany, onSta
     <nav className="gl-nav">
       <div>
         <Link className="gl-logo" to="/" data-testid={TID.navLogo}>
-          placemint<i aria-hidden="true" />
+          <GlassLogoMark size={28} />
+          HireTric
         </Link>
         <div className="gl-links">
           <a href="#top">Starting points</a>

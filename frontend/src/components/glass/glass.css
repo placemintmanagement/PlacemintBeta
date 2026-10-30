@@ -91,8 +91,7 @@
   align-items: center;
   gap: 18px;
 }
-.gl-logo { font-size: 26px; font-weight: 600; letter-spacing: -0.03em; display: inline-flex; align-items: center; }
-.gl-logo i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gl-y); margin-left: 2px; }
+.gl-logo { font-size: 24px; font-weight: 700; letter-spacing: -0.03em; display: inline-flex; align-items: center; gap: 8px; color: var(--gl-text); }
 .gl-links { display: flex; gap: 20px; font-size: 15px; }
 .gl-links a { padding: 4px 0; border-bottom: 2px solid transparent; }
 .gl-links a:hover { border-color: var(--gl-y); }

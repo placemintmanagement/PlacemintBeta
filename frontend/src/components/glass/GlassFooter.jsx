@@ -17,7 +17,7 @@ export default function GlassFooter() {
         <a href="#get">What you get</a>
         <a href="#companies">Companies</a>
         <a href="#faq">FAQ</a>
-        <a href="mailto:hello@placemint.app">Contact</a>
+        <a href="mailto:hello@hiretric.app">Contact</a>
       </div>
       <div className="gl-footer-legal">
         <Link to="/legal/privacy">Privacy</Link>
@@ -26,9 +26,9 @@ export default function GlassFooter() {
         <Link to="/legal/cookies">Cookies</Link>
         <Link to="/legal/about">About</Link>
       </div>
-      <div>&copy; {new Date().getFullYear()} Placemint. Illustrative layout, not real results.</div>
+      <div>&copy; {new Date().getFullYear()} HireTric. Illustrative layout, not real results.</div>
       <small>
-        Company names are trademarks of their respective owners. Placemint is not affiliated with or endorsed by them.
+        Company names are trademarks of their respective owners. HireTric is not affiliated with or endorsed by them.
       </small>
     </footer>
   );

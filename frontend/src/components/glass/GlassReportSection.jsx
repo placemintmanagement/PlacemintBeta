@@ -30,7 +30,7 @@ export default function GlassReportSection() {
 
         <div className="gl-rc">
           <header>
-            <b style={{ fontWeight: 500 }}>Your Placemint report</b>
+            <b style={{ fontWeight: 500 }}>Your HireTric report</b>
             <small>Illustrative example</small>
           </header>
 
