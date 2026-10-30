@@ -547,7 +547,7 @@
 /* Same color combo as .gl-rep (report section) per feedback -- mint/
    blue/pink/yellow radial glows on near-black, instead of a flat #1a1a1a. */
 .gl-dk {
-  display: grid; grid-template-columns: 1fr 1fr; border-radius: 44px; padding: 10px; color: #fff; overflow: hidden; min-height: 520px;
+  display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; border-radius: 44px; padding: 10px; color: #fff; overflow: hidden; min-height: 580px;
   background:
     radial-gradient(45% 55% at 5% 10%, rgba(161, 216, 193, 0.5), transparent),
     radial-gradient(45% 55% at 100% 0, rgba(172, 215, 220, 0.5), transparent),
