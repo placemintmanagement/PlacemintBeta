@@ -169,6 +169,68 @@ or any other page. Manual toggle added to `GlassNav`. Status: see "Done" below.
      runs (12 → 8 → 2 failures) which is itself the signature of a load-sensitive flake rather
      than a deterministic break. No horizontal overflow at 390px (`scrollWidth === clientWidth
      === 390`, including the nav with the new button hidden below 980px).
+- **Timeline redesign + several follow-on polish rounds** (bottom `.gl-tline`/`.gl-segs`, the
+  "Interview results" hexagon, and two more hero tweaks), all from a second reference image of
+  the same "Int." interview UI source:
+  - `.gl-seg` cards redesigned from plain number-badge pills to icon-swatch pill cards (title +
+    `SHORT_TAG` detail line, same real phase copy as before, nothing invented) — explicitly
+    **not** photo thumbnails: the reference's own thumbnails are specific captured interview-clip
+    moments with timestamps ("Design Skills 13:14 → 28:12"), and this app has no real footage to
+    back that; a fabricated candidate photo + invented timestamp would be exactly the fake-result
+    claim avoided everywhere else in this redesign. Same per-phase icon as `PhaseStrip.jsx` for
+    consistency. Went through two rounds of visual feedback: first ported `.gl-tile`'s solid
+    `var(--tc)` + sheen-gradient treatment (previous version read "dull"/washed-out as a
+    translucent glass tint), then on "still dull" feedback added a diagonal 3-stop gradient,
+    `filter: saturate(1.45)` (boosts the shared, deliberately-pastel `--gl-*` tokens locally
+    without changing them everywhere else they're used), and a `--tc`-tinted glow shadow. Also
+    widened (`flex: 1 1 240px`, up from `170px`) on request, with `flex-shrink` turned back on
+    (`1` not `0`) so it can still shrink to fit at 390px without reopening the earlier grid
+    min-content overflow bug.
+  - Added a purely decorative connector strip + 3 bare icon markers (Star/MessageCircle/
+    ThumbsUp) below the row — no counts or numbers next to them, matching the reference's own
+    bare-icon treatment.
+  - The `.gl-note` "AI interview note" callout repositioned to float over the Interview card
+    specifically (it only ever shows during that phase) instead of the left edge, matching the
+    reference's "card overlapping the timeline row" look. Caught and fixed a real overlap bug
+    this introduced: the repositioned note's bounding box fully covered `.gl-ctl`'s end-call
+    button (confirmed via actual `getBoundingClientRect()`, not eyeballed) — moved the note
+    right/up until a second rect check showed zero overlap.
+  - **`Readiness.jsx` reframed from a general "sectional readiness" meter to specifically
+    "Interview results"**, matching a second, closer reference crop: concentric radar-grid
+    rings (3, at 33/66/100% radius), vertex labels outside the shape (six generic interview-
+    competency dimensions — Communication/Problem Solving/Technical Depth/Clarity/Ownership/
+    Follow-through, same register as the reference's own Research/Communication/Teamwork/...
+    without copying it), a filled translucent gold polygon connecting a point on each axis, and
+    dot markers at its vertices. Honesty-rule call: the reference's polygon is driven by six
+    fabricated numeric scores (4.7/4.2/3.6/...); this version's polygon shape is a **fixed
+    constant** (`SHAPE` in `Readiness.jsx`, hand-picked, not derived from any formula/seed/
+    state) — the exact same irregular silhouette for every visitor, every time, which is what
+    keeps it in the "shape only" register the caption states rather than reading as a result.
+    The only thing that changes is a single binary `interviewActive` state (brighter gold fill
+    + glow) while the interview phase is actually live — not a per-vertex score. Card only
+    renders this way at all times (not gated to the interview phase) so the right rail doesn't
+    jump around as the demo state changes.
+  - `.gl-video` depth-of-field polish: the product owner's photo is more uniformly sharp than
+    the reference's (which has real optical depth of field separating the subject from a
+    blurred background). Didn't touch the photo file — added a CSS-only vignette
+    (`.gl-video::after`, three stacked linear-gradients darkening the left/right/bottom edges
+    toward transparent at the centre) so the floating glass panels read with more contrast
+    against the photo, same idea as the reference's own dark-to-transparent edges, and bumped
+    `.gl-glass`'s `backdrop-filter` blur from 26px to 30px for a stronger blur-through under
+    the panels themselves.
+  - Top-right header pill changed from `{company.name} · {topic.name}` + a "View plan →" link
+    to an **AI interviewer persona pill** ("Aria · AI Interviewer", `AI_INTERVIEWER_NAME` const
+    in `GlassHero.jsx`) — explicitly, unambiguously labelled AI in the pill text itself, never a
+    human recruiter name/title, same honesty bar as the rest of this app. Dropped the "View
+    plan" link from this specific spot rather than keep repositioning it: the company/topic
+    info it carried is still visible via the "Preparing for" avatar switcher immediately to its
+    left, and the two other real navigate-to-company paths (nav search, the "Crack interviews
+    at" chip grid) are untouched, so a visitor can still always reach a real `/company/:id`
+    page — this pill was never the only way.
+  - Verified: isolated `yarn build` clean after every sub-change; isolated `yarn test` **67/67
+    passing** (confirms the earlier SparkInterview flake really was load/contention-related, not
+    a regression — it's fully clean now that the session's background-process load has settled).
+    No horizontal overflow at 390px at any point in this round.
 
 ## Next
 - Nothing blocking; the build is feature-complete against the task's section list. If there's

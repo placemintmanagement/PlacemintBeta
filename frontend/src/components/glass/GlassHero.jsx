@@ -1,6 +1,5 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { Mic, Headphones, PhoneOff } from "lucide-react";
+import { Mic, Headphones, PhoneOff, Star, MessageCircle, ThumbsUp } from "lucide-react";
 import { COMPANIES } from "../../data/companies";
 import { PHASES } from "../PhaseStrip";
 import HeroPhoto from "./HeroPhoto";
@@ -29,6 +28,12 @@ const TOPIC_TILES = [
 // line already shown, labelled, in InsideYourReportSection.jsx's report
 // card -- not a newly-invented "real" result.
 const NOTE_TEXT = "You mentioned the project but not how you measured the improvement. Walk through the before and after numbers next time.";
+
+// Persona name for the header's "who's interviewing you" pill (2026-10).
+// Explicitly, unambiguously AI -- "· AI Interviewer" is part of the label
+// itself, not a tooltip or fine print, same honesty bar as everywhere
+// else in this app (no fabricated human recruiter name/title).
+const AI_INTERVIEWER_NAME = "Aria";
 
 /**
  * Exposes `startDemo()` via ref so GlassNav's "Start practice" button (see
@@ -104,16 +109,6 @@ const GlassHero = forwardRef(function GlassHero(_props, ref) {
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
 
-  const readinessTopic = !live
-    ? topic.name
-    : si === 0
-    ? "Resume"
-    : si === 1
-    ? topic.name
-    : si === 2
-    ? "Interview"
-    : null;
-
   return (
     <div className="gl-page" id="top">
       <div className={`gl-stage${live ? " gl-live" : ""}`} id="stage">
@@ -150,15 +145,19 @@ const GlassHero = forwardRef(function GlassHero(_props, ref) {
             </div>
           </div>
 
-          <span className="gl-glass gl-pillr" style={{ flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
-            {company.live ? (
-              <Link to={`/company/${company.id}`} data-testid={TID.heroSecondary} style={{ fontWeight: 500 }}>
-                {company.name} &middot; {topic.name}
-                <span style={{ marginLeft: 8, textDecoration: "underline" }}>View plan &rarr;</span>
-              </Link>
-            ) : (
-              <span>{company.name} &middot; Rolling out next</span>
-            )}
+          {/* AI interviewer persona pill (2026-10, replaces the old
+              company/topic + "View plan" link) -- explicitly labelled AI,
+              never a real recruiter/human name, same honesty bar as the
+              rest of this app (no fabricated people/testimonials). The
+              company/topic info this used to carry isn't lost: it's still
+              shown via the "Preparing for" avatar switcher just to its
+              left, and the two other real navigate-to-company paths
+              (the nav search field, the "Crack interviews at" chip grid)
+              are untouched, so dropping the link here doesn't reduce how
+              a visitor can reach a real company page. */}
+          <span className="gl-glass gl-pillr" data-testid={TID.heroSecondary}>
+            <span style={{ fontWeight: 500 }}>{AI_INTERVIEWER_NAME}</span>
+            <span style={{ opacity: 0.75, marginLeft: 6 }}>&middot; AI Interviewer</span>
           </span>
         </header>
 
@@ -215,12 +214,25 @@ const GlassHero = forwardRef(function GlassHero(_props, ref) {
             <HeroPhoto small />
           </div>
           <div className="gl-glass gl-res">
-            <h4>Sectional<br />readiness</h4>
-            <Readiness activeTopic={readinessTopic} />
+            <h4>Interview<br />results</h4>
+            {/* Shown always (not gated to the interview phase) so the
+                right rail doesn't jump around as the demo state changes --
+                `interviewActive` just brightens the shape while the
+                interview phase (si===2) is actually live, rather than
+                hiding/showing the whole card. */}
+            <Readiness interviewActive={live && si === 2} />
           </div>
         </aside>
 
         <section className="gl-tline">
+          {/* "AI Interview Notes" callout (reference: a floating card
+              overlapping the timeline row). Positioned over the Interview
+              card specifically (index 2 of 4) -- it only ever shows during
+              that phase (si>=2), so the overlap is thematic, not
+              arbitrary. Content is unchanged from before: the same
+              already-labelled example feedback line reused from
+              InsideYourReportSection.jsx's report card, not a new/
+              fabricated quote. */}
           {live && si >= 2 && !noteDismissed && (
             <div className="gl-note">
               <b>AI interview note (example)</b>
@@ -230,19 +242,40 @@ const GlassHero = forwardRef(function GlassHero(_props, ref) {
           )}
           <h3>Your four phases</h3>
           <div className="gl-segs">
-            {PHASES.map((p, i) => (
-              <div
-                key={p.key}
-                className={`gl-seg${live && i === si ? " on" : ""}`}
-                style={{ "--tc": `var(${PALETTE[i % PALETTE.length]})` }}
-              >
-                <span className="gl-thumb">{i + 1}</span>
-                <span>
-                  <b>{p.title}</b>
-                  <small>{SHORT_TAG[p.key]}</small>
-                </span>
-              </div>
-            ))}
+            {PHASES.map((p, i) => {
+              const Icon = p.icon;
+              return (
+                <div
+                  key={p.key}
+                  className={`gl-seg${live && i === si ? " on" : ""}`}
+                  style={{ "--tc": `var(${PALETTE[i % PALETTE.length]})` }}
+                >
+                  {/* Icon swatch, not a photo thumbnail -- the reference's
+                      thumbnails are specific captured interview-clip
+                      moments (with timestamps) that this app has no real
+                      footage to back; a fake "candidate photo" + invented
+                      timestamp would be exactly the kind of fake-result
+                      claim avoided everywhere else in this redesign (the
+                      qualitative readiness hexagon, the icon-only feature
+                      picker). Same icon per phase as PhaseStrip.jsx, for
+                      consistency across the app, not a one-off choice. */}
+                  <span className="gl-seg-swatch" aria-hidden="true"><Icon size={24} /></span>
+                  <span>
+                    <b>{p.title}</b>
+                    <small>{SHORT_TAG[p.key]}</small>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {/* Purely decorative connector + icon markers (reference: a thin
+              line with small icon dots below the row) -- bare icons, no
+              counts/numbers next to them, same "no numbers" rule as the
+              rest of this hero. */}
+          <div className="gl-connector" aria-hidden="true">
+            <span className="gl-connector-mark" style={{ left: "16.5%" }}><Star size={11} /></span>
+            <span className="gl-connector-mark" style={{ left: "50%" }}><MessageCircle size={11} /></span>
+            <span className="gl-connector-mark" style={{ left: "83.5%" }}><ThumbsUp size={11} /></span>
           </div>
         </section>
       </div>
