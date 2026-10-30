@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import "../components/glass/glass.css";
+import Reveal from "../components/Reveal";
 import GlassNav from "../components/glass/GlassNav";
 import GlassHero from "../components/glass/GlassHero";
 import GlassCrackInterviews from "../components/glass/GlassCrackInterviews";
@@ -60,15 +61,18 @@ export default function Landing() {
         onStartPractice={() => heroRef.current?.startDemo()}
       />
       <GlassHero ref={heroRef} />
-      <GlassCrackInterviews />
-      <GlassStartingPoints />
-      <GlassWhatYouGet />
-      <GlassFourPhases />
-      <GlassIdeSection />
-      <GlassReportSection />
-      <GlassDepartments />
-      <GlassFaq />
-      <GlassFooter />
+      {/* Hero stays as-is (above the fold, visible on load) -- everything
+          below fades/lifts in on scroll via the same Reveal used
+          throughout the main app's own Landing.jsx. */}
+      <Reveal><GlassCrackInterviews /></Reveal>
+      <Reveal><GlassStartingPoints /></Reveal>
+      <Reveal><GlassWhatYouGet /></Reveal>
+      <Reveal><GlassFourPhases /></Reveal>
+      <Reveal><GlassIdeSection /></Reveal>
+      <Reveal><GlassReportSection /></Reveal>
+      <Reveal><GlassDepartments /></Reveal>
+      <Reveal><GlassFaq /></Reveal>
+      <Reveal><GlassFooter /></Reveal>
     </div>
   );
 }
