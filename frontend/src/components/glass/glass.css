@@ -544,7 +544,16 @@
 }
 
 /* four phases (dark split panel) */
-.gl-dk { display: grid; grid-template-columns: 1fr 1fr; background: #1a1a1a; border-radius: 44px; padding: 10px; color: #fff; overflow: hidden; min-height: 520px; }
+/* Same color combo as .gl-rep (report section) per feedback -- mint/
+   blue/pink/yellow radial glows on near-black, instead of a flat #1a1a1a. */
+.gl-dk {
+  display: grid; grid-template-columns: 1fr 1fr; border-radius: 44px; padding: 10px; color: #fff; overflow: hidden; min-height: 520px;
+  background:
+    radial-gradient(45% 55% at 5% 10%, rgba(161, 216, 193, 0.5), transparent),
+    radial-gradient(45% 55% at 100% 0, rgba(172, 215, 220, 0.5), transparent),
+    radial-gradient(45% 55% at 100% 100%, rgba(220, 172, 175, 0.6), transparent),
+    radial-gradient(40% 50% at 0 100%, rgba(255, 196, 40, 0.4), transparent), #0c0c0c;
+}
 @media (max-width: 980px) { .gl-dk { grid-template-columns: 1fr; } }
 .gl-dl {
   border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 36px;
