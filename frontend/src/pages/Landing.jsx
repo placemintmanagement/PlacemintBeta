@@ -4,6 +4,7 @@ import GlassNav from "../components/glass/GlassNav";
 import GlassHero from "../components/glass/GlassHero";
 import GlassCrackInterviews from "../components/glass/GlassCrackInterviews";
 import GlassStartingPoints from "../components/glass/GlassStartingPoints";
+import GlassDepartments from "../components/glass/GlassDepartments";
 import GlassWhatYouGet from "../components/glass/GlassWhatYouGet";
 import GlassFourPhases from "../components/glass/GlassFourPhases";
 import GlassIdeSection from "../components/glass/GlassIdeSection";
@@ -61,6 +62,7 @@ export default function Landing() {
       <GlassHero ref={heroRef} />
       <GlassCrackInterviews />
       <GlassStartingPoints />
+      <GlassDepartments />
       <GlassWhatYouGet />
       <GlassFourPhases />
       <GlassIdeSection />

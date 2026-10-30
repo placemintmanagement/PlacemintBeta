@@ -463,6 +463,36 @@
   .glass-landing * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 
+/* "Pick your branch, then your track" (departments) */
+.gl-dept-grid { display: grid; grid-template-columns: 5fr 7fr; gap: 24px; align-items: stretch; }
+@media (max-width: 860px) { .gl-dept-grid { grid-template-columns: 1fr; } }
+.gl-dept-featured-col { display: flex; flex-direction: column; gap: 24px; }
+.gl-dept-soon-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 560px) { .gl-dept-soon-grid { grid-template-columns: 1fr; } }
+.gl-dept-icon {
+  width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; flex: none;
+  background: color-mix(in srgb, var(--tc) 32%, #fff 68%); color: var(--ic);
+}
+.gl-dept-icon.lg { width: 52px; height: 52px; border-radius: 16px; }
+.gl-dept-featured {
+  display: block; border-radius: 28px; padding: 32px; background: var(--gl-card); border: 1px solid var(--gl-line);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06); color: var(--gl-text); transition: transform 0.15s;
+}
+.gl-dept-featured:hover { transform: translateY(-3px); }
+.gl-dept-featured b { display: block; font-weight: 500; font-size: 26px; margin: 20px 0 8px; letter-spacing: -0.01em; }
+.gl-dept-featured p { margin: 0 0 20px; color: var(--gl-muted); font-size: 16px; }
+.gl-dept-soon {
+  border-radius: 24px; padding: 24px; background: color-mix(in srgb, var(--gl-card) 60%, transparent);
+  border: 1px dashed var(--gl-line);
+}
+.gl-dept-soon-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.gl-dept-pill {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 4px 10px;
+  border-radius: 99px; background: var(--gl-sand); color: var(--gl-text);
+}
+.gl-dept-soon b { display: block; font-weight: 500; font-size: 18px; margin-bottom: 4px; }
+.gl-dept-soon p { margin: 0; color: var(--gl-muted); font-size: 14px; }
+
 /* ---------- generic sections ---------- */
 .gl-sec { max-width: 1200px; margin: 0 auto; padding: 76px 22px; }
 .gl-sec-wide { max-width: 1480px; }
