@@ -258,21 +258,23 @@
    caught live, the top pill row sat right at her hairline). 33% trims
    closer to 5% off the top instead of 7.5%, leaving visible margin above
    the headphones before the top pill row. */
-/* Scaled down from a plain 100% cover-fit on purpose: object-fit:cover on
-   this container is width-constrained (the photo's full width already
-   shows, only ~7.5% gets trimmed off its height) -- there is no crop that
-   shows literally more of the source image without introducing gaps
-   somewhere, since cover already picks the minimum necessary crop. The
-   "too tightly magnified" read came from how much of the STAGE her face
-   ends up filling, not from the crop itself, so this pulls the whole
-   photo back to ~82% size (transform, centred) instead -- a smaller,
-   less face-dominant inset with the stage's own gradient background
-   showing as a frame around it, same technique the brief suggested. */
+/* Plain full-bleed cover-fit, no scale transform: a transform-based
+   "zoom out" was tried here and reverted (2026-10) -- it shrinks the
+   already-covering image inside its own box, which doesn't zoom out at
+   all, it just reveals the box's own background gradient as a visible
+   frame around a smaller photo. That read as a layout bug, not a
+   stylistic choice, and broke the full-bleed composition the hero is
+   built around. object-position tuned for head/shoulder clearance
+   below the top pill row; see Landing.jsx conversation history for the
+   real constraint this runs into (cover is already the minimum crop
+   with no gaps -- there's no way to show literally more of the photo
+   at full-bleed without either a wider-context source photo or
+   accepting visible letterboxing, which trades away the full-bleed
+   look this composition depends on). */
 .gl-video img {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
-  object-fit: cover; object-position: 50% 33%;
-  transform: scale(0.68);
+  object-fit: cover; object-position: 50% 28%;
   display: block;
 }
 .gl-video svg { width: 100%; height: 100%; display: block; }
