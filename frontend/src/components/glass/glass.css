@@ -200,7 +200,9 @@
      short viewports, not the normal sizing mechanism. */
   position: absolute; left: 22px; top: 92px; width: 252px; max-height: calc(100% - 250px);
   padding: 16px; overflow-y: auto; z-index: 2;
+  scrollbar-width: none; -ms-overflow-style: none;
 }
+.gl-left::-webkit-scrollbar { display: none; }
 .gl-prof { margin-bottom: 14px; }
 .gl-prof b { font-weight: 500; font-size: 17px; display: block; line-height: 1.1; }
 .gl-prof small { font-size: 11px; opacity: 0.7; }
@@ -319,7 +321,9 @@
   /* Same content-sized approach as .gl-left, mirrored to the right edge. */
   position: absolute; right: 22px; top: 92px; width: 232px; max-height: calc(100% - 250px);
   display: flex; flex-direction: column; gap: 16px; align-items: flex-end; overflow-y: auto; z-index: 2;
+  scrollbar-width: none; -ms-overflow-style: none;
 }
+.gl-right::-webkit-scrollbar { display: none; }
 .gl-pip { width: 150px; height: 100px; border-radius: 24px; overflow: hidden; border: 3px solid rgba(255, 255, 255, 0.5); background: linear-gradient(#cfd8d3, #9fb6b8); }
 .gl-pip svg { width: 100%; height: 100%; display: block; }
 .gl-res { width: 100%; padding: 16px; }

@@ -12,16 +12,19 @@ import { TID } from "../../testIds";
 const SHORT_TAG = { resume: "AI check", oa: "Sectional cutoffs", interview: "Adaptive", review: "One verdict" };
 const PALETTE = ["--gl-blue", "--gl-mint", "--gl-pink", "--gl-sand", "--gl-y"];
 
-// Four topic tiles for the left "prep plan" panel. Sample prompts are
-// generic placeholder practice questions (no existing on-site equivalent
-// to preserve) -- same register as the IDE section's "Two Sum" problem,
-// which the task brief explicitly allows to stay as a reasonable generic
-// placeholder.
+// Four tiles for the left "prep plan" panel, reframed (2026-10) from OA
+// practice categories to interview goals -- matches the Interview row now
+// being the default-highlighted phase, and reuses the same competency
+// vocabulary already established in Readiness.jsx's hexagon (Communication/
+// Problem Solving/Technical Depth/.../Ownership) instead of inventing new
+// unrelated labels. No longer wired to the readiness hexagon's own state
+// (that reads a fixed shape, see Readiness.jsx), purely a "what we're
+// practising" grid now.
 const TOPIC_TILES = [
-  { key: "aptitude", name: "Aptitude", glyph: "123", sample: "A train covers 240 km in 3 hours. How long will 400 km take?" },
-  { key: "verbal", name: "Verbal", glyph: "Aa", sample: "Rewrite in the passive: “The team completed the project early.”" },
-  { key: "reasoning", name: "Reasoning", glyph: "?", sample: "Find the next number in the series: 3, 6, 11, 18, ?" },
-  { key: "coding", name: "Coding", glyph: "</>", sample: "Return the indices of the two numbers in an array that add up to a target." },
+  { key: "clarity", name: "Clarity", glyph: "Aa", sample: "Explain your approach clearly, out loud, as you work through it." },
+  { key: "problem-solving", name: "Problem Solving", glyph: "?", sample: "Break the problem down before jumping to a solution." },
+  { key: "technical-depth", name: "Technical Depth", glyph: "</>", sample: "Be ready to justify the trade-offs in your approach." },
+  { key: "ownership", name: "Ownership", glyph: "123", sample: "Speak to decisions you drove, not just tasks you completed." },
 ];
 
 // The illustrative "AI interview note" callout re-uses the exact feedback
