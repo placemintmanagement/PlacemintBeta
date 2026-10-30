@@ -309,7 +309,7 @@
   width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
   background: rgba(32, 30, 28, 0.5); border: 1px solid rgba(255, 255, 255, 0.2);
 }
-.gl-ctl svg { width: 20px; height: 20px; fill: #fff; }
+.gl-ctl svg { width: 20px; height: 20px; }
 .gl-ctl button.end { background: #e5484d; border-color: #e5484d; }
 .gl-ctl button.end svg { transform: rotate(135deg); }
 /* Same floating-panel treatment as .gl-left, mirrored to the right edge:
