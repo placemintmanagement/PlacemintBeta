@@ -21,6 +21,7 @@ const FEATURES = [
     desc: "Uploads once, gets analysed against this company & this role. Strengths, weaknesses, fit score, projects extracted. No credit card needed.",
     icon: FileCheck2,
     tc: "--gl-pink",
+    bg: "gl-fc-i1",
   },
   {
     key: "interview",
@@ -29,6 +30,7 @@ const FEATURES = [
     desc: "One question at a time, planned for the company you chose and drawing on your resume when one is attached. A short verdict follows each answer.",
     icon: MessageSquareText,
     tc: "--gl-blue",
+    bg: "gl-fc-i2",
   },
   {
     key: "cutoffs",
@@ -37,6 +39,7 @@ const FEATURES = [
     desc: "Where a company sets a cutoff for each section, missing one means not ready. Where it uses a blended score, we show your weakest section.",
     icon: ShieldCheck,
     tc: "--gl-sand",
+    bg: "gl-fc-i3",
   },
   {
     key: "report",
@@ -45,6 +48,7 @@ const FEATURES = [
     desc: "The final report ties resume, OA, and interview into a single narrative, written by our premium AI tier, the one place we don't downgrade.",
     icon: Layers,
     tc: "--gl-mint",
+    bg: "gl-fc-i4",
   },
   {
     key: "coding",
@@ -53,6 +57,7 @@ const FEATURES = [
     desc: "Split-panel IDE, dark editor on a light page. 2 visible tests. 3 hidden tests unlocked on Submit. Write in Python, JS, C, C++, Java.",
     icon: Code2,
     tc: "--gl-blue",
+    bg: "gl-fc-i5",
   },
   {
     key: "fresh",
@@ -61,6 +66,7 @@ const FEATURES = [
     desc: "Generated and execution-verified, so there are no memorised answer sheets.",
     icon: RefreshCw,
     tc: "--gl-y",
+    bg: "gl-fc-i6",
   },
 ];
 
@@ -108,10 +114,7 @@ export default function GlassWhatYouGet() {
             })}
           </div>
 
-          <div
-            className="gl-fc"
-            style={{ background: `linear-gradient(150deg, color-mix(in srgb, var(${f.tc}) 55%, transparent), transparent 70%), color-mix(in srgb, var(${f.tc}) 70%, var(--gl-card))` }}
-          >
+          <div className={`gl-fc ${f.bg}`}>
             <span className="gl-fc-g"><Icon size={20} /></span>
             <div className="gl-fc-tx">
               <h4>{f.title}</h4>

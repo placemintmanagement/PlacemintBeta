@@ -498,18 +498,36 @@
 .gl-fc {
   margin-top: 22px; border-radius: 30px; min-height: 230px; padding: 14px; display: flex; flex-direction: column;
   justify-content: flex-end; gap: 10px; position: relative; overflow: hidden; color: #fff;
-  background-size: cover; background-position: center;
+  background: var(--img) center/cover;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 14px 30px rgba(0, 0, 0, 0.18);
 }
+/* Abstract decorative illustrations, one per feature -- ported from the
+   reference mockup's own .i1-.i6 (ported verbatim: these are plain
+   geometric shapes in the existing --gl-* palette, not text/data/photos,
+   so there's no honesty concern copying them exactly). Previously this
+   card used a flat color-mix gradient tint instead (the reference's FT
+   array defines these per-option but its own script never renders them --
+   a gap in the reference, not a deliberate minimal choice), which read as
+   plain/bland against the rest of this hero's visual density. */
+.gl-fc-i1 { --img: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 360' preserveAspectRatio='xMidYMid slice'%3E%3Crect width='400' height='360' fill='%23A1D8C1'/%3E%3Ccircle cx='330' cy='60' r='120' fill='%23ACD7DC'/%3E%3Ccircle cx='40' cy='250' r='90' fill='%23DCD7AC'/%3E%3Cg transform='rotate(-8 200 140)'%3E%3Crect x='105' y='20' width='160' height='230' rx='16' fill='%23fff'/%3E%3Crect x='125' y='46' width='70' height='10' rx='5' fill='%23000'/%3E%3Crect x='125' y='72' width='120' height='7' rx='3' fill='%23ccc'/%3E%3Crect x='125' y='90' width='105' height='7' rx='3' fill='%23ccc'/%3E%3Crect x='125' y='108' width='120' height='7' rx='3' fill='%23ccc'/%3E%3Crect x='125' y='150' width='80' height='7' rx='3' fill='%23ccc'/%3E%3C/g%3E%3C/svg%3E"); }
+.gl-fc-i2 { --img: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 360' preserveAspectRatio='xMidYMid slice'%3E%3Crect width='400' height='360' fill='%23ACD7DC'/%3E%3Ccircle cx='60' cy='70' r='110' fill='%23DCACAF'/%3E%3Ccircle cx='370' cy='90' r='80' fill='%23FFC428'/%3E%3Crect x='50' y='28' width='190' height='46' rx='23' fill='%23fff'/%3E%3Crect x='150' y='92' width='200' height='46' rx='23' fill='%23000'/%3E%3Crect x='50' y='156' width='150' height='46' rx='23' fill='%23fff'/%3E%3Crect x='170' y='220' width='170' height='46' rx='23' fill='%23000'/%3E%3C/svg%3E"); }
+.gl-fc-i3 { --img: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 360' preserveAspectRatio='xMidYMid slice'%3E%3Crect width='400' height='360' fill='%23DCACAF'/%3E%3Ccircle cx='340' cy='300' r='100' fill='%23DCD7AC'/%3E%3Ccircle cx='50' cy='290' r='80' fill='%23ACD7DC'/%3E%3Crect x='40' y='36' width='320' height='24' rx='12' fill='%23fff'/%3E%3Crect x='40' y='36' width='230' height='24' rx='12' fill='%23000'/%3E%3Crect x='40' y='100' width='320' height='24' rx='12' fill='%23fff'/%3E%3Crect x='40' y='100' width='130' height='24' rx='12' fill='%23000'/%3E%3Crect x='40' y='164' width='320' height='24' rx='12' fill='%23fff'/%3E%3Crect x='40' y='164' width='260' height='24' rx='12' fill='%23000'/%3E%3Crect x='214' y='16' width='5' height='200' fill='%23FFC428'/%3E%3C/svg%3E"); }
+.gl-fc-i4 { --img: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 360' preserveAspectRatio='xMidYMid slice'%3E%3Crect width='400' height='360' fill='%23DCD7AC'/%3E%3Ccircle cx='340' cy='300' r='100' fill='%23DCACAF'/%3E%3Ccircle cx='40' cy='40' r='90' fill='%23ACD7DC'/%3E%3Crect x='60' y='150' width='44' height='120' rx='10' fill='%23000'/%3E%3Crect x='128' y='110' width='44' height='160' rx='10' fill='%23fff'/%3E%3Crect x='196' y='70' width='44' height='200' rx='10' fill='%23FFC428'/%3E%3Crect x='264' y='30' width='44' height='240' rx='10' fill='%23000'/%3E%3C/svg%3E"); }
+.gl-fc-i5 { --img: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 360' preserveAspectRatio='xMidYMid slice'%3E%3Crect width='400' height='360' fill='%23ACD7DC'/%3E%3Ccircle cx='340' cy='40' r='100' fill='%23A1D8C1'/%3E%3Crect x='50' y='30' width='300' height='220' rx='20' fill='%230c0c0c'/%3E%3Crect x='80' y='64' width='90' height='10' rx='5' fill='%23DCACAF'/%3E%3Crect x='96' y='92' width='160' height='10' rx='5' fill='%23fff'/%3E%3Crect x='96' y='120' width='120' height='10' rx='5' fill='%23FFC428'/%3E%3Crect x='112' y='148' width='150' height='10' rx='5' fill='%23fff'/%3E%3Crect x='80' y='176' width='70' height='10' rx='5' fill='%23A1D8C1'/%3E%3Ccircle cx='60' cy='300' r='70' fill='%23DCD7AC'/%3E%3C/svg%3E"); }
+.gl-fc-i6 { --img: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 360' preserveAspectRatio='xMidYMid slice'%3E%3Crect width='400' height='360' fill='%23FFC428'/%3E%3Ccircle cx='350' cy='300' r='100' fill='%23DCACAF'/%3E%3Ccircle cx='40' cy='60' r='80' fill='%23ACD7DC'/%3E%3Crect x='70' y='40' width='240' height='90' rx='20' fill='%23fff' transform='rotate(-6 190 85)'/%3E%3Crect x='95' y='125' width='240' height='90' rx='20' fill='%23A1D8C1' transform='rotate(4 215 170)'/%3E%3Crect x='65' y='210' width='240' height='90' rx='20' fill='%23000' transform='rotate(-3 185 255)'/%3E%3C/svg%3E"); }
 .gl-fc .gl-fc-g {
   width: 42px; height: 42px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); border: 1px solid rgba(255, 255, 255, 0.65);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #fff; display: grid; place-items: center;
   position: absolute; top: 14px; left: 14px;
 }
 .gl-fc-tx {
-  margin-top: auto; padding: 16px 18px 18px; border-radius: 22px; background: rgba(30, 28, 26, 0.32);
-  border: 1px solid rgba(255, 255, 255, 0.5); backdrop-filter: blur(18px) saturate(1.5);
-  -webkit-backdrop-filter: blur(18px) saturate(1.5); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  /* Darker + more blur than the first pass (0.32 -> 0.62, 18px -> 28px):
+     at 0.32 the illustration's own shapes (card edges, chat bubbles, bar
+     chart bars) were still sharp enough to read as distinct blobs through
+     the glass, which fought the text instead of just tinting behind it. */
+  margin-top: auto; padding: 16px 18px 18px; border-radius: 22px; background: rgba(20, 18, 16, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.5); backdrop-filter: blur(28px) saturate(1.3);
+  -webkit-backdrop-filter: blur(28px) saturate(1.3); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .gl-fc-tx h4 { margin: 0 0 6px; font-size: 20px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.3); }
 .gl-fc-tx p { margin: 0; font-size: 14px; opacity: 0.95; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.3); }
