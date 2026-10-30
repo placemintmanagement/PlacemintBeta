@@ -172,8 +172,11 @@ const GlassHero = forwardRef(function GlassHero(_props, ref) {
 
         <aside className="gl-left gl-glass">
           <div className="gl-prof">
-            <b>{CANDIDATE_NAME}</b>
-            <small>{CANDIDATE_ROLE} &middot; Your prep plan</small>
+            <img className="gl-prof-pfp" src="/photos/hero-person-provided.jpg" alt="" aria-hidden="true" />
+            <span>
+              <b>{CANDIDATE_NAME}</b>
+              <small>{CANDIDATE_ROLE} &middot; Your prep plan</small>
+            </span>
           </div>
           <div>
             {PHASES.map((p, i) => {

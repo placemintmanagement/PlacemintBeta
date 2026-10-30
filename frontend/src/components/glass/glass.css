@@ -202,7 +202,11 @@
   scrollbar-width: none; -ms-overflow-style: none;
 }
 .gl-left::-webkit-scrollbar { display: none; }
-.gl-prof { margin-bottom: 14px; }
+.gl-prof { margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+.gl-prof-pfp {
+  width: 40px; height: 40px; border-radius: 50%; flex: none; object-fit: cover;
+  object-position: 50% 28%; border: 2px solid rgba(255, 255, 255, 0.6);
+}
 .gl-prof b { font-weight: 500; font-size: 17px; display: block; line-height: 1.1; }
 .gl-prof small { font-size: 11px; opacity: 0.7; }
 .gl-row {
