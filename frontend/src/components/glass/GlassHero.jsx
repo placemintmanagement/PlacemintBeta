@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Mic, Headphones, PhoneOff } from "lucide-react";
 import { COMPANIES } from "../../data/companies";
 import { PHASES } from "../PhaseStrip";
-import PersonIllustration from "./PersonIllustration";
+import HeroPhoto from "./HeroPhoto";
 import Readiness from "./Readiness";
 import { TID } from "../../testIds";
 
@@ -30,20 +30,20 @@ const TOPIC_TILES = [
 // card -- not a newly-invented "real" result.
 const NOTE_TEXT = "You mentioned the project but not how you measured the improvement. Walk through the before and after numbers next time.";
 
-function phaseCaption(phaseIndex, company, topicSample) {
-  switch (phaseIndex) {
-    case 0:
-      return `Checking your resume against ${company.name} and the role you picked.`;
-    case 1:
-      return topicSample;
-    case 2:
-      return "Tell me about a project, and how you measured the result.";
-    default:
-      return "One narrative tying your resume, OA and interview together.";
-  }
-}
-
-export default function GlassHero() {
+/**
+ * Exposes `startDemo()` via ref so GlassNav's "Start practice" button (see
+ * Landing.jsx, which owns the ref and wires the two together) can drive
+ * the SAME interactive demo state machine as the old in-hero card's
+ * button used to -- the card itself is gone (2026-10, "remove the
+ * floating caption card entirely" pass: it was sitting over the photo's
+ * face through several rounds of repositioning, so the simplest fix was
+ * to stop putting anything there), but the recording pill / phase-row
+ * highlight / segmented timeline / readiness-hexagon live state / AI note
+ * callout all still work exactly as before, just started from the nav
+ * instead. startDemo() also scrolls the hero into view first, since the
+ * nav is sticky and can be clicked from anywhere on the page.
+ */
+const GlassHero = forwardRef(function GlassHero(_props, ref) {
   const [ci, setCi] = useState(0);
   const [ti, setTi] = useState(0);
   const [live, setLive] = useState(false);
@@ -90,6 +90,17 @@ export default function GlassHero() {
     if (live) stop(false);
   }
 
+  useImperativeHandle(ref, () => ({
+    startDemo() {
+      const el = document.getElementById("top");
+      if (el) {
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+      }
+      start();
+    },
+  }));
+
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
 
@@ -103,22 +114,12 @@ export default function GlassHero() {
     ? "Interview"
     : null;
 
-  let capTitle, capBody;
-  if (stopped) {
-    capTitle = <>Report <b>ready.</b></>;
-    capBody = "See where you stand below, or pick another company.";
-  } else if (live) {
-    capTitle = <>{PHASES[si].title}</>;
-    capBody = phaseCaption(si, company, topic.sample);
-  } else {
-    capTitle = <>Don&apos;t practice for a test. Practice for <b>the</b> test.</>;
-    capBody = "One engine per company, built on its real order, cutoffs and gating.";
-  }
-
   return (
     <div className="gl-page" id="top">
       <div className={`gl-stage${live ? " gl-live" : ""}`} id="stage">
-        <PersonIllustration className="gl-person" />
+        <div className="gl-video" aria-hidden="true">
+          <HeroPhoto />
+        </div>
 
         <header className="gl-top">
           <span className="gl-glass gl-pillr">
@@ -191,18 +192,15 @@ export default function GlassHero() {
         </aside>
 
         <main className="gl-mid">
-          <div className="gl-glass gl-cap">
-            <h2>{capTitle}</h2>
-            <p>{capBody}</p>
-            {!stopped && (
-              <>
-                <button type="button" className="gl-btn y" data-testid={TID.heroCta} onClick={start}>
-                  {!live ? "Start practice" : si < 3 ? "Next phase" : "See report"}
-                </button>
-                {!live && <div style={{ marginTop: 8, fontSize: 11, opacity: 0.75 }}>A guided preview of the flow — not a real score.</div>}
-              </>
-            )}
-          </div>
+          {/* The floating glass caption card that used to live here (the
+              "Don't practice for a test..." heading + per-phase body text
+              + Start/Next/End button) is gone (2026-10) -- it sat over the
+              photo's face through several rounds of repositioning, and
+              the simplest fix was to stop putting anything there. The
+              "Start practice" trigger moved to GlassNav (see
+              GlassNav.jsx's startBtn + Landing.jsx's ref wiring); this
+              control strip is what's left, floating low over the photo
+              like a real video call's control bar. */}
           <div className="gl-ctl">
             <button type="button" aria-label="Microphone (decorative)" tabIndex={-1}><Mic size={20} color="#fff" /></button>
             <button type="button" aria-label="Audio (decorative)" tabIndex={-1}><Headphones size={20} color="#fff" /></button>
@@ -214,7 +212,7 @@ export default function GlassHero() {
 
         <aside className="gl-right">
           <div className="gl-pip">
-            <PersonIllustration small />
+            <HeroPhoto small />
           </div>
           <div className="gl-glass gl-res">
             <h4>Sectional<br />readiness</h4>
@@ -250,4 +248,6 @@ export default function GlassHero() {
       </div>
     </div>
   );
-}
+});
+
+export default GlassHero;

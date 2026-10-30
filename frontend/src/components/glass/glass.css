@@ -129,7 +129,13 @@
   min-height: min(860px, calc(100vh - 100px));
   padding: 22px;
   display: grid;
-  grid-template-columns: 270px 1fr 270px;
+  /* Single track now -- the photo is the shared full-bleed background
+     layer (like the gradient it replaces), not a sized column. .gl-left/
+     .gl-right are pulled out of grid flow entirely (position:absolute
+     below) and float as narrow glass panels over it near the edges,
+     same "everything overlaid on one shared background" pattern the
+     reference's own .stage already used for its gradient. */
+  grid-template-columns: 1fr;
   grid-template-rows: auto 1fr auto;
   gap: 16px;
   background:
@@ -139,8 +145,16 @@
     radial-gradient(40% 40% at 78% 100%, rgba(255, 196, 40, 0.6), transparent),
     linear-gradient(160deg, #8d8780, #4b4642);
 }
-.gl-stage > * { position: relative; z-index: 1; }
-.gl-person { position: absolute !important; z-index: 0 !important; left: 50%; bottom: 0; height: 88%; transform: translateX(-50%); width: auto; max-width: 100%; }
+/* min-width:0 overrides the grid default (min-width:auto, i.e. "don't
+   shrink below your content's min-content size") -- without it, the
+   single `1fr` column (mobile) has to grow wide enough to fit
+   .gl-tline's non-shrinking .gl-seg children (flex: 1 0 170px x 4, inside
+   .gl-tline once it's back in normal grid flow at <=980px), which was
+   stretching EVERY item in that column -- .gl-left/.gl-mid/.gl-right too
+   -- out past the viewport. Caught live via a computed-style check
+   (grid-template-columns was resolving to 708px, not the viewport's real
+   ~360px), not assumed. */
+.gl-stage > * { position: relative; z-index: 1; min-width: 0; }
 .gl-glass {
   background: linear-gradient(150deg, rgba(255, 255, 255, 0.3), rgba(50, 46, 42, 0.42) 55%);
   border: 1px solid rgba(255, 255, 255, 0.32);
@@ -149,7 +163,7 @@
   -webkit-backdrop-filter: blur(26px) saturate(1.5);
   border-radius: 30px;
 }
-.gl-top { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+.gl-top { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
 .gl-pillr { display: flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 99px; font-size: 13px; }
 .gl-pillr i { width: 7px; height: 7px; border-radius: 50%; background: #ff4d4d; }
 .gl-live .gl-pillr i { animation: gl-blink 1.2s infinite; }
@@ -169,7 +183,19 @@
   width: 46px; height: 46px; border-color: #fff; --tc: var(--gl-y) !important; z-index: 2;
   box-shadow: 0 0 0 4px rgba(255, 196, 40, 0.55), 0 8px 18px rgba(0, 0, 0, 0.3);
 }
-.gl-left { padding: 16px; align-self: start; }
+/* Floats as a narrow glass panel over the full-bleed photo, near the
+   stage's left edge -- not a grid column squeezing the photo down
+   anymore. Taken out of grid flow by position:absolute, so it's
+   positioned straight against .gl-stage's own padding box. */
+.gl-left {
+  /* Sized to its own content (NOT stretched to a fixed bottom offset) --
+     a fixed top+bottom box here previously stretched the glass panel's
+     translucent background down far enough to visually overlap the
+     "Your four phases" heading below it. max-height is a safety net for
+     short viewports, not the normal sizing mechanism. */
+  position: absolute; left: 22px; top: 92px; width: 252px; max-height: calc(100% - 250px);
+  padding: 16px; overflow-y: auto; z-index: 2;
+}
 .gl-prof { margin-bottom: 14px; }
 .gl-prof b { font-weight: 500; font-size: 17px; display: block; line-height: 1.1; }
 .gl-prof small { font-size: 11px; opacity: 0.7; }
@@ -196,29 +222,95 @@
 .gl-tile.on { outline: 3px solid var(--gl-y); outline-offset: 1px; }
 .gl-tile > span { position: relative; }
 .gl-tile .g { width: 30px; height: 30px; border-radius: 50%; background: rgba(0, 0, 0, 0.85); color: #fff; display: grid; place-items: center; }
-.gl-mid { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 14px; }
-.gl-cap { padding: 18px 22px; max-width: 440px; text-align: center; }
-.gl-cap h2 { margin: 0 0 6px; font-weight: 300; font-size: clamp(20px, 2.3vw, 28px); line-height: 1.15; letter-spacing: -0.02em; }
-.gl-cap h2 b { font-weight: 600; }
-.gl-cap p { margin: 0 0 14px; font-size: 13px; opacity: 0.85; }
+/* Now holds only the .gl-ctl control-bar strip -- the floating glass
+   caption card that used to anchor here (several rounds of chin/collar-
+   line measurement against the photo, see git history on this file if
+   that math is ever needed again) is gone entirely (2026-10): it kept
+   sitting over the photo's face, and removing it outright was simpler
+   than repositioning it again. "Start practice" moved to GlassNav.jsx,
+   wired to this component's startDemo() via Landing.jsx's ref. */
+.gl-mid {
+  position: absolute !important;
+  left: 50%; bottom: 150px; transform: translateX(-50%);
+  z-index: 2 !important;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+/* Full-bleed "video window" background layer -- the photo IS the stage's
+   shared background now (same role the radial-gradient background plays,
+   and the same role the reference mockup's own standing silhouette used
+   to play): it fills the whole stage behind everything else, not a sized
+   element inside any one column. Direct child of .gl-stage (a sibling of
+   .gl-top/.gl-left/.gl-mid/.gl-right/.gl-tline, NOT nested inside
+   .gl-mid), so `inset:0` covers the full stage box, not just one
+   column's box. Escapes the generic ".gl-stage > *" reset the same way
+   the reference's own .person did. */
+.gl-video {
+  position: absolute !important;
+  inset: 0;
+  z-index: 0 !important;
+  overflow: hidden;
+}
+/* hero-person-provided.jpg (see HeroPhoto.jsx's comment for the full
+   measurement) is 2400x1601 (1.5:1) against .gl-video's ~1.76:1 -- cover-
+   fit here is width-constrained, trimming ~7.5% off the photo's height at
+   the default centre object-position (hitting her headphone top, which
+   sits at ~15% down the source photo, with no breathing room above it --
+   caught live, the top pill row sat right at her hairline). 33% trims
+   closer to 5% off the top instead of 7.5%, leaving visible margin above
+   the headphones before the top pill row. */
+/* Scaled down from a plain 100% cover-fit on purpose: object-fit:cover on
+   this container is width-constrained (the photo's full width already
+   shows, only ~7.5% gets trimmed off its height) -- there is no crop that
+   shows literally more of the source image without introducing gaps
+   somewhere, since cover already picks the minimum necessary crop. The
+   "too tightly magnified" read came from how much of the STAGE her face
+   ends up filling, not from the crop itself, so this pulls the whole
+   photo back to ~82% size (transform, centred) instead -- a smaller,
+   less face-dominant inset with the stage's own gradient background
+   showing as a frame around it, same technique the brief suggested. */
+.gl-video img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover; object-position: 50% 33%;
+  transform: scale(0.68);
+  display: block;
+}
+.gl-video svg { width: 100%; height: 100%; display: block; }
 .gl-ctl { display: flex; gap: 10px; }
 .gl-ctl button {
-  width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
   background: rgba(32, 30, 28, 0.5); border: 1px solid rgba(255, 255, 255, 0.2);
 }
 .gl-ctl svg { width: 20px; height: 20px; fill: #fff; }
 .gl-ctl button.end { background: #e5484d; border-color: #e5484d; }
 .gl-ctl button.end svg { transform: rotate(135deg); }
-.gl-right { display: flex; flex-direction: column; gap: 16px; align-items: flex-end; }
+/* Same floating-panel treatment as .gl-left, mirrored to the right edge:
+   the PIP thumbnail + "Sectional readiness" card stack as narrow glass
+   cards over the photo, not a grid column squeezing it. */
+.gl-right {
+  /* Same content-sized approach as .gl-left, mirrored to the right edge. */
+  position: absolute; right: 22px; top: 92px; width: 232px; max-height: calc(100% - 250px);
+  display: flex; flex-direction: column; gap: 16px; align-items: flex-end; overflow-y: auto; z-index: 2;
+}
 .gl-pip { width: 150px; height: 100px; border-radius: 24px; overflow: hidden; border: 3px solid rgba(255, 255, 255, 0.5); background: linear-gradient(#cfd8d3, #9fb6b8); }
 .gl-pip svg { width: 100%; height: 100%; display: block; }
 .gl-res { width: 100%; padding: 16px; }
 .gl-res h4 { margin: 0 0 8px; font-weight: 400; font-size: 17px; line-height: 1.1; }
-.gl-tline { grid-column: 1 / -1; position: relative; }
-.gl-tline h3 { margin: 0 0 10px; font-weight: 400; font-size: 20px; }
-.gl-segs { display: flex; gap: 10px; overflow-x: auto; padding: 4px 4px 12px; }
+/* Pulled out of grid flow entirely, same as .gl-video/.gl-left/.gl-mid/
+   .gl-right -- the actual root cause of the "timeline floats mid-page"
+   bug: .gl-stage's middle `1fr` grid row had no normal-flow items left in
+   it once .gl-mid became position:absolute, so it collapsed, and
+   .gl-tline (still relying on grid auto-placement for row 3) landed right
+   under the header instead of at the bottom. Bottom-anchored at the same
+   22px the stage's own padding uses, independent of any row math. Also
+   compacted (smaller heading, smaller thumb circles, tighter padding) so
+   it + the caption card both fit in the room left below the photo's
+   chin/collar line -- see .gl-mid. */
+.gl-tline { position: absolute !important; left: 22px; right: 22px; bottom: 22px; z-index: 2 !important; }
+.gl-tline h3 { margin: 0 0 6px; font-weight: 400; font-size: 15px; }
+.gl-segs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 4px; }
 .gl-seg {
-  flex: 1 0 190px; border-radius: 32px; padding: 8px 18px 8px 8px; display: flex; align-items: center; gap: 12px;
+  flex: 1 0 170px; border-radius: 26px; padding: 5px 14px 5px 5px; display: flex; align-items: center; gap: 10px;
   opacity: 0.88; transition: opacity 0.2s, transform 0.15s;
   background: color-mix(in srgb, var(--tc) 40%, transparent);
   border: 1px solid rgba(255, 255, 255, 0.55);
@@ -227,9 +319,9 @@
   color: #fff;
 }
 .gl-seg.on { opacity: 1; transform: translateY(-3px); box-shadow: 0 0 0 3px var(--gl-y), 0 14px 26px rgba(0, 0, 0, 0.3); }
-.gl-thumb { width: 44px; height: 44px; border-radius: 50%; background: #000; color: #fff; display: grid; place-items: center; font-weight: 600; flex: none; }
-.gl-seg b { font-weight: 500; font-size: 15px; display: block; line-height: 1.1; }
-.gl-seg small { font-size: 11px; opacity: 0.7; }
+.gl-thumb { width: 32px; height: 32px; border-radius: 50%; background: #000; color: #fff; display: grid; place-items: center; font-weight: 600; font-size: 13px; flex: none; }
+.gl-seg b { font-weight: 500; font-size: 13px; display: block; line-height: 1.1; }
+.gl-seg small { font-size: 10px; opacity: 0.7; }
 .gl-note {
   position: absolute; z-index: 3; left: 21%; top: -74px; width: 280px; transform: rotate(-4deg);
   background: linear-gradient(145deg, #ffe07a, #ffc428 55%, #f2a900); color: #000; border-radius: 26px;
@@ -246,12 +338,41 @@
 .gl-ready-legend i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
 @media (max-width: 980px) {
-  .gl-links, .gl-finder { display: none; }
+  .gl-links, .gl-finder, .gl-nav-start { display: none; }
   .gl-stage { grid-template-columns: 1fr; grid-template-rows: auto; min-height: 0; }
-  .gl-person { height: 420px; top: 60px; bottom: auto; }
-  .gl-mid { min-height: 380px; }
+  /* The floating-narrow-panel-over-full-bleed-photo composition needs the
+     width a 980px+ stage has. Below that, .gl-left/.gl-right drop out of
+     absolute positioning and stack as normal full-width blocks (photo
+     stays full-bleed behind the whole stack via its own position:absolute
+     + inset:0, unaffected by this). */
+  .gl-left, .gl-right {
+    position: static; width: auto; top: auto; bottom: auto; left: auto; right: auto;
+    max-height: none; overflow-y: visible;
+  }
+  /* .gl-mid reverts to a normal stacked grid item here too (same reason
+     as .gl-left/.gl-right above) -- its desktop-only absolute/bottom-
+     anchored positioning doesn't make sense once the photo and panels are
+     no longer sharing one full-bleed stage. !important on position/left/
+     bottom/transform/z-index is required here -- the base .gl-mid rule
+     sets those with !important (to escape ".gl-stage > *" and to beat
+     .gl-tline's z-index, see above), and a non-!important override in a
+     media query can NOT beat an !important rule regardless of source
+     order or specificity. Missing this caused a real bug, caught live:
+     the card stayed absolutely positioned and floated mid-page over the
+     stacked mobile content instead of flowing with it. */
+  .gl-mid {
+    position: static !important; left: auto !important; bottom: auto !important; transform: none !important; z-index: auto !important;
+    padding: 24px 0;
+  }
   .gl-right { align-items: stretch; }
-  .gl-pip { position: absolute; right: 22px; top: 70px; z-index: 2; }
+  /* .gl-tline reverts to a normal stacked grid item too (same reason as
+     .gl-left/.gl-right/.gl-mid above) -- its desktop bottom-anchored
+     overlay positioning doesn't apply once everything else is stacked in
+     a single column; the photo (.gl-video) stays full-bleed behind the
+     whole stack either way, unaffected by this. Same !important
+     requirement as .gl-mid just above, same reason (the base rule sets
+     position/z-index with !important). */
+  .gl-tline { position: static !important; left: auto !important; right: auto !important; bottom: auto !important; z-index: auto !important; }
   .gl-note { position: relative; left: auto; top: auto; width: 100%; margin-bottom: 12px; transform: rotate(-1.5deg); }
 }
 @media (prefers-reduced-motion: reduce) {

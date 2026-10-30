@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "../components/glass/glass.css";
 import GlassNav from "../components/glass/GlassNav";
 import GlassHero from "../components/glass/GlassHero";
@@ -44,10 +44,20 @@ export default function Landing() {
     setTheme((t) => (t === "dark" ? "light" : "dark"));
   }
 
+  // GlassNav's "Start practice" button (replaces the hero's own removed
+  // caption-card button, 2026-10) drives GlassHero's demo state machine
+  // through this ref -- see GlassHero.jsx's startDemo() for what it does
+  // (scrolls the hero into view, then starts/advances the demo).
+  const heroRef = useRef(null);
+
   return (
     <div className="glass-landing" data-theme={theme === "system" ? undefined : theme}>
-      <GlassNav theme={theme} onToggleTheme={toggleTheme} />
-      <GlassHero />
+      <GlassNav
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onStartPractice={() => heroRef.current?.startDemo()}
+      />
+      <GlassHero ref={heroRef} />
       <GlassCrackInterviews />
       <GlassWhatYouGet />
       <GlassFourPhases />

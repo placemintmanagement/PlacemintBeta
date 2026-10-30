@@ -83,6 +83,92 @@ or any other page. Manual toggle added to `GlassNav`. Status: see "Done" below.
   `.glass-landing[data-theme]` without touching `/login`'s background (confirms the scoping
   holds); `/login` and `/company/:id` render in the untouched original teal design, confirming
   the logged-in/auth app is unaffected.
+- **Hero person element: full rework, standing SVG → framed photo window.** Original request
+  was narrower (swap the SVG `PersonIllustration` for a photo in the two existing slots), but
+  went through many rounds based on direct product-owner review of live screenshots:
+  1. First pass: an AI-generated PORTRAIT photo (1792x2400, 0.75:1) dropped into a `.gl-video`
+     "video window" card sized to the `.gl-mid` grid column. Composition read as 3 roughly-equal
+     columns side by side, not the dominant-photo-with-floating-panels look the reference
+     ("Int." interview UI) implied.
+  2. Redesigned `.gl-stage` to a single-column layout: `.gl-video` became a full-bleed
+     `position:absolute;inset:0` background layer (same role the radial-gradient background/the
+     mockup's own standing silhouette used to play), `.gl-left`/`.gl-right` pulled out of grid
+     flow into narrow (232–252px) `position:absolute` floating glass panels near the edges.
+     This is the composition that stuck for the rest of the session.
+  3. The portrait photo's 0.75:1 aspect against the stage's ~1.76:1 forced a brutal ~58% height
+     crop, making `object-position` extremely sensitive (tuned 3 times chasing head/chin
+     clearance) — concluded a portrait photo fundamentally can't frame well in a landscape
+     window. Replaced with an AI-generated LANDSCAPE photo (`hero-person-wide.png`,
+     2752x1536, 1.79:1) — near-exact match to the stage's aspect, crop became trivial.
+  4. Hit two real structural bugs along the way, both caught live (not assumed) and fixed:
+     - `.gl-stage`'s `grid-template-rows: auto 1fr auto` left the middle `1fr` track empty once
+       everything in it went `position:absolute`; `.gl-tline` (still grid-flow at the time)
+       auto-placed into that now-empty row instead of the bottom row, floating mid-page.
+       Fixed by pulling `.gl-tline` out of grid flow too (`position:absolute`, bottom-anchored
+       at the stage's own 22px padding, same as the other panels).
+     - The mobile (`<=980px`) breakpoint resets `.gl-mid`/`.gl-tline` back to `position:static`
+       for stacking, but the base rules set `position`/`z-index` with `!important` (needed to
+       escape `.gl-stage > *`'s generic reset and to out-rank `.gl-tline`'s z-index) — a
+       non-`!important` override inside a media query cannot beat an `!important` base rule
+       regardless of source order, so the card/strip stayed absolutely positioned and floated
+       over the stacked mobile content. Fixed by adding `!important` to the mobile overrides too.
+     - Separately, once `.gl-tline` was back in grid flow at mobile, its non-shrinking
+       `.gl-seg` children (`flex: 1 0 170px` × 4) gave the single `1fr` column a ~708px
+       min-content floor, overflowing the 390px viewport (clipped invisibly by
+       `.glass-landing`'s own `overflow-x: clip`, silently hiding "Sign up"). Fixed with the
+       standard CSS Grid fix: `min-width: 0` on `.gl-stage`'s direct children (overrides the
+       grid default `min-width: auto`, which is "don't shrink below your content's min-content
+       size").
+  5. **The floating `.gl-cap` caption card was removed entirely** (not repositioned again) —
+     after several rounds of chin/collar-line measurement it kept landing on some part of her
+     face. "Start practice" moved to `GlassNav.jsx` (new button, before Log in/Dashboard,
+     `.gl-btn k` black solid — Sign up already owns the yellow accent). `GlassHero.jsx` now
+     exposes `startDemo()` via `forwardRef`/`useImperativeHandle` (`Landing.jsx` owns the ref
+     and wires nav→hero); it scrolls the hero into view, then runs the same `start()` logic the
+     old card's button called — so the recording pill, phase-row highlight, segmented timeline,
+     readiness-hexagon live state and the AI note callout are all still fully functional, just
+     triggered from the nav. Hid the new nav button below 980px (same breakpoint that already
+     hides `.gl-links`/`.gl-finder`) — a third nav action button overflowed the 390px nav,
+     clipping "Sign up" off-screen; caught live via a `scrollWidth` check on the nav, not
+     assumed. **Deliberately kept `.gl-ctl`** (mic/headphones/end-call icons): since the demo
+     is still fully triggerable (from the nav) and endable (the red button still calls
+     `stop()`), the floating control-bar-over-video-feed reads as a normal, legitimate "video
+     call controls" pattern rather than dead UI — this was an explicit judgment call, not an
+     oversight.
+  6. Product owner then provided their OWN real photo (`hero-person-provided.jpg`, originally
+     8192x5464 / ~22MB) to replace the AI-generated one, for both the big `.gl-video` and the
+     small `.gl-pip` thumbnail (checked `.gl-pip`'s actual CSS aspect — 150x100 = 1.5:1,
+     landscape, not portrait/square — so it gets the same photo, not the old AI portrait).
+     Downscaled to 2400px on the long edge / JPEG quality 82 (~250KB) before wiring it in — no
+     existing raster-photo convention in this codebase's `public/` to match (everything else is
+     SVG), so picked JPEG since the source already was one. Measured crop against the stage via
+     a 5%-gridline overlay on the actual file (not guessed): headphones start at ~15% down: the
+     default-centre crop (~7.5% trimmed off top/bottom, width-constrained... *checked live and
+     corrected* — it's actually width-constrained the OTHER way: container wider than photo, so
+     this crop is trimming off height) needed a small `object-position: 50% 33%` nudge to clear
+     the top pill row (caught live: default centre had the pill row sitting right at her
+     hairline).
+  7. Final fix: product owner felt the face read as too magnified/zoomed-in even after the crop
+     fix — root cause is that `object-fit: cover` on a container noticeably wider than the photo
+     necessarily blows up an already-fairly-tight headshot. There's no crop that shows literally
+     more of the source image without gaps (cover already picks the minimum necessary crop), so
+     pulled the whole photo back via `transform: scale(0.68)` on the `.gl-video img` instead —
+     renders as a smaller, clearly "pulled back" inset video window with the stage's own
+     gradient background showing as a frame around it (first tried 0.82, confirmed via computed
+     styles it WAS applying but read as too subtle once the side margins landed under the
+     floating `.gl-left`/`.gl-right` panels; 0.68 is unmistakable).
+  8. Old AI-generated photos (`hero-person.png`, `hero-person-wide.png`) deleted from
+     `public/photos/` — fully unreferenced once `HeroPhoto.jsx` switched to the provided photo.
+  9. Final verification (clean, isolated `yarn build` + `yarn test`, Playwright at
+     1440/1024/390px + nav + mid-interaction): `yarn build` compiles clean. `yarn test`: one
+     flaky suite (`SparkInterview.test.jsx`, unrelated to anything touched this session) showed
+     timeout-based failures when run alongside the other 10 suites under heavy system load from
+     this long session's accumulated background processes — re-ran it in total isolation and all
+     8 tests passed cleanly in 1-2s each (vs. the 5s timeout), confirming it's resource
+     contention, not a real regression; the full suite's failure COUNT varied across repeated
+     runs (12 → 8 → 2 failures) which is itself the signature of a load-sensitive flake rather
+     than a deterministic break. No horizontal overflow at 390px (`scrollWidth === clientWidth
+     === 390`, including the nav with the new button hidden below 980px).
 
 ## Next
 - Nothing blocking; the build is feature-complete against the task's section list. If there's
@@ -107,3 +193,6 @@ or any other page. Manual toggle added to `GlassNav`. Status: see "Done" below.
   `Landing.jsx` rather than a destructive rewrite. `ChooseCompanySection.jsx` is also now
   unused (it was already feature-flagged off before this task) but still compiles and its own
   tests/usages (none) are unaffected.
+- `GlassHero.jsx` is now a `forwardRef` component (exposes `startDemo()`); `Landing.jsx` owns
+  the ref and passes `onStartPractice` down to `GlassNav.jsx` — this is the only cross-component
+  wiring in the whole glass restyle, everything else is self-contained per component.
