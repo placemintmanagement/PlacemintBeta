@@ -18,7 +18,7 @@ const CHECK_LINES = [
 
 export default function GlassReportSection() {
   return (
-    <section className="gl-sec">
+    <section className="gl-sec gl-sec-wide">
       <div className="gl-rep">
         <div>
           <h2 className="gl-h2" style={{ color: "#fff" }}>See exactly <b>where you stand.</b></h2>
@@ -34,12 +34,12 @@ export default function GlassReportSection() {
             <small>Illustrative example</small>
           </header>
 
-          <div className="gl-ri" style={{ "--bc": "var(--gl-pink)" }}>
+          <div className="gl-ri" style={{ "--bc": "#db2777" }}>
             <b>Resume</b>
             <div className="gl-tr"><i style={{ width: "74%" }} /></div>
           </div>
 
-          <div className="gl-ri" style={{ "--bc": "var(--gl-blue)" }}>
+          <div className="gl-ri" style={{ "--bc": "#0891b2" }}>
             <b>Online assessment</b>
             <div className="gl-tr"><i style={{ width: "82%" }} /><u style={{ left: "62%" }} /></div>
             <span className="gl-pill-sm a">Above cutoff</span>
@@ -49,13 +49,13 @@ export default function GlassReportSection() {
             <span className="gl-pill-sm a">Above cutoff</span>
           </div>
 
-          <div className="gl-ri" style={{ "--bc": "var(--gl-y)" }}>
+          <div className="gl-ri" style={{ "--bc": "#d97706" }}>
             <b>Interview</b>
             <div className="gl-tr"><i style={{ width: "62%" }} /></div>
             <q>&quot;You mentioned the project but not how you measured the improvement.&quot;</q>
           </div>
 
-          <div className="gl-ri" style={{ border: 0, "--bc": "var(--gl-mint)" }}>
+          <div className="gl-ri" style={{ border: 0, "--bc": "#16a34a" }}>
             <b>Cross-phase review</b>
             <div className="gl-tr"><i style={{ width: "78%" }} /></div>
           </div>
