@@ -62,11 +62,11 @@ export default function Landing() {
       <GlassHero ref={heroRef} />
       <GlassCrackInterviews />
       <GlassStartingPoints />
-      <GlassDepartments />
       <GlassWhatYouGet />
       <GlassFourPhases />
       <GlassIdeSection />
       <GlassReportSection />
+      <GlassDepartments />
       <GlassFaq />
       <GlassFooter />
     </div>
