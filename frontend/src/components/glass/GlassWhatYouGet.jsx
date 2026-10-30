@@ -11,13 +11,17 @@ import { FileCheck2, MessageSquareText, ShieldCheck, Layers, Code2, RefreshCw } 
  * but the ask is for the grid to be self-explanatory, nothing changes
  * below it on click).
  */
+// Vivid, saturated colors (not the shared --gl-* pastel tokens, which
+// read as washed-out/grey at icon scale even with a saturate() filter
+// boost) -- matches a provided reference screenshot's bright per-icon
+// colors, one distinct hue per option.
 const FEATURES = [
-  { key: "resume", name: "Resume checker", icon: FileCheck2, tc: "--gl-pink" },
-  { key: "interview", name: "Adaptive interview", icon: MessageSquareText, tc: "--gl-blue" },
-  { key: "cutoffs", name: "Sectional cutoffs", icon: ShieldCheck, tc: "--gl-sand" },
-  { key: "report", name: "One report", icon: Layers, tc: "--gl-mint" },
-  { key: "coding", name: "Coding rounds", icon: Code2, tc: "--gl-blue" },
-  { key: "fresh", name: "Fresh questions", icon: RefreshCw, tc: "--gl-y" },
+  { key: "resume", name: "Resume checker", icon: FileCheck2, ic: "#16a34a" },
+  { key: "interview", name: "Adaptive interview", icon: MessageSquareText, ic: "#2563eb" },
+  { key: "cutoffs", name: "Sectional cutoffs", icon: ShieldCheck, ic: "#dc2626" },
+  { key: "report", name: "One report", icon: Layers, ic: "#ca8a04" },
+  { key: "coding", name: "Coding rounds", icon: Code2, ic: "#0d9488" },
+  { key: "fresh", name: "Fresh questions", icon: RefreshCw, ic: "#ea580c" },
 ];
 
 export default function GlassWhatYouGet() {
@@ -55,7 +59,7 @@ export default function GlassWhatYouGet() {
                   className={`gl-opt${i === k ? " on" : ""}`}
                   onClick={() => setK(i)}
                 >
-                  <b style={{ "--oc": `var(${o.tc})` }}><OIcon size={19} /></b>
+                  <b style={{ "--oc": o.ic }}><OIcon size={19} /></b>
                   {o.name}
                 </button>
               );

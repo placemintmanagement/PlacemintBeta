@@ -494,13 +494,13 @@
 .gl-opt:hover { border-color: var(--gl-line); }
 .gl-opt.on { box-shadow: 0 0 0 2px var(--gl-y); border-color: transparent; }
 /* Colored icon chip, matching the reference: a tinted square badge per
-   option (not just a bare icon in its own pastel color, which read as
-   washed-out grey against the light pill background) + a saturate boost
-   on the icon itself since --gl-* tokens are deliberately pastel. */
+   option in a vivid, saturated color (GlassWhatYouGet.jsx's FEATURES.ic,
+   not the shared --gl-* pastel tokens -- those stayed washed-out/grey at
+   icon scale even with a saturate() filter boost, so this uses real
+   saturated hex colors directly instead of filtering pastel ones). */
 .gl-opt b {
   display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px;
-  background: color-mix(in srgb, var(--oc) 22%, #fff); color: color-mix(in srgb, var(--oc) 75%, #000 25%);
-  filter: saturate(1.7);
+  background: color-mix(in srgb, var(--oc) 16%, #fff); color: var(--oc);
 }
 
 /* four phases (dark split panel) */
