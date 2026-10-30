@@ -565,9 +565,22 @@
 .gl-bento { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
 .gl-bento-main { grid-column: span 2; grid-row: span 2; }
 @media (max-width: 980px) { .gl-bento { grid-template-columns: 1fr; } .gl-bento-main { grid-column: auto; grid-row: auto; } }
+/* Same "colorful frame peeking around a white inner panel" technique as
+   .gl-ide, using each card's own --tc instead of the IDE block's fixed
+   4-color mix (a single-hue gradient here, not the unrelated-colors
+   blend, since each card's identity IS its own tc -- mixing in the
+   other cards' colors would fight that rather than echo the IDE's
+   framing language). */
 .gl-bento-card {
-  border-radius: 24px; padding: 24px; background: var(--gl-card); border: 1px solid var(--gl-line);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.05); display: flex; flex-direction: column; gap: 10px;
+  border-radius: 24px; padding: 3px;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.65), transparent 50%),
+    radial-gradient(75% 95% at 100% 0, var(--tc), transparent),
+    radial-gradient(75% 95% at 0 100%, color-mix(in srgb, var(--tc) 65%, var(--gl-y) 35%), transparent);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+}
+.gl-bento-card-in {
+  background: var(--gl-card); border-radius: 21px; padding: 22px; height: 100%;
+  display: flex; flex-direction: column; gap: 10px;
 }
 .gl-bento-icon {
   width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; flex: none;

@@ -112,9 +112,11 @@ export default function GlassIdeSection() {
           const Icon = c.icon;
           return (
             <div key={c.key} className="gl-bento-card" style={{ "--tc": `var(${c.tc})` }}>
-              <span className="gl-bento-icon"><Icon size={22} /></span>
-              <h4>{c.title}</h4>
-              <p>{c.desc}</p>
+              <div className="gl-bento-card-in">
+                <span className="gl-bento-icon"><Icon size={22} /></span>
+                <h4>{c.title}</h4>
+                <p>{c.desc}</p>
+              </div>
             </div>
           );
         })}
