@@ -466,7 +466,7 @@
 /* "Pick your branch, then your track" (departments) */
 .gl-dept-grid { display: grid; grid-template-columns: 5fr 7fr; gap: 24px; align-items: stretch; }
 @media (max-width: 860px) { .gl-dept-grid { grid-template-columns: 1fr; } }
-.gl-dept-featured-col { display: flex; flex-direction: column; gap: 24px; }
+.gl-dept-featured-col { display: flex; flex-direction: column; justify-content: center; gap: 24px; }
 .gl-dept-soon-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 560px) { .gl-dept-soon-grid { grid-template-columns: 1fr; } }
 .gl-dept-icon {
@@ -474,17 +474,27 @@
   background: color-mix(in srgb, var(--tc) 32%, #fff 68%); color: var(--ic);
 }
 .gl-dept-icon.lg { width: 52px; height: 52px; border-radius: 16px; }
+/* Same dark-block combo as .gl-rep/.gl-dk (mint/blue/pink/yellow radial
+   mix on #0c0c0c) -- the one card worth that treatment since it's the
+   section's single hero card, not a repeated tile. */
 .gl-dept-featured {
-  display: block; border-radius: 28px; padding: 32px; background: var(--gl-card); border: 1px solid var(--gl-line);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06); color: var(--gl-text); transition: transform 0.15s;
+  display: block; border-radius: 28px; padding: 28px 32px 24px; color: #fff; transition: transform 0.15s;
+  background:
+    radial-gradient(45% 55% at 5% 10%, rgba(161, 216, 193, 0.5), transparent),
+    radial-gradient(45% 55% at 100% 0, rgba(172, 215, 220, 0.5), transparent),
+    radial-gradient(45% 55% at 100% 100%, rgba(220, 172, 175, 0.6), transparent),
+    radial-gradient(40% 50% at 0 100%, rgba(255, 196, 40, 0.4), transparent), #0c0c0c;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
 }
 .gl-dept-featured:hover { transform: translateY(-3px); }
-.gl-dept-featured b { display: block; font-weight: 500; font-size: 26px; margin: 20px 0 8px; letter-spacing: -0.01em; }
-.gl-dept-featured p { margin: 0 0 20px; color: var(--gl-muted); font-size: 16px; }
+.gl-dept-featured-in { height: 100%; }
+.gl-dept-featured b { display: block; font-weight: 500; font-size: 26px; margin: 20px 0 8px; letter-spacing: -0.01em; color: #fff; }
+.gl-dept-featured p { margin: 0 0 20px; color: rgba(255, 255, 255, 0.72); font-size: 16px; }
 .gl-dept-soon {
   border-radius: 24px; padding: 24px; background: color-mix(in srgb, var(--gl-card) 60%, transparent);
   border: 1px dashed var(--gl-line);
 }
+.gl-dept-soon-in { height: 100%; }
 .gl-dept-soon-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .gl-dept-pill {
   display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 4px 10px;

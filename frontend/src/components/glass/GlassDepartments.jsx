@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronRight, Clock, Cpu, Radio, Zap, Cog, Building2 } from "lucide-react";
+import { ChevronRight, Clock, Laptop, Radio, Zap, Cog, Building2 } from "lucide-react";
 import api from "../../api";
 import { TID } from "../../testIds";
 
 // Same icon-per-department-id map as components/DepartmentCard.jsx (teal
 // design) -- real department ids from the live /departments API, not
 // placeholder data.
-const ICONS = { cse: Cpu, entc: Radio, electronics: Zap, mechanical: Cog, civil: Building2 };
+const ICONS = { cse: Laptop, entc: Radio, electronics: Zap, mechanical: Cog, civil: Building2 };
 const PALETTE = ["--gl-blue", "--gl-mint", "--gl-pink", "--gl-sand", "--gl-y"];
 // Vivid icon-foreground hexes, paired by index with PALETTE's pastel
 // background tints -- same reason as GlassWhatYouGet/GlassIdeSection's `ic`
@@ -21,25 +21,29 @@ function DeptCard({ department, i }) {
 
   if (!department.active) {
     return (
-      <div data-testid={TID.departmentCard(department.id)} className="gl-dept-soon" aria-disabled="true">
-        <div className="gl-dept-soon-top">
-          <span className="gl-dept-icon" style={{ "--tc": tc, "--ic": ic }}><Icon size={20} /></span>
-          <span className="gl-dept-pill"><Clock size={13} aria-hidden="true" />Coming Soon</span>
+      <div data-testid={TID.departmentCard(department.id)} className="gl-dept-soon" style={{ "--tc": tc }} aria-disabled="true">
+        <div className="gl-dept-soon-in">
+          <div className="gl-dept-soon-top">
+            <span className="gl-dept-icon" style={{ "--tc": tc, "--ic": ic }}><Icon size={20} /></span>
+            <span className="gl-dept-pill"><Clock size={13} aria-hidden="true" />Coming Soon</span>
+          </div>
+          <b>{department.name}</b>
+          <p>No tracks published yet</p>
         </div>
-        <b>{department.name}</b>
-        <p>No tracks published yet</p>
       </div>
     );
   }
 
   return (
     <Link to={`/departments/${department.id}`} data-testid={TID.departmentCard(department.id)} className="gl-dept-featured">
-      <span className="gl-dept-icon lg" style={{ "--tc": tc, "--ic": ic }}><Icon size={26} /></span>
-      <b>{department.name}</b>
-      <p>Browse supported company tracks</p>
-      <span className="gl-btn y" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-        Explore <ChevronRight size={14} aria-hidden="true" />
-      </span>
+      <div className="gl-dept-featured-in">
+        <span className="gl-dept-icon lg" style={{ "--tc": tc, "--ic": ic }}><Icon size={26} /></span>
+        <b>{department.name}</b>
+        <p>Browse supported company tracks</p>
+        <span className="gl-btn y" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          Explore <ChevronRight size={14} aria-hidden="true" />
+        </span>
+      </div>
     </Link>
   );
 }
