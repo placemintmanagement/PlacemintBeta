@@ -17,7 +17,7 @@ export default function GlassFourPhases() {
   const phase = PHASES[ph];
 
   return (
-    <section className="gl-sec">
+    <section className="gl-sec gl-sec-wide">
       <div className="gl-dk">
         <div className="gl-dl">
           <h2>Four phases. <b>One story.</b></h2>
