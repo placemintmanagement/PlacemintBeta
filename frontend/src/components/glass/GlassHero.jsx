@@ -39,6 +39,7 @@ const AI_INTERVIEWER_NAME = "Arun";
 // demo -- same register as AI_INTERVIEWER_NAME: a stand-in for the
 // interactive demo, not a claim about a real user.
 const CANDIDATE_NAME = "Maya M.";
+const CANDIDATE_ROLE = "Software Engineer";
 
 /**
  * Exposes `startDemo()` via ref so GlassNav's "Start practice" button (see
@@ -169,7 +170,7 @@ const GlassHero = forwardRef(function GlassHero(_props, ref) {
         <aside className="gl-left gl-glass">
           <div className="gl-prof">
             <b>{CANDIDATE_NAME}</b>
-            <small>{company.name} &middot; Your prep plan</small>
+            <small>{CANDIDATE_ROLE} &middot; Your prep plan</small>
           </div>
           <div>
             {PHASES.map((p, i) => (
