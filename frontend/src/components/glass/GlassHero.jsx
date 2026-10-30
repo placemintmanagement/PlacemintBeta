@@ -33,7 +33,7 @@ const NOTE_TEXT = "You mentioned the project but not how you measured the improv
 // Explicitly, unambiguously AI -- "· AI Interviewer" is part of the label
 // itself, not a tooltip or fine print, same honesty bar as everywhere
 // else in this app (no fabricated human recruiter name/title).
-const AI_INTERVIEWER_NAME = "Aria";
+const AI_INTERVIEWER_NAME = "Arun";
 
 /**
  * Exposes `startDemo()` via ref so GlassNav's "Start practice" button (see

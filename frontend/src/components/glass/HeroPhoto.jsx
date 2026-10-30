@@ -24,12 +24,21 @@ import PersonIllustration from "./PersonIllustration";
 // (portrait, 0.75:1) photo this hero used.
 const SRC = "/photos/hero-person-provided.jpg";
 
+// Second real, product-owner-provided photo (2026-10): the AI interviewer
+// persona ("Arun"), shown only in the small picture-in-picture slot --
+// the big .gl-video background stays the candidate's photo. 1565x1005
+// (~1.56:1), a close match for .gl-pip's 150x100 (1.5:1) frame, so no
+// cropping math was needed here the way the hero photo required.
+const PIP_SRC = "/photos/interviewer-person-provided.jpg";
+
 /**
  * Renders the hero photo, filling its parent container (parent supplies
  * the frame: size, border-radius, overflow:hidden). Falls back to the
  * generic inline SVG figure (PersonIllustration) if the photo fails to
  * load for any reason, instead of showing a broken image -- same
  * robustness convention as the rest of this project's photo-slot work.
+ * `small` renders the AI interviewer's own photo (the pip), not a cropped
+ * copy of the big candidate photo.
  */
 export default function HeroPhoto({ small = false }) {
   const [failed, setFailed] = useState(false);
@@ -40,7 +49,7 @@ export default function HeroPhoto({ small = false }) {
 
   return (
     <img
-      src={SRC}
+      src={small ? PIP_SRC : SRC}
       alt=""
       aria-hidden="true"
       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
