@@ -467,7 +467,12 @@
 .gl-sec { max-width: 1200px; margin: 0 auto; padding: 76px 22px; }
 .gl-sec-wide { max-width: 1480px; }
 .gl-h2 { font-size: clamp(30px, 4.6vw, 54px); font-weight: 300; letter-spacing: -0.03em; line-height: 1.05; margin: 0 0 14px; }
-.gl-h2 b { font-weight: 600; }
+/* Deepened amber, not the raw --gl-y token -- flat #FFC428 text reads
+   fine as a button/dot fill but is too low-contrast against a white
+   section background for body-scale legibility (large-text WCAG still
+   wants ~3:1). Darkened toward black, same color-mix technique already
+   used for icon-on-light contrast elsewhere in this file. */
+.gl-h2 b { font-weight: 600; color: color-mix(in srgb, var(--gl-y) 78%, #000 22%); }
 .gl-sub { color: var(--gl-muted); max-width: 52ch; margin: 0 0 32px; font-size: 17px; }
 
 /* chip grid ("Crack interviews at") */
