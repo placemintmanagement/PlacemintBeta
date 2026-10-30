@@ -584,7 +584,7 @@
 }
 .gl-bento-icon {
   width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; flex: none;
-  background: color-mix(in srgb, var(--tc) 55%, #fff 45%); color: color-mix(in srgb, var(--tc) 70%, #000 30%);
+  background: color-mix(in srgb, var(--ic) 16%, #fff); color: var(--ic);
 }
 .gl-bento-card h4 { margin: 0; font-weight: 500; font-size: 20px; letter-spacing: -0.01em; }
 .gl-bento-card p { margin: 0; color: var(--gl-muted); font-size: 15px; line-height: 1.55; }

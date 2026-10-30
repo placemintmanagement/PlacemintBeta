@@ -7,12 +7,16 @@ import { Code2, FileCheck2, MessageSquareText, ShieldCheck, Layers } from "lucid
 // IDE mockup instead of standing alone in a picker. Not a duplicate
 // source of truth in spirit -- GlassWhatYouGet's own copy is unchanged,
 // this is a second, denser presentation of the same real product facts.
+// ic: vivid saturated hex per card, same values GlassWhatYouGet.jsx uses
+// for the matching concept -- the pastel --gl-* tokens (used below for
+// tc, the card's gradient frame, where pastel is fine over a larger
+// area) read dull at icon-chip scale, same issue fixed there.
 const BENTO_CARDS = [
-  { key: "coding", icon: Code2, title: "LeetCode-style coding rounds", desc: "Split-panel IDE, dark editor on a light page. 2 visible tests. 3 hidden tests unlocked on Submit. Write in Python, JS, C, C++, Java.", tc: "--gl-blue" },
-  { key: "resume", icon: FileCheck2, title: "Resume checker", desc: "Uploads once, gets analysed against this company & this role. Strengths, weaknesses, fit score, projects extracted.", tc: "--gl-pink" },
-  { key: "interview", icon: MessageSquareText, title: "Adaptive interview", desc: "One question at a time, planned for the company you chose and drawing on your resume when one is attached. A short verdict follows each answer.", tc: "--gl-mint" },
-  { key: "cutoffs", icon: ShieldCheck, title: "Sectional cutoffs, honest verdicts", desc: "Where a company sets a cutoff for each section, missing one means not ready. Where it uses a blended score, we show your weakest section.", tc: "--gl-sand" },
-  { key: "report", icon: Layers, title: "One report, not four", desc: "The final report ties resume, OA, and interview into a single narrative, written by our premium AI tier, the one place we don't downgrade.", tc: "--gl-y" },
+  { key: "coding", icon: Code2, title: "LeetCode-style coding rounds", desc: "Split-panel IDE, dark editor on a light page. 2 visible tests. 3 hidden tests unlocked on Submit. Write in Python, JS, C, C++, Java.", tc: "--gl-blue", ic: "#0d9488" },
+  { key: "resume", icon: FileCheck2, title: "Resume checker", desc: "Uploads once, gets analysed against this company & this role. Strengths, weaknesses, fit score, projects extracted.", tc: "--gl-pink", ic: "#16a34a" },
+  { key: "interview", icon: MessageSquareText, title: "Adaptive interview", desc: "One question at a time, planned for the company you chose and drawing on your resume when one is attached. A short verdict follows each answer.", tc: "--gl-mint", ic: "#2563eb" },
+  { key: "cutoffs", icon: ShieldCheck, title: "Sectional cutoffs, honest verdicts", desc: "Where a company sets a cutoff for each section, missing one means not ready. Where it uses a blended score, we show your weakest section.", tc: "--gl-sand", ic: "#dc2626" },
+  { key: "report", icon: Layers, title: "One report, not four", desc: "The final report ties resume, OA, and interview into a single narrative, written by our premium AI tier, the one place we don't downgrade.", tc: "--gl-y", ic: "#ca8a04" },
 ];
 
 // Same Two Sum problem/code/test cases as components/IDEMockup.jsx (teal
@@ -113,7 +117,7 @@ export default function GlassIdeSection() {
           return (
             <div key={c.key} className="gl-bento-card" style={{ "--tc": `var(${c.tc})` }}>
               <div className="gl-bento-card-in">
-                <span className="gl-bento-icon"><Icon size={22} /></span>
+                <span className="gl-bento-icon" style={{ "--ic": c.ic }}><Icon size={22} /></span>
                 <h4>{c.title}</h4>
                 <p>{c.desc}</p>
               </div>
