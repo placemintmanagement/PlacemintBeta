@@ -1,4 +1,19 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Code2, FileCheck2, MessageSquareText, ShieldCheck, Layers } from "lucide-react";
+
+// Five "what you get" cards, same copy as GlassWhatYouGet.jsx's FEATURES
+// (resume/interview/cutoffs/report/coding -- "fresh questions" omitted,
+// matching the bento layout this is ported from), placed alongside the
+// IDE mockup instead of standing alone in a picker. Not a duplicate
+// source of truth in spirit -- GlassWhatYouGet's own copy is unchanged,
+// this is a second, denser presentation of the same real product facts.
+const BENTO_CARDS = [
+  { key: "coding", icon: Code2, title: "LeetCode-style coding rounds", desc: "Split-panel IDE, dark editor on a light page. 2 visible tests. 3 hidden tests unlocked on Submit. Write in Python, JS, C, C++, Java.", tc: "--gl-blue" },
+  { key: "resume", icon: FileCheck2, title: "Resume checker", desc: "Uploads once, gets analysed against this company & this role. Strengths, weaknesses, fit score, projects extracted.", tc: "--gl-pink" },
+  { key: "interview", icon: MessageSquareText, title: "Adaptive interview", desc: "One question at a time, planned for the company you chose and drawing on your resume when one is attached. A short verdict follows each answer.", tc: "--gl-mint" },
+  { key: "cutoffs", icon: ShieldCheck, title: "Sectional cutoffs, honest verdicts", desc: "Where a company sets a cutoff for each section, missing one means not ready. Where it uses a blended score, we show your weakest section.", tc: "--gl-sand" },
+  { key: "report", icon: Layers, title: "One report, not four", desc: "The final report ties resume, OA, and interview into a single narrative, written by our premium AI tier, the one place we don't downgrade.", tc: "--gl-y" },
+];
 
 // Same Two Sum problem/code/test cases as components/IDEMockup.jsx (teal
 // design) -- a generic, reasonable placeholder problem with no existing
@@ -39,6 +54,8 @@ export default function GlassIdeSection() {
 
   return (
     <section className="gl-sec">
+      <div className="gl-bento">
+        <div className="gl-bento-main">
       <h2 className="gl-h2">A real split-panel coding IDE, <b>not a textarea.</b></h2>
       <p className="gl-sub">The same layout as HackerRank and LeetCode: problem on the left, dark editor on the right.</p>
       <div className="gl-ide">
@@ -88,6 +105,19 @@ export default function GlassIdeSection() {
             )}
           </div>
         </div>
+      </div>
+        </div>
+
+        {BENTO_CARDS.map((c) => {
+          const Icon = c.icon;
+          return (
+            <div key={c.key} className="gl-bento-card" style={{ "--tc": `var(${c.tc})` }}>
+              <span className="gl-bento-icon"><Icon size={22} /></span>
+              <h4>{c.title}</h4>
+              <p>{c.desc}</p>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
