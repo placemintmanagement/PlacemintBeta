@@ -529,11 +529,11 @@
 @media (max-width: 560px) { .gl-chips { grid-template-columns: repeat(2, 1fr); } }
 .gl-chip {
   padding: 26px 10px; border-radius: 24px; font-size: 16px; font-weight: 500; position: relative;
-  transition: border-color 0.15s, box-shadow 0.15s; background: var(--gl-card); color: var(--gl-text);
-  border: 1px dashed var(--gl-line); text-align: center;
+  transition: box-shadow 0.15s; background: var(--gl-card); color: var(--gl-text);
+  border: none; text-align: center;
   display: flex; align-items: center; justify-content: center; min-height: 76px;
 }
-.gl-chip:hover { border-color: var(--gl-text); }
+.gl-chip:hover { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08); }
 .gl-chip[aria-disabled="true"] { opacity: 0.55; cursor: default; }
 .gl-cl { border-radius: 6px; object-fit: contain; }
 .gl-cl-fallback {
