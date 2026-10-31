@@ -17,7 +17,7 @@ const CARDS = [
 
 export default function GlassStartingPoints() {
   return (
-    <section className="gl-sec" id="starting-points">
+    <section className="gl-sec gl-sec-tight-top" id="starting-points">
       <h2 className="gl-h2" style={{ textAlign: "center" }}>
         Pick your <b>starting point.</b>
       </h2>

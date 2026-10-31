@@ -514,6 +514,11 @@
 /* ---------- generic sections ---------- */
 .gl-sec { max-width: 1200px; margin: 0 auto; padding: 76px 22px; }
 .gl-sec-wide { max-width: 1480px; }
+/* "Pick your starting point." follows straight after the companies chip
+   grid -- two adjacent .gl-sec's standard 76px padding stacked (152px
+   combined) read as an excessive gap at this specific transition. */
+.gl-sec-tight-top { padding-top: 8px; }
+.gl-sec-tight-bottom { padding-bottom: 8px; }
 .gl-h2 { font-size: clamp(30px, 4.6vw, 54px); font-weight: 300; letter-spacing: -0.03em; line-height: 1.05; margin: 0 0 14px; }
 .gl-h2 b { font-weight: 600; }
 .gl-sub { color: var(--gl-muted); max-width: 52ch; margin: 0 0 32px; font-size: 17px; }
@@ -565,8 +570,17 @@
   font-family: "Poppins", system-ui, sans-serif; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
 }
 .gl-bdg i { font-style: normal; width: 40px; height: 40px; border-radius: 50%; background: var(--gl-y); color: #000; display: grid; place-items: center; font-size: 16px; }
-.gl-wc { background: var(--gl-card); border: 1.5px solid var(--gl-line); border-radius: 44px; padding: 40px 36px 44px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.07); }
-@media (max-width: 980px) { .gl-wc { padding: 22px; } }
+/* Same "colorful frame peeking around a white inner panel" recipe as
+   .gl-ide (the IDE mockup's pink/blue/yellow/sand mix). */
+.gl-wc {
+  border-radius: 46px; padding: 3px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.6), transparent 45%),
+    radial-gradient(70% 80% at 100% 0, var(--gl-pink), transparent),
+    radial-gradient(70% 80% at 0 100%, var(--gl-blue), transparent),
+    radial-gradient(45% 55% at 100% 100%, var(--gl-y), transparent), var(--gl-sand);
+}
+.gl-wc-in { background: var(--gl-card); border-radius: 44px; padding: 40px 36px 44px; }
+@media (max-width: 980px) { .gl-wc-in { padding: 22px; } }
 .gl-wh { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 28px; flex-wrap: wrap; }
 .gl-wh h3 { margin: 0; font-size: clamp(22px, 2.6vw, 30px); font-weight: 400; letter-spacing: -0.02em; line-height: 1.1; max-width: 16ch; }
 .gl-pg { display: flex; align-items: center; gap: 10px; font-size: 13px; white-space: nowrap; }
