@@ -26,6 +26,13 @@
   --gl-blue: #acd7dc;
   --gl-sand: #dcd7ac;
   --gl-focus: var(--gl-y);
+  /* Vivid, readable-as-text accent (Stage 2, shared/* primitives) -- the
+     --gl-* palette above is deliberately pastel for large fills, which
+     fails contrast as small text/links on a white card (same "pastel
+     reads dull/illegible at small scale" issue GlassLogoMark.jsx and the
+     option-picker icons hit). Same pink family as the logo mark's right
+     leg, darkened for ~5.5:1 contrast on white. */
+  --gl-accent: #be185d;
   /* Same typography system as the main app (frontend/src/index.css):
      Inter for body text, Outfit for headings (h2/h3/h4 below), Poppins
      600 for eyebrow/badge labels, JetBrains Mono for code/technical UI
@@ -48,6 +55,7 @@
     --gl-text: #fff;
     --gl-muted: #a9a9a9;
     --gl-line: rgba(255, 255, 255, 0.14);
+    --gl-accent: #f472b6;
     color-scheme: dark;
   }
 }
@@ -57,6 +65,7 @@
   --gl-text: #fff;
   --gl-muted: #a9a9a9;
   --gl-line: rgba(255, 255, 255, 0.14);
+  --gl-accent: #f472b6;
   color-scheme: dark;
 }
 
@@ -796,3 +805,49 @@
   .glass-landing:not([data-theme="light"]) .gl-bg-cream { background: var(--gl-card); }
 }
 .glass-landing[data-theme="dark"] .gl-bg-cream { background: var(--gl-card); }
+
+/* ---------- app primitives (Stage 2, 2026-11: components/shared/* -- used
+   site-wide, not just the landing page) ----------
+   Reuses .gl-btn/.gl-tag (nav/landing) as the base, adding the variant
+   modifiers those pages never needed. Scoped the same way as everything
+   else in this file -- `.glass-landing` lives on PageShell's own root now
+   (Stage 2), so every shared/* primitive below just needs its bare class,
+   same pattern as Header.jsx/Footer.jsx putting the scope on their own
+   root rather than on every child. */
+.gl-btn.o { background: transparent; color: var(--gl-text); border: 1.5px solid var(--gl-line); }
+.gl-btn.o:hover { background: color-mix(in srgb, var(--gl-text) 5%, transparent); }
+.gl-btn.r { background: #e5484d; color: #fff; }
+.gl-btn.r:hover { filter: brightness(0.95); }
+/* White-outline variant for buttons sitting on a dark/photo surface
+   (hero, dark panels) -- mirrors .gl-ctl's existing white-border-on-dark
+   treatment rather than inventing a new recipe. */
+.gl-btn.wo { background: transparent; color: #fff; border: 1px solid rgba(255, 255, 255, 0.4); }
+.gl-btn.wo:hover { background: rgba(255, 255, 255, 0.1); }
+
+.gl-card {
+  background: var(--gl-card);
+  border: 1px solid var(--gl-line);
+  border-radius: 24px;
+  box-shadow: 0 14px 28px -18px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+.gl-card-interactive { transition: transform 0.15s, box-shadow 0.15s; }
+.gl-card-interactive:hover { transform: translateY(-3px); box-shadow: 0 20px 36px -16px rgba(0, 0, 0, 0.32); }
+
+/* Chip.jsx tones -- `.gl-tag` on its own is the yellow pill badge (Header
+   plan tags, "Beta" tag); these two modifiers override its background for
+   the shared Chip component's two tones, same colors the chip grid/report
+   section already use elsewhere in this file for status vs. neutral info. */
+.gl-tag.neutral { background: color-mix(in srgb, var(--gl-blue) 45%, transparent); }
+.gl-tag.status { background: color-mix(in srgb, var(--gl-mint) 45%, transparent); }
+
+.gl-field-input {
+  width: 100%; background: var(--gl-card); color: var(--gl-text);
+  border: 1.5px solid var(--gl-line); border-radius: 14px; padding: 12px 16px; font-size: 15px;
+  outline: none;
+}
+.gl-field-input:focus { outline: 3px solid var(--gl-focus); outline-offset: 2px; border-color: var(--gl-text); }
+.gl-field-input.err { border-color: #e5484d; }
+
+.gl-modal-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.5); }
+.gl-modal-panel { width: 100%; max-width: 520px; background: var(--gl-card); border: 1px solid var(--gl-line); border-radius: 24px; box-shadow: 0 14px 28px -18px rgba(0, 0, 0, 0.28); padding: 28px; }
