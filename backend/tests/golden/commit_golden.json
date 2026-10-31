@@ -1,0 +1,815 @@
+{
+  "final_closing_message": "Thank you, Priya, for attending the interview. We will update you soon.",
+  "final_report": {
+    "attempt_id": "att1",
+    "company_name": "Capgemini",
+    "created_at": "2027-01-15T08:00:00+00:00",
+    "interview_id": "<NORMALIZED>",
+    "interview_summary": {
+      "avg_score": 100.0,
+      "completed": true,
+      "skipped": false,
+      "verdicts": [
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Solid approach.",
+        "Complexity noted.",
+        "Complexity noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "CS answer noted.",
+        "HR answer noted.",
+        "HR answer noted.",
+        "HR answer noted."
+      ]
+    },
+    "oa_summary": {
+      "composite_score": 0.5,
+      "section_results": {},
+      "verdict": "borderline",
+      "weakest_section": ""
+    },
+    "report": {
+      "narrative": "n",
+      "next_steps": [],
+      "overall_score": 50,
+      "overall_verdict": "borderline",
+      "strongest_dimension": "",
+      "weakest_dimension": ""
+    },
+    "report_id": "<NORMALIZED>",
+    "resume_analysis": {
+      "extracted_projects": [
+        {
+          "name": "Inventory tracker",
+          "one_line_summary": "Tracks stock levels for a shop.",
+          "tech_stack": "Python, SQLite"
+        },
+        {
+          "name": "Chat app",
+          "one_line_summary": "Realtime chat.",
+          "tech_stack": "Node"
+        },
+        {
+          "name": "Analytics dashboard",
+          "one_line_summary": "Shows usage metrics.",
+          "tech_stack": "React, Postgres"
+        }
+      ]
+    },
+    "tier": "commit",
+    "tier_source": "oa_designated",
+    "user_id": "u1"
+  },
+  "final_score": {
+    "cs_grilling": 1.0,
+    "dsa_complexity": 1.0,
+    "hr": 1.0,
+    "interview": 1.0,
+    "not_reached": [],
+    "project1": 1.0,
+    "project2": 1.0
+  },
+  "final_status": "completed",
+  "questions": [
+    {
+      "id": "commit-intro",
+      "prompt": "Please introduce yourself in a few sentences: your background and what you are working on now.",
+      "stage": "intro"
+    },
+    {
+      "id": "commit-project1",
+      "prompt": "Your resume lists the project \"Analytics dashboard\". Walk me through what it does and which parts you built yourself.",
+      "stage": "project1"
+    },
+    {
+      "id": "commit-p1f1",
+      "prompt": "Follow-up 1: what did you change, and why?",
+      "stage": "project1"
+    },
+    {
+      "id": "commit-p1f2",
+      "prompt": "Follow-up 2: what did you change, and why?",
+      "stage": "project1"
+    },
+    {
+      "id": "commit-p1f3",
+      "prompt": "Follow-up 3: what did you change, and why?",
+      "stage": "project1"
+    },
+    {
+      "id": "commit-p1f4",
+      "prompt": "Follow-up 4: what did you change, and why?",
+      "stage": "project1"
+    },
+    {
+      "id": "commit-p1f5",
+      "prompt": "Follow-up 5: what did you change, and why?",
+      "stage": "project1"
+    },
+    {
+      "id": "commit-p1f6",
+      "prompt": "Follow-up 6: what did you change, and why?",
+      "stage": "project1"
+    },
+    {
+      "id": "commit-p1f7",
+      "prompt": "Follow-up 7: what did you change, and why?",
+      "stage": "project1"
+    },
+    {
+      "id": "commit-project2",
+      "prompt": "Let's talk about another project on your resume: \"Chat app\". Give me a brief overview of what it does.",
+      "stage": "project2"
+    },
+    {
+      "id": "commit-p2f1",
+      "prompt": "Follow-up 8: what did you change, and why?",
+      "stage": "project2"
+    },
+    {
+      "id": "commit-p2f2",
+      "prompt": "Follow-up 9: what did you change, and why?",
+      "stage": "project2"
+    },
+    {
+      "id": "commit-p2f3",
+      "prompt": "Follow-up 10: what did you change, and why?",
+      "stage": "project2"
+    },
+    {
+      "id": "commit-p2f4",
+      "prompt": "Follow-up 11: what did you change, and why?",
+      "stage": "project2"
+    },
+    {
+      "id": "commit-p2f5",
+      "prompt": "Follow-up 12: what did you change, and why?",
+      "stage": "project2"
+    },
+    {
+      "id": "commit-p2f6",
+      "prompt": "Follow-up 13: what did you change, and why?",
+      "stage": "project2"
+    },
+    {
+      "id": "commit-dsa",
+      "prompt": "Coding question: Diameter of Binary Tree\n\nGiven a binary tree as a level-order list ('N' = missing child), print its diameter: the number of edges on the longest path between any two nodes (the path may or may not pass through the root).\n\nInput: Single line: level-order values with 'N' for null.\nOutput: Single integer.\nConstraints: 1 <= number of real nodes <= 1000\n\nYou may answer with the algorithm or with full code.",
+      "stage": "dsa"
+    },
+    {
+      "id": "commit-time-complexity",
+      "prompt": "What is the time complexity of your solution?",
+      "stage": "time_complexity"
+    },
+    {
+      "id": "commit-space-complexity",
+      "prompt": "What is the space complexity?",
+      "stage": "space_complexity"
+    },
+    {
+      "id": "commit-cs-0-main",
+      "prompt": "What do coupling and cohesion mean, and why do we generally want low coupling and high cohesion?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-0-nudge",
+      "prompt": "Could you explain that a bit more, or give an example?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-0-fu1",
+      "prompt": "Give an example of a class with LOW cohesion, and explain what makes it low-cohesion.",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-0-fu2",
+      "prompt": "How are coupling and cohesion related to each other in practice -- does improving one tend to help the other?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-1-main",
+      "prompt": "What is the difference between a checked exception and an unchecked exception in Java?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-1-nudge",
+      "prompt": "Could you explain that a bit more, or give an example?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-1-fu1",
+      "prompt": "Error is also a subclass of Throwable but is neither Exception's checked branch nor RuntimeException. Where does something like OutOfMemoryError fit into this picture, and should application code typically try to catch it?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-1-fu2",
+      "prompt": "If a checked exception doesn't fit any of your method's existing `throws` declarations, what are your options, and what's the trade-off of wrapping it in an unchecked exception instead?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-2-main",
+      "prompt": "Given this schema and sample data:\nemployees(id, name, salary, dept_id)\n1, Asha, 90000, 1\n2, Bilal, 85000, 1\n3, Chen, 85000, 2\n4, Deepa, 72000, 2\n\nWrite a query that returns the second-highest salary. Walk me through the query you'd write.",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-2-nudge",
+      "prompt": "Could you explain that a bit more, or give an example?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-2-fu1",
+      "prompt": "What would your query return if two employees were tied for the single highest salary? Would it still be correct?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-2-fu2",
+      "prompt": "Could you solve this with a window function instead of a subquery? Which one, and how?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-3-main",
+      "prompt": "What is the difference between an abstract class and an interface in Java, including how default methods changed things?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-3-nudge",
+      "prompt": "Could you explain that a bit more, or give an example?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-3-fu1",
+      "prompt": "If a class implements two interfaces that both define the SAME default method signature with different bodies, what happens?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-cs-3-fu2",
+      "prompt": "Given that interfaces can now have default methods too, what's still a genuine reason to choose an abstract class over an interface for a given design?",
+      "stage": "cs_grilling"
+    },
+    {
+      "id": "commit-hr-0",
+      "prompt": "What attracted you to the field you chose to study?",
+      "stage": "hr"
+    },
+    {
+      "id": "commit-hr-0-nudge",
+      "prompt": "Could you give me a specific example or a bit more detail?",
+      "stage": "hr"
+    },
+    {
+      "id": "commit-hr-1",
+      "prompt": "What would you say is your biggest strength, and how has it helped you in your work or studies?",
+      "stage": "hr"
+    },
+    {
+      "id": "commit-hr-1-nudge",
+      "prompt": "Could you give me a specific example or a bit more detail?",
+      "stage": "hr"
+    },
+    {
+      "id": "commit-hr-2",
+      "prompt": "What kind of projects or problems do you hope to work on in your career?",
+      "stage": "hr"
+    },
+    {
+      "id": "commit-hr-2-nudge",
+      "prompt": "Could you give me a specific example or a bit more detail?",
+      "stage": "hr"
+    }
+  ],
+  "stage_transitions": [
+    "intro",
+    "project1",
+    "project2",
+    "dsa",
+    "time_complexity",
+    "space_complexity",
+    "cs_grilling",
+    "hr",
+    "done"
+  ],
+  "stored_turns": [
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "Please introduce yourself in a few sentences: your background and what you are working on now.",
+      "question_id": "commit-intro",
+      "stage": "intro",
+      "verdict": null
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Your resume lists the project \"Analytics dashboard\". Walk me through what it does and which parts you built yourself.",
+      "question_id": "commit-project1",
+      "rejections": [],
+      "stage": "project1",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 1: what did you change, and why?",
+      "question_id": "commit-p1f1",
+      "rejections": [],
+      "stage": "project1_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 2: what did you change, and why?",
+      "question_id": "commit-p1f2",
+      "rejections": [],
+      "stage": "project1_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 3: what did you change, and why?",
+      "question_id": "commit-p1f3",
+      "rejections": [],
+      "stage": "project1_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 4: what did you change, and why?",
+      "question_id": "commit-p1f4",
+      "rejections": [],
+      "stage": "project1_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 5: what did you change, and why?",
+      "question_id": "commit-p1f5",
+      "rejections": [],
+      "stage": "project1_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 6: what did you change, and why?",
+      "question_id": "commit-p1f6",
+      "rejections": [],
+      "stage": "project1_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 7: what did you change, and why?",
+      "question_id": "commit-p1f7",
+      "rejections": [],
+      "stage": "project1_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Let's talk about another project on your resume: \"Chat app\". Give me a brief overview of what it does.",
+      "question_id": "commit-project2",
+      "rejections": [],
+      "stage": "project2",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 8: what did you change, and why?",
+      "question_id": "commit-p2f1",
+      "rejections": [],
+      "stage": "project2_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 9: what did you change, and why?",
+      "question_id": "commit-p2f2",
+      "rejections": [],
+      "stage": "project2_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 10: what did you change, and why?",
+      "question_id": "commit-p2f3",
+      "rejections": [],
+      "stage": "project2_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 11: what did you change, and why?",
+      "question_id": "commit-p2f4",
+      "rejections": [],
+      "stage": "project2_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 12: what did you change, and why?",
+      "question_id": "commit-p2f5",
+      "rejections": [],
+      "stage": "project2_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 13: what did you change, and why?",
+      "question_id": "commit-p2f6",
+      "rejections": [],
+      "stage": "project2_followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "approach_0": true,
+        "approach_1": true,
+        "edge_cases_named": true
+      },
+      "question": "Coding question: Diameter of Binary Tree\n\nGiven a binary tree as a level-order list ('N' = missing child), print its diameter: the number of edges on the longest path between any two nodes (the path may or may not pass through the root).\n\nInput: Single line: level-order values with 'N' for null.\nOutput: Single integer.\nConstraints: 1 <= number of real nodes <= 1000\n\nYou may answer with the algorithm or with full code.",
+      "question_id": "commit-dsa",
+      "rejections": [],
+      "stage": "dsa",
+      "verdict": "Solid approach."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "time_correct": true,
+        "time_stated": true
+      },
+      "question": "What is the time complexity of your solution?",
+      "question_id": "commit-time-complexity",
+      "rejections": [],
+      "stage": "time_complexity",
+      "verdict": "Complexity noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "space_correct": true,
+        "space_stated": true
+      },
+      "question": "What is the space complexity?",
+      "question_id": "commit-space-complexity",
+      "rejections": [],
+      "stage": "space_complexity",
+      "verdict": "Complexity noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What do coupling and cohesion mean, and why do we generally want low coupling and high cohesion?",
+      "question_id": "commit-cs-0-main",
+      "stage": "cs_grilling",
+      "verdict": null
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true,
+        "key_point_2": true
+      },
+      "question": "Could you explain that a bit more, or give an example?",
+      "question_id": "commit-cs-0-nudge",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true
+      },
+      "question": "Give an example of a class with LOW cohesion, and explain what makes it low-cohesion.",
+      "question_id": "commit-cs-0-fu1",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true
+      },
+      "question": "How are coupling and cohesion related to each other in practice -- does improving one tend to help the other?",
+      "question_id": "commit-cs-0-fu2",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What is the difference between a checked exception and an unchecked exception in Java?",
+      "question_id": "commit-cs-1-main",
+      "stage": "cs_grilling",
+      "verdict": null
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true,
+        "key_point_2": true
+      },
+      "question": "Could you explain that a bit more, or give an example?",
+      "question_id": "commit-cs-1-nudge",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true
+      },
+      "question": "Error is also a subclass of Throwable but is neither Exception's checked branch nor RuntimeException. Where does something like OutOfMemoryError fit into this picture, and should application code typically try to catch it?",
+      "question_id": "commit-cs-1-fu1",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true
+      },
+      "question": "If a checked exception doesn't fit any of your method's existing `throws` declarations, what are your options, and what's the trade-off of wrapping it in an unchecked exception instead?",
+      "question_id": "commit-cs-1-fu2",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "Given this schema and sample data:\nemployees(id, name, salary, dept_id)\n1, Asha, 90000, 1\n2, Bilal, 85000, 1\n3, Chen, 85000, 2\n4, Deepa, 72000, 2\n\nWrite a query that returns the second-highest salary. Walk me through the query you'd write.",
+      "question_id": "commit-cs-2-main",
+      "stage": "cs_grilling",
+      "verdict": null
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true,
+        "key_point_2": true
+      },
+      "question": "Could you explain that a bit more, or give an example?",
+      "question_id": "commit-cs-2-nudge",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true
+      },
+      "question": "What would your query return if two employees were tied for the single highest salary? Would it still be correct?",
+      "question_id": "commit-cs-2-fu1",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true
+      },
+      "question": "Could you solve this with a window function instead of a subquery? Which one, and how?",
+      "question_id": "commit-cs-2-fu2",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What is the difference between an abstract class and an interface in Java, including how default methods changed things?",
+      "question_id": "commit-cs-3-main",
+      "stage": "cs_grilling",
+      "verdict": null
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true,
+        "key_point_2": true
+      },
+      "question": "Could you explain that a bit more, or give an example?",
+      "question_id": "commit-cs-3-nudge",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true
+      },
+      "question": "If a class implements two interfaces that both define the SAME default method signature with different bodies, what happens?",
+      "question_id": "commit-cs-3-fu1",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "key_point_0": true,
+        "key_point_1": true
+      },
+      "question": "Given that interfaces can now have default methods too, what's still a genuine reason to choose an abstract class over an interface for a given design?",
+      "question_id": "commit-cs-3-fu2",
+      "rejections": [],
+      "stage": "cs_grilling",
+      "verdict": "CS answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What attracted you to the field you chose to study?",
+      "question_id": "commit-hr-0",
+      "stage": "hr",
+      "verdict": null
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_example_or_reason": true,
+        "direct_answer": true,
+        "reflection_or_outcome": true
+      },
+      "question": "Could you give me a specific example or a bit more detail?",
+      "question_id": "commit-hr-0-nudge",
+      "rejections": [],
+      "stage": "hr",
+      "verdict": "HR answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What would you say is your biggest strength, and how has it helped you in your work or studies?",
+      "question_id": "commit-hr-1",
+      "stage": "hr",
+      "verdict": null
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_example_or_reason": true,
+        "direct_answer": true,
+        "reflection_or_outcome": true
+      },
+      "question": "Could you give me a specific example or a bit more detail?",
+      "question_id": "commit-hr-1-nudge",
+      "rejections": [],
+      "stage": "hr",
+      "verdict": "HR answer noted."
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": null,
+      "question": "What kind of projects or problems do you hope to work on in your career?",
+      "question_id": "commit-hr-2",
+      "stage": "hr",
+      "verdict": null
+    },
+    {
+      "answer": "A clear, specific answer about my own part and the trade-off I handled.",
+      "flags": {
+        "concrete_example_or_reason": true,
+        "direct_answer": true,
+        "reflection_or_outcome": true
+      },
+      "question": "Could you give me a specific example or a bit more detail?",
+      "question_id": "commit-hr-2-nudge",
+      "rejections": [],
+      "stage": "hr",
+      "verdict": "HR answer noted."
+    }
+  ],
+  "tier": "commit"
+}

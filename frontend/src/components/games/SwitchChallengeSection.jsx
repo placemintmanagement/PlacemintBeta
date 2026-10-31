@@ -56,7 +56,7 @@ export default function SwitchChallengeSection({ puzzles, config, onComplete, on
   if (phase === "instructions") {
     return (
       <div className="pm-card p-8 max-w-lg mx-auto text-center">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-primary-dark mb-2">
+        <div className="text-xs pm-eyebrow tracking-widest text-pm-primary-dark mb-2">
           Gamified Round
         </div>
         <h2 className="font-display text-2xl font-bold mb-4">{instructions.title}</h2>
@@ -95,11 +95,11 @@ export default function SwitchChallengeSection({ puzzles, config, onComplete, on
           <div className="pm-chip text-xs">LEVEL {currentIndex + 1}</div>
           <div className="flex-1 mx-4 h-2 bg-[rgba(10,10,10,0.06)] rounded-full overflow-hidden">
             <div
-              className="h-full bg-[#FF9F45] transition-all"
+              className="h-full bg-[var(--pm-teal-deep)] transition-all"
               style={{ width: `${fillPct}%` }}
             />
           </div>
-          <div className="text-xs font-mono text-pm-text2">
+          <div className="text-xs font-display tabular-nums text-pm-text2">
             {hasLiveScore ? `${runningScore} pts` : `${answeredCount}/${puzzles.length}`}
           </div>
         </div>

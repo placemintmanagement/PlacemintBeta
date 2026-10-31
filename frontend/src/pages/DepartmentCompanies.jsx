@@ -46,13 +46,30 @@ export default function DepartmentCompanies() {
     return order.map(label => ({ label, companies: byGroup.get(label) }));
   }, [companies]);
 
+  // Running counter across ALL groups (not reset per group) so
+  // CompanyCard's header-tint cycle (index.css) reflects the cards'
+  // actual visual order top-to-bottom on the page -- recomputed fresh
+  // each render, never stored, so it's safe as a plain local variable.
+  let cardIndex = 0;
+
   return (
-    <div className="min-h-screen">
-      <Header />
+    // Opaque cream background on this page's own wrapper (2026-10 restyle)
+    // -- deliberately not a change to the shared html/body teal gradient
+    // + grid overlay (index.css), which other pages (Dashboard, Pricing,
+    // etc.) still rely on. #root paints above body::before's fixed grid
+    // (z-index 1 vs 0), so an opaque background here fully hides both the
+    // teal and the grid wherever this div covers, without touching either
+    // globally. min-h-screen plus a plain block div's natural growth with
+    // content covers the page even when it's taller than the viewport.
+    <div className="min-h-screen" style={{ background: "var(--pm-cream)" }}>
+      <Header light />
       <section className="max-w-7xl mx-auto px-6 lg:px-10 pt-16 pb-24">
         <div className="mb-8">
-          <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-2">department</div>
-          <h1 className="font-display font-bold text-3xl lg:text-4xl">
+          <div className="pm-eyebrow mb-2" style={{ color: "#0F6F7A" }}>department</div>
+          <h1
+            className="font-display font-light"
+            style={{ color: "#0B2A30", fontSize: "clamp(2rem, 4vw, 3rem)", letterSpacing: "-0.02em", lineHeight: 1.1 }}
+          >
             {department ? department.name : "Loading…"}
           </h1>
         </div>
@@ -65,9 +82,14 @@ export default function DepartmentCompanies() {
 
         {groups.map(g => (
           <div key={g.label} className="mb-10 last:mb-0">
-            <h2 className="font-display font-bold text-xl mb-4">{g.label}</h2>
-            <div data-testid={TID.companyGrid} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {g.companies.map(c => <CompanyCard key={c.id} company={c} />)}
+            <h2
+              className="font-display font-semibold"
+              style={{ color: "#0F6F7A", fontSize: 22, marginTop: 40, marginBottom: 20 }}
+            >
+              {g.label}
+            </h2>
+            <div data-testid={TID.companyGrid} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 items-stretch">
+              {g.companies.map(c => <CompanyCard key={c.id} company={c} index={cardIndex++} />)}
             </div>
           </div>
         ))}

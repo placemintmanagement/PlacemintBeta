@@ -57,6 +57,10 @@ __pycache__/
 venv/
 .venv/
 
+# Dev-only OpenAI response cache (DEV_MODEL_CACHE=1) -- never active in
+# production, never committed: see services/ai_service.py.
+backend/.dev_model_cache/
+
 # Development tools
 chainlit.md
 .chainlit
@@ -96,3 +100,10 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Design rollout screenshots (local review only)
+frontend/design-screenshots/
+
+# Local runtime artifacts (pid files and uvicorn logs)
+backend/*.pid
+backend/uvicorn*.log

@@ -79,6 +79,30 @@ let webpackConfig = {
       },
     },
   },
+  // react-router-dom@7 (and the react-router@7 core package it wraps) ship
+  // ESM-first via package.json "exports" maps that Jest's CRA-bundled
+  // resolver does not fully understand -- `require("react-router-dom")`
+  // under `craco test` fails ("Cannot find module") without this
+  // override, and react-router-dom's own CJS entry in turn requires
+  // "react-router/dom" and "react-router", which need the same redirect.
+  // Forces Jest to each package's own dist/development/*.js (plain CJS)
+  // instead. Does not affect the real webpack build (dev/prod), which
+  // already resolves these packages correctly via its own ESM-aware
+  // resolver -- this only changes what `yarn test` sees.
+  jest: {
+    configure: (jestConfig) => {
+      jestConfig.moduleNameMapper = {
+        ...jestConfig.moduleNameMapper,
+        "^react-router-dom$": "<rootDir>/node_modules/react-router-dom/dist/index.js",
+        "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js",
+        "^react-router$": "<rootDir>/node_modules/react-router/dist/development/index.js",
+        // Mirrors the webpack "@" alias (above) -- CRA/craco does not
+        // translate webpack aliases into Jest's own resolver automatically.
+        "^@/(.*)$": "<rootDir>/src/$1",
+      };
+      return jestConfig;
+    },
+  },
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),

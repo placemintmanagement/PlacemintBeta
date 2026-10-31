@@ -40,7 +40,7 @@ const SAMPLE_QUESTIONS = [
     correct_index: 2,
     chart: {
       type: "histogram",
-      title: "Marks Distribution — Class X Mathematics (120 students)",
+      title: "Marks Distribution: Class X Mathematics (120 students)",
       labels: ["0–20", "20–40", "40–60", "60–80", "80–100"],
       values: [4, 10, 18, 52, 36],
       unit: "students",
@@ -57,7 +57,7 @@ export default function DevChartPreview() {
       <Header />
       <div className="max-w-3xl mx-auto px-6 py-10">
         <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-1">dev preview · not a real route</div>
-        <h1 className="font-display text-2xl font-bold mb-6">DI Chart Question — component preview</h1>
+        <h1 className="font-display text-2xl font-bold mb-6">DI Chart Question: component preview</h1>
         <div className="space-y-6">
           {SAMPLE_QUESTIONS.map((q, i) => (
             <ChartQuestion

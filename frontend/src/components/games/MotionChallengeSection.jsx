@@ -101,6 +101,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   const finishedRef = useRef(false); // guards against double-firing onComplete
   const levelTokenRef = useRef(0); // bumped on every goToLevel(); guards a stale state-sync response
   const hasMovedRef = useRef(false); // true once a real move/undo has landed for the CURRENT level
+  const goToLevelRef = useRef(null); // always the latest goToLevel -- see advanceAfterLevel below
 
   const instructions = config?.instructions || {
     title: "Motion Challenge",
@@ -147,18 +148,26 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   // already won/lost in a prior visit), and calling this with the stale
   // closure's currentId/levelIndex would record the wrong puzzleId and
   // transition from the wrong index.
-  const advanceAfterLevel = (outcome, puzzleId, fromIdx) => {
+  // goToLevel is called through a ref (set just below, right after goToLevel
+  // is defined) rather than named directly in this callback's own deps --
+  // the two functions are mutually referential (goToLevel's own deps list
+  // includes advanceAfterLevel), so naming goToLevel here directly would
+  // make each one's useCallback identity depend on the other's, defeating
+  // the memoization exhaustive-deps is asking for. The ref always points
+  // at the current goToLevel, so this calls the exact same function with
+  // the exact same timing as before.
+  const advanceAfterLevel = useCallback((outcome, puzzleId, fromIdx) => {
     setResults((prev) => [...prev, { puzzleId, outcome }]);
     setLevelOutcome(outcome);
     setTimeout(() => {
       setLevelOutcome(null);
       if (fromIdx + 1 < puzzles.length) {
-        goToLevel(fromIdx + 1);
+        goToLevelRef.current(fromIdx + 1);
       } else {
         finishSection();
       }
     }, 1200);
-  };
+  }, [puzzles.length, finishSection]);
 
   const goToLevel = useCallback((idx) => {
     const p = puzzles[idx];
@@ -191,6 +200,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
         setLoadError(describeError(err)); // optimistic placeholder stands, but surface why the sync failed
       });
   }, [puzzles, attemptId, sectionKey, advanceAfterLevel]);
+  goToLevelRef.current = goToLevel;
 
   useEffect(() => {
     if (phase !== "done") return;
@@ -280,7 +290,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   if (phase === "instructions") {
     return (
       <div className="pm-card p-8 max-w-lg mx-auto text-center">
-        <div className="text-xs font-mono uppercase tracking-widest text-pm-primary-dark mb-2">Gamified Round</div>
+        <div className="text-xs pm-eyebrow tracking-widest text-pm-primary-dark mb-2">Gamified Round</div>
         <h2 className="font-display text-2xl font-bold mb-4">{instructions.title}</h2>
         <p className="text-pm-text2 mb-6">{instructions.rule}</p>
         <div className="flex flex-col gap-3 text-left mb-8">
@@ -310,7 +320,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
               <div
                 key={p.id ?? p.puzzle_id}
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${
-                  r?.outcome === "won" ? "bg-emerald-600" : r ? "bg-pm-secondary" : "bg-[#D8D3C4]"
+                  r?.outcome === "won" ? "bg-[var(--pm-teal-deep)]" : r ? "bg-pm-secondary" : "bg-[#D8D3C4]"
                 }`}
               >
                 {i + 1}
@@ -369,16 +379,16 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   return (
     <div>
       {loadError && (
-        <div className="mb-3 px-4 py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm flex items-center justify-between gap-3">
+        <div className="mb-3 px-4 py-2.5 rounded-lg bg-[rgba(11,42,48,0.06)] border border-[rgba(11,42,48,0.15)] text-pm-text text-sm flex items-center justify-between gap-3">
           <span>{loadError}</span>
-          <button onClick={() => setLoadError(null)} className="text-red-400 hover:text-red-600 shrink-0">&times;</button>
+          <button onClick={() => setLoadError(null)} className="text-pm-text2 hover:text-pm-text shrink-0">&times;</button>
         </div>
       )}
       <div className="flex items-center justify-between mb-3 px-1">
         <div className="pm-chip text-xs">LEVEL {levelIndex + 1} OF {puzzles.length}</div>
         <div className="flex items-center gap-4">
-          <div className="text-xs font-mono text-pm-text2">{movesUsed} / {current.moveBudget} moves</div>
-          <div className={`flex items-center gap-1.5 font-mono text-xs font-semibold ${poolRemaining <= 30 ? "text-pm-secondary" : "text-pm-text2"}`}>
+          <div className="text-xs font-display tabular-nums text-pm-text2">{movesUsed} / {current.moveBudget} moves</div>
+          <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${poolRemaining <= 30 ? "text-pm-secondary" : "text-pm-text2"}`}>
             <Clock size={14} /> {formatMMSS(poolRemaining)}
           </div>
         </div>
@@ -436,7 +446,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
                         isWall ? "bg-[#2C2C2C]" : "bg-white"
                       }`}
                     >
-                      {isWall && <span className="text-[#8A8A8A] text-xs font-bold">&times;</span>}
+                      {isWall && <span className="text-[#C4C4C4] text-xs font-bold">&times;</span>}
                     </div>
                   );
                 })

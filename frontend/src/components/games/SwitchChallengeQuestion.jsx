@@ -98,10 +98,10 @@ export default function SwitchChallengeQuestion({
       style={{ background: "linear-gradient(135deg, #DCEBFA 0%, #B9D9F2 100%)" }}
     >
       <div className="flex items-center justify-between mb-4">
-        <div className="text-xs font-mono uppercase text-[#2C3E56]/70">
+        <div className="text-xs pm-eyebrow text-[#2C3E56]/70">
           Q{index + 1} of {total} · Switch Challenge
         </div>
-        <div className={`flex items-center gap-1.5 font-mono text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-[#2C3E56]"}`}>
+        <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-[#2C3E56]"}`}>
           <Clock size={14} />
           00:{String(remaining).padStart(2, "0")}
         </div>
@@ -112,14 +112,14 @@ export default function SwitchChallengeQuestion({
           Which digit sequence maps the input to the output?
         </div>
 
-        <div className="text-[11px] font-mono uppercase text-pm-text2 mb-2 text-center">Input</div>
+        <div className="text-[11px] pm-eyebrow text-pm-text2 mb-2 text-center">Input</div>
         <div className="flex justify-center gap-4 mb-6">
           {q.topRow.map((shape, i) => (
             <ShapeCellLight key={i} shape={shape} positionLabel={i + 1} />
           ))}
         </div>
 
-        <div className="text-[11px] font-mono uppercase text-pm-text2 mb-2 text-center">Output</div>
+        <div className="text-[11px] pm-eyebrow text-pm-text2 mb-2 text-center">Output</div>
         <div className="flex justify-center gap-4 mb-6">
           {q.bottomRow.map((shape, i) => (
             <ShapeCellLight key={i} shape={shape} />
@@ -127,7 +127,7 @@ export default function SwitchChallengeQuestion({
         </div>
 
         <div className="border-t border-pm-border pt-5">
-          <div className="text-xs font-mono uppercase text-pm-text2 mb-3 text-center">Pick the matching sequence</div>
+          <div className="text-xs pm-eyebrow text-pm-text2 mb-3 text-center">Pick the matching sequence</div>
           <div className="flex justify-center gap-3">
             {(q.options || []).map((opt, ix) => (
               <button
@@ -135,7 +135,7 @@ export default function SwitchChallengeQuestion({
                 data-testid={TID.oaQuestionOption(qid, ix)}
                 onClick={() => handleSelect(ix)}
                 disabled={locked}
-                className={`${CELL_BASE} px-5 py-4 font-mono text-lg font-bold tracking-widest transition disabled:opacity-60`}
+                className={`${CELL_BASE} px-5 py-4 font-display tabular-nums text-lg font-bold tracking-widest transition disabled:opacity-60`}
               >
                 {opt}
               </button>
@@ -156,7 +156,7 @@ function ShapeCellLight({ shape, positionLabel }) {
         <ShapeIcon shape={shape} />
       </div>
       {positionLabel != null && (
-        <div className="font-mono text-xs font-semibold text-pm-text2">{positionLabel}</div>
+        <div className="font-display tabular-nums text-xs font-semibold text-pm-text2">{positionLabel}</div>
       )}
     </div>
   );

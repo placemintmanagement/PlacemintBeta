@@ -49,18 +49,84 @@ a plain-English summary of it, not a second copy of the data:
     capgemini_round1, 60 min, single shared timer) -- the 6 sub-parts this
     module implements (grammar/business_writing/situational/reading_comp/
     listening_comp/spoken_sim).
-  Round 2: Online Assessment (formerly "Round 1"), 4 sections:
-    - "technical" (R2a): pseudocode base (16 Qs) + extra_topics blend of
-      OOPS/DBMS/OS/CN (6 each) -- generated via the SHARED
-      server._generate_extra_topics helper, same mechanism every other
-      company's cs-fundamentals-style block uses. Not implemented in this
-      module; genuinely shared code, stays in server.py.
-    - "essay" (R2b): plain essay section, no target_words override.
-    - "cognitive" (R2c): registry-driven gamified_round (game_types.py /
-      gamified_round.py), not an LLM-generated section.
-    - "behavioral" (R2d): unscored (weight 0.0) plain mcq.
-  Round 3: Coding Round (formerly "Round 2") -- 2 plain DSA problems, no
-    difficulty_targets/automata_fix.
+  Round 2: Technical Module, 2 sections (2026-09, legacy-section-removal
+    pass -- REMOVED "technical" (R2a: pseudocode base + OOPS/DBMS/OS/CN
+    extra_topics), "essay" (R2b), and "behavioral" (R2d): none of the
+    five official rounds this company was restructured around
+    (Communication / Technical Module / Debugging / AI-Assisted Coding /
+    Cognitive) call for a separate legacy pseudocode section, an essay
+    section, or a behavioral section -- they were leftover from the
+    pre-restructure section list, not part of the confirmed pattern.
+    Removing the companies.py ENTRIES only -- the shared "pseudocode"/
+    "essay"/"mcq" section TYPES, and their dispatch/grading/prompt code
+    in server.py, are untouched and still used by other companies
+    (Infosys, Zoho, LTIMindtree, Tech Mahindra, Wipro, and others)):
+    - "ai_literacy": AI Literacy scenario bank, 20 Q/session -- see
+      the paragraph below and Section 7 (draw_section7_questions).
+    - "technical_assessment": 20 Q/session, fixed 5/5/5/5 split
+      across programming_logic / dsa / an oops+dbms+swe_fundamentals mix
+      (balanced) / a cn+modern_engineering mix (weighted 3:2 toward cn).
+      Implemented entirely in server.py's "capgemini_round2_technical"
+      branch by composing the shared _generate_extra_topics helper with
+      per-draw randomized topic counts for the two mixed pools -- no new
+      draw function in this module (genuinely shared mechanism, stays in
+      server.py, same precedent the removed "technical" section used to
+      illustrate here).
+  Round 3: Debugging Assessment ("round3_debugging", type "debugging", 20
+    min) -- 1 problem (2026-09, R3/R4-config-correction pass: was 2
+    problems from 2 different topics, reversed per explicit instruction;
+    20 min UNCHANGED) drawn via debugging_bank.py's sample_debug_session(),
+    with a Python/C/C++/Java bug-injected variant; graded via
+    debugging_bank.grade_debugging_submission() (the same
+    code_runner.run_tests pipeline the old coding round used). See
+    server.py's "debugging" branches in _generate_section_questions /
+    _grade_debugging_section / _strip_answer_fields_for_response.
+    (2026-09: the older plain-DSA "coding" round that used to occupy this
+    "Round 3" slot -- 2 plain DSA problems, no difficulty_targets/
+    automata_fix -- was REMOVED from this company's section list, per
+    explicit user decision, rather than relabeled, once Debugging
+    Assessment took over the Round 3 slot. The "coding" section TYPE
+    itself is untouched and still used by other companies.)
+  Round 4: AI-Assisted Coding ("round4_ai_assisted", type "ai_assisted",
+    45 min -- was 30, corrected 2026-09 same pass) -- 1 problem drawn via
+    ai_assisted_bank.sample_one(); a
+    stateful, multi-turn staged conversation (its own db.ai_assisted_
+    sessions collection, not an answers payload) gated by real LLM
+    sufficiency judgments. See server.py's "ai_assisted" branches and the
+    attempt-scoped /oa/{attempt_id}/ai-assisted/{section_key}/... routes.
+  Round 5: Cognitive Assessment ("round5_cognitive", type
+    "gamified_round", 11 min -- was 14, retimed 2026-10) -- registry-
+    driven (game_types.py / gamified_round.py), not an LLM-generated
+    section. Moved here (2026-09, R5-reorder pass) from the middle of
+    the section list -- was key "cognitive", still labeled "R2c" from
+    before this company's restructure -- and renamed to match the
+    other four rounds' "roundN_..." convention.
+    RANDOM-4-OF-5 DRAW (2026-10, R5-random-draw pass): each session now
+    draws 4 of the 5 registered games at random, no repeats within a
+    session, instead of running all 5 every time. Driven by a
+    `drawCount: 4` field on Capgemini's OWN gamified_round_config
+    document (server.py's gamified_round branch reads it; absent on
+    every other company's doc, so Accenture/IBM are unaffected) --
+    not a hardcoded company check in the shared engine. Minutes retimed
+    proportionally (14 * 4/5 = 11.2, rounded to 11). The official
+    research's ~68 minutes and the registered game types (vs. the
+    official Motion/Grid/Logical Reasoning/ADEPT-15 set) remain
+    UNRECONCILED -- a separate decision for a real Round 5 content pass
+    later, deliberately not touched in this pass either.
+
+Round 2 also has an "AI Literacy" scenario bank (`capgemini_round2_bank`,
+100 questions across 19 scenario clusters -- corrected 2026-09, an earlier
+note here said 400, checked directly against the live collection instead
+of trusting that number), authored + staged via the scratchpad pipeline,
+then upserted into Mongo by a one-off loader script
+(scripts/capgemini_round2_ai_literacy_insert.py, since deleted -- its job
+was done the moment the data landed; same disposal precedent as Round 1's
+own insert scripts, none of which still live in scripts/ either). Section 7
+below (draw_section7_questions) is now WIRED (2026-09/10) into both
+generation (server.py's "capgemini_round2_ai_literacy" branch) and grading
+(server.py's _grade_capgemini_round2_ai_literacy_section, needed because
+this bank's scenario-nested, letter-keyed-option shape doesn't fit the
+generic _grade_mcq_like grader) and has a companies.py section entry.
 
 No wrapper functions are added in this pass for the Round 2/3 shared
 mechanisms (extra_topics, gamified_round, plain coding): server.py already
@@ -73,6 +139,7 @@ mechanisms wrapped safely where no such cycle exists.
 from __future__ import annotations
 import random
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from companies import get_company
@@ -84,6 +151,59 @@ def get_config() -> Optional[Dict[str, Any]]:
     (the source of truth) -- so anyone opening this file can see the real
     OA shape without digging through the shared companies.py data blob."""
     return get_company("capgemini")
+
+
+# ---- Cross-attempt repetition tracking (added 2026-09, Phase 0 migration) --
+# Every draw_sectionN_questions function below used to be pure `rng.sample()`
+# over the whole pool it was handed, with zero seen-tracking -- a candidate
+# retaking Round 1 could see identical grammar/situational/reading/etc.
+# content. Same collection shape and get_seen_ids/mark_seen interface as
+# mcq_static_bank.py's tracker (deliberately not reinvented), keyed by
+# (user_id, section) where `section` matches this bank's own `section` field
+# values ("grammar_correction", "business_writing", ..., "ai_literacy") --
+# reusing that existing natural key rather than inventing a new one.
+_db = None  # set by init(db)
+
+
+def init(db) -> None:
+    global _db
+    _db = db
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def get_seen_ids(user_id: str, section: str) -> set:
+    if _db is None:
+        return set()
+    doc = await _db.capgemini_bank_seen.find_one({"user_id": user_id, "section": section})
+    return set(doc.get("question_ids", [])) if doc else set()
+
+
+async def mark_seen(user_id: str, section: str, question_ids: List[str]) -> None:
+    if _db is None or not question_ids:
+        return
+    await _db.capgemini_bank_seen.update_one(
+        {"user_id": user_id, "section": section},
+        {"$addToSet": {"question_ids": {"$each": question_ids}}, "$set": {"updated_at": _now_iso()}},
+        upsert=True,
+    )
+
+
+def _apply_seen_exclusion(pool: List[Dict[str, Any]], id_field: str, exclude_ids: Optional[set], target_count: int) -> List[Dict[str, Any]]:
+    """Shared graceful-fallback filter used by every draw_sectionN_questions
+    below: filter `pool` down to items NOT in `exclude_ids`, but only if the
+    filtered pool can still satisfy `target_count` -- otherwise fall back to
+    the full, unfiltered pool (allowing repeats) rather than under-serving
+    the section or raising a spurious ValueError caused by seen-exhaustion
+    rather than a genuinely too-small bank. Same "never a hard failure"
+    philosophy as mcq_static_bank's own shortfall handling."""
+    if not exclude_ids:
+        return pool
+    filtered = [item for item in pool if item.get(id_field) not in exclude_ids]
+    return filtered if len(filtered) >= target_count else pool
+
 
 # =============================================================================
 # ---- Section 1: Grammar & Sentence Correction ----
@@ -137,6 +257,7 @@ def draw_section1_questions(
     question_pool: List[Dict[str, Any]],
     rng: Optional[random.Random] = None,
     strip: bool = True,
+    exclude_ids: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Randomly selects exactly SECTION1_TARGET_QUESTION_COUNT (10)
     questions from `question_pool` (a list of capgemini_round1_bank docs
@@ -146,19 +267,24 @@ def draw_section1_questions(
     correct_option and explanation excluded. strip=False: full docs
     unchanged, for the generation/persist path -- see module docstring.
 
-    Raises ValueError if the pool has fewer than SECTION1_TARGET_QUESTION_COUNT
-    questions -- there's no partial-draw fallback here (unlike
-    mcq_static_bank.sample_static's graceful shortfall) since this bank is
-    a large, fixed, non-per-user-tracked pool; a shortfall here would mean
-    the bank itself is too small, not that a user has exhausted their view
-    of it."""
+    `exclude_ids` (added 2026-09, Phase 0 migration): question_ids this
+    candidate has already seen (see get_seen_ids/mark_seen above) --
+    excluded before sampling, but ONLY if doing so still leaves enough
+    questions to satisfy the target count; otherwise falls back to the full
+    pool (see _apply_seen_exclusion) rather than under-serving the section.
+
+    Raises ValueError if the (possibly seen-filtered) pool has fewer than
+    SECTION1_TARGET_QUESTION_COUNT questions -- this now only fires when the
+    bank itself is genuinely too small, not merely because one candidate has
+    seen everything (that case falls back to allowing repeats instead)."""
     rng = rng or random.Random()
-    if len(question_pool) < SECTION1_TARGET_QUESTION_COUNT:
+    pool = _apply_seen_exclusion(question_pool, "question_id", exclude_ids, SECTION1_TARGET_QUESTION_COUNT)
+    if len(pool) < SECTION1_TARGET_QUESTION_COUNT:
         raise ValueError(
             f"question pool too small to draw {SECTION1_TARGET_QUESTION_COUNT} questions "
-            f"(have {len(question_pool)})"
+            f"(have {len(pool)})"
         )
-    selected = rng.sample(question_pool, SECTION1_TARGET_QUESTION_COUNT)
+    selected = rng.sample(pool, SECTION1_TARGET_QUESTION_COUNT)
     if not strip:
         return [dict(q) for q in selected]
     return [_strip_grammar_for_client(q) for q in selected]
@@ -199,6 +325,7 @@ def draw_section2_questions(
     scenario_pool: List[Dict[str, Any]],
     rng: Optional[random.Random] = None,
     strip: bool = True,
+    exclude_ids: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Randomly selects exactly TARGET_SCENARIO_COUNT (2) scenarios from
     `scenario_pool` (a list of capgemini_round1_bank docs with
@@ -212,15 +339,19 @@ def draw_section2_questions(
     so it can't be stripped away before persisting (same "store full,
     strip at response" reasoning as Sections 1 and 3).
 
-    Raises ValueError if the pool has fewer than TARGET_SCENARIO_COUNT
-    scenarios."""
+    `exclude_ids` (added 2026-09): see draw_section1_questions -- same
+    seen-exclusion-with-graceful-fallback behavior via _apply_seen_exclusion.
+
+    Raises ValueError if the (possibly seen-filtered) pool has fewer than
+    TARGET_SCENARIO_COUNT scenarios."""
     rng = rng or random.Random()
-    if len(scenario_pool) < TARGET_SCENARIO_COUNT:
+    pool = _apply_seen_exclusion(scenario_pool, "scenario_id", exclude_ids, TARGET_SCENARIO_COUNT)
+    if len(pool) < TARGET_SCENARIO_COUNT:
         raise ValueError(
             f"scenario pool too small to draw {TARGET_SCENARIO_COUNT} scenarios "
-            f"(have {len(scenario_pool)})"
+            f"(have {len(pool)})"
         )
-    selected = rng.sample(scenario_pool, TARGET_SCENARIO_COUNT)
+    selected = rng.sample(pool, TARGET_SCENARIO_COUNT)
     if not strip:
         return [dict(s) for s in selected]
     return [_strip_business_writing_for_client(s) for s in selected]
@@ -377,6 +508,7 @@ def draw_section3_questions(
     question_pool: List[Dict[str, Any]],
     rng: Optional[random.Random] = None,
     strip: bool = True,
+    exclude_ids: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Randomly selects exactly SECTION3_TARGET_QUESTION_COUNT (6)
     questions from `question_pool` (a list of capgemini_round1_bank docs
@@ -386,16 +518,20 @@ def draw_section3_questions(
     options). strip=False: full docs unchanged, for the generation/persist
     path.
 
-    Raises ValueError if the pool has fewer than SECTION3_TARGET_QUESTION_COUNT
-    questions, same reasoning as Section 1's draw function -- this is a
-    fixed bank-size guard, not a per-user shortfall case."""
+    `exclude_ids` (added 2026-09): see draw_section1_questions -- same
+    seen-exclusion-with-graceful-fallback behavior via _apply_seen_exclusion.
+
+    Raises ValueError if the (possibly seen-filtered) pool has fewer than
+    SECTION3_TARGET_QUESTION_COUNT questions, same reasoning as Section 1's
+    draw function -- this now only fires on a genuinely too-small bank."""
     rng = rng or random.Random()
-    if len(question_pool) < SECTION3_TARGET_QUESTION_COUNT:
+    pool = _apply_seen_exclusion(question_pool, "question_id", exclude_ids, SECTION3_TARGET_QUESTION_COUNT)
+    if len(pool) < SECTION3_TARGET_QUESTION_COUNT:
         raise ValueError(
             f"question pool too small to draw {SECTION3_TARGET_QUESTION_COUNT} questions "
-            f"(have {len(question_pool)})"
+            f"(have {len(pool)})"
         )
-    selected = rng.sample(question_pool, SECTION3_TARGET_QUESTION_COUNT)
+    selected = rng.sample(pool, SECTION3_TARGET_QUESTION_COUNT)
     if not strip:
         return [dict(q) for q in selected]
     return [_strip_situational_for_client(q) for q in selected]
@@ -419,9 +555,21 @@ def draw_section3_questions(
 SECTION4_TARGET_QUESTION_COUNT = 4
 
 
+def _section4_shapes(one_q: List[Dict[str, Any]], two_q: List[Dict[str, Any]]) -> List[str]:
+    shapes = []
+    if len(one_q) >= 4:
+        shapes.append("four_ones")
+    if len(one_q) >= 2 and len(two_q) >= 1:
+        shapes.append("two_ones_one_two")
+    if len(two_q) >= 2:
+        shapes.append("two_twos")
+    return shapes
+
+
 def draw_section4_questions(
     passage_pool: List[Dict[str, Any]],
     rng: Optional[random.Random] = None,
+    exclude_ids: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Randomly selects passages from `passage_pool` such that the total
     number of questions across the selected passages is exactly
@@ -435,6 +583,15 @@ def draw_section4_questions(
     given the pool's current composition), then specific passages are
     sampled at random within that shape.
 
+    `exclude_ids` (added 2026-09): passage_ids this candidate has already
+    seen. Unlike the simple item-count sections above, "enough pool left"
+    here means "at least one shape is still assemblable" (not just a raw
+    count), so this doesn't reuse _apply_seen_exclusion directly -- same
+    graceful-fallback principle, applied to this section's own shape math:
+    excluded only if the seen-filtered pool can still assemble some shape,
+    otherwise falls back to the full pool (allowing a repeat passage) rather
+    than under-serving or raising.
+
     Does not mutate or strip any passage content (e.g. correct_option) --
     that's the caller's responsibility when preparing a client-facing
     response, same as every other bank in this codebase.
@@ -442,16 +599,17 @@ def draw_section4_questions(
     Raises ValueError if the pool doesn't have enough passages of either
     type to assemble any valid 4-question combination."""
     rng = rng or random.Random()
-    one_q = [p for p in passage_pool if len(p.get("questions", [])) == 1]
-    two_q = [p for p in passage_pool if len(p.get("questions", [])) == 2]
+    pool = passage_pool
+    if exclude_ids:
+        filtered = [p for p in passage_pool if p.get("passage_id") not in exclude_ids]
+        f_one_q = [p for p in filtered if len(p.get("questions", [])) == 1]
+        f_two_q = [p for p in filtered if len(p.get("questions", [])) == 2]
+        if _section4_shapes(f_one_q, f_two_q):
+            pool = filtered
 
-    shapes = []
-    if len(one_q) >= 4:
-        shapes.append("four_ones")
-    if len(one_q) >= 2 and len(two_q) >= 1:
-        shapes.append("two_ones_one_two")
-    if len(two_q) >= 2:
-        shapes.append("two_twos")
+    one_q = [p for p in pool if len(p.get("questions", [])) == 1]
+    two_q = [p for p in pool if len(p.get("questions", [])) == 2]
+    shapes = _section4_shapes(one_q, two_q)
     if not shapes:
         raise ValueError(
             f"passage pool too small to assemble {SECTION4_TARGET_QUESTION_COUNT} questions "
@@ -554,6 +712,7 @@ def draw_section5_questions(
     clip_pool: List[Dict[str, Any]],
     rng: Optional[random.Random] = None,
     strip: bool = True,
+    exclude_ids: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Randomly selects clips from `clip_pool` such that the total number of
     questions across the selected clips is exactly SECTION5_TARGET_QUESTION_
@@ -568,22 +727,27 @@ def draw_section5_questions(
     for the generation/persist path -- matches Sections 1-3's strip=False
     convention when called from server.py.
 
+    `exclude_ids` (added 2026-09): clip_ids this candidate has already seen
+    -- same shape-aware graceful-fallback as draw_section4_questions (only
+    applied if the seen-filtered, generated-only pool can still assemble
+    some shape; otherwise falls back to allowing a repeat clip).
+
     Raises ValueError if there aren't enough GENERATED clips (regardless of
     total pool size) to assemble any valid 4-question combination -- the
     error message says explicitly whether the shortfall is real content
     scarcity or just missing audio, since those need very different fixes."""
     rng = rng or random.Random()
     generated_pool = [c for c in clip_pool if c.get("tts_status") == "generated"]
+    if exclude_ids:
+        filtered = [c for c in generated_pool if c.get("clip_id") not in exclude_ids]
+        f_one_q = [c for c in filtered if len(c.get("questions", [])) == 1]
+        f_two_q = [c for c in filtered if len(c.get("questions", [])) == 2]
+        if _section4_shapes(f_one_q, f_two_q):
+            generated_pool = filtered
+
     one_q = [c for c in generated_pool if len(c.get("questions", [])) == 1]
     two_q = [c for c in generated_pool if len(c.get("questions", [])) == 2]
-
-    shapes = []
-    if len(one_q) >= 4:
-        shapes.append("four_ones")
-    if len(one_q) >= 2 and len(two_q) >= 1:
-        shapes.append("two_ones_one_two")
-    if len(two_q) >= 2:
-        shapes.append("two_twos")
+    shapes = _section4_shapes(one_q, two_q)
     if not shapes:
         total_in_pool = len(clip_pool)
         raise ValueError(
@@ -865,6 +1029,7 @@ def draw_section6_questions(
     item_pool: List[Dict[str, Any]],
     rng: Optional[random.Random] = None,
     strip: bool = True,
+    exclude_ids: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Selects exactly 1 read_aloud item + 1 respond_to_prompt item from
     `item_pool` (a list of capgemini_round1_bank docs with
@@ -878,6 +1043,13 @@ def draw_section6_questions(
     later, same "store full, strip at response" reasoning as every other
     section here.
 
+    `exclude_ids` (added 2026-09): item_ids this candidate has already seen,
+    applied independently per item_type (each type's own graceful fallback:
+    only excluded if that type's pool still has at least 1 item left,
+    otherwise falls back to that type's full pool -- with only 35 items per
+    type, a long candidate history exhausting one type shouldn't be able to
+    starve the other).
+
     Raises ValueError, loudly and separately per type, if either pool is
     empty -- with 35/35 in the live bank this should never happen, but a
     silent partial draw (e.g. 2 read_aloud, 0 respond_to_prompt) would be a
@@ -885,6 +1057,13 @@ def draw_section6_questions(
     rng = rng or random.Random()
     read_aloud_pool = [it for it in item_pool if it.get("item_type") == "read_aloud"]
     respond_pool = [it for it in item_pool if it.get("item_type") == "respond_to_prompt"]
+    if exclude_ids:
+        f_read = [it for it in read_aloud_pool if it.get("item_id") not in exclude_ids]
+        f_respond = [it for it in respond_pool if it.get("item_id") not in exclude_ids]
+        if f_read:
+            read_aloud_pool = f_read
+        if f_respond:
+            respond_pool = f_respond
     if not read_aloud_pool:
         raise ValueError("read_aloud pool is empty -- cannot draw Section 6 (need exactly 1 read_aloud item)")
     if not respond_pool:
@@ -894,3 +1073,116 @@ def draw_section6_questions(
     if not strip:
         return [dict(it) for it in selected]
     return [_strip_spoken_sim_for_client(it) for it in selected]
+
+
+# =============================================================================
+# ---- Section 7: Round 2 -- AI Literacy ----
+# =============================================================================
+# Draw logic only. Scenario content lives in Mongo (`capgemini_round2_bank`,
+# NOT capgemini_round1_bank -- this is genuinely Round 2 content, see the
+# Round 2 paragraph in this module's top docstring), authored + staged via
+# the scratchpad pipeline and inserted separately (100 questions across 19
+# scenario clusters: 18 with 5 nested questions, 1 with 10).
+#
+# Schema differs from every Round 1 section: each scenario doc is
+# {scenario_id, batch_number, domain, questions: [{question_id, prompt,
+# topic_tag, options: {A,B,C,D}, correct_option, explanation}, ...]} --
+# options is a LETTER-KEYED DICT (matching how this bank was authored), not
+# the plain list mcq_static_bank/Round 1 use. Left as-is rather than
+# reshaped, since the draw layer has no reason to touch content shape.
+#
+# WIRED (2026-09/10, Round 2 wiring pass): server.py's "capgemini_round2_
+# ai_literacy" branch (both generation and grading) and a companies.py
+# section entry now exist -- see this module's top docstring. Target count
+# raised from 5 to 20 to match the confirmed session composition (20 Q/
+# session); the accumulate-until-target algorithm below already
+# generalizes to any target (its own docstring says so), so this was a
+# one-line constant change, not a structural one -- confirmed against the
+# bank's actual shape (100 questions, 18 scenarios of 5 + 1 of 10) leaves
+# ample combinations that sum to exactly 20.
+
+SECTION7_TARGET_QUESTION_COUNT = 20  # confirmed session composition: 20 Q/session
+
+SECTION7_SCENARIO_CLIENT_SAFE_FIELDS = ("scenario_id", "domain")
+SECTION7_QUESTION_CLIENT_SAFE_FIELDS = ("question_id", "prompt", "topic_tag", "options")
+
+
+def _strip_ai_literacy_for_client(scenario: Dict[str, Any]) -> Dict[str, Any]:
+    """Whitelist projection -- module-internal convenience strip (used when
+    this function is called directly with strip=True), mirroring every
+    other section's own _strip_*_for_client helper. correct_option and
+    explanation are excluded by construction, same as every other section
+    here; `options` itself (the letter-keyed dict of answer text) is NOT
+    answer-revealing on its own and is passed through unchanged."""
+    item = {k: scenario[k] for k in SECTION7_SCENARIO_CLIENT_SAFE_FIELDS if k in scenario}
+    item["questions"] = [
+        {k: q[k] for k in SECTION7_QUESTION_CLIENT_SAFE_FIELDS if k in q}
+        for q in (scenario.get("questions") or [])
+    ]
+    return item
+
+
+def draw_section7_questions(
+    scenario_pool: List[Dict[str, Any]],
+    rng: Optional[random.Random] = None,
+    strip: bool = True,
+    exclude_ids: Optional[set] = None,
+) -> List[Dict[str, Any]]:
+    """Randomly selects scenarios from `scenario_pool` such that the total
+    number of nested questions across the selected scenarios is exactly
+    SECTION7_TARGET_QUESTION_COUNT (5) -- never more, never fewer.
+
+    Unlike Sections 4/5's fixed 1-or-2-question shapes, this bank's
+    per-scenario question count isn't uniform (18 scenarios have 5, one has
+    10) -- so rather than enumerate shapes, this shuffles scenarios and
+    accumulates them until the running total reaches or exceeds the target,
+    then TRIMS the last scenario's own `questions` list down to exactly
+    however many are still needed (a random sub-sample of that scenario's
+    questions, on a copy -- never mutates the pool doc). This generalizes
+    to any per-scenario question count without needing a new shape case
+    every time the bank's composition changes.
+
+    `exclude_ids` (added 2026-09, built in from the start per Task 2 --
+    unlike Round 1's sections, this one never shipped without tracking):
+    scenario_ids this candidate has already seen, excluded before
+    accumulating -- but only if the seen-filtered pool's total question
+    count can still reach the target; otherwise falls back to the full
+    pool (allowing a repeat scenario) rather than under-serving or raising,
+    same graceful-fallback principle as every other section here.
+
+    Raises ValueError if the pool's total question count (regardless of
+    seen-status) can't reach SECTION7_TARGET_QUESTION_COUNT."""
+    rng = rng or random.Random()
+    pool = scenario_pool
+    if exclude_ids:
+        filtered = [s for s in scenario_pool if s.get("scenario_id") not in exclude_ids]
+        if sum(len(s.get("questions", [])) for s in filtered) >= SECTION7_TARGET_QUESTION_COUNT:
+            pool = filtered
+
+    total_available = sum(len(s.get("questions", [])) for s in pool)
+    if total_available < SECTION7_TARGET_QUESTION_COUNT:
+        raise ValueError(
+            f"scenario pool too small to assemble {SECTION7_TARGET_QUESTION_COUNT} questions "
+            f"(have {total_available} questions across {len(pool)} scenarios)"
+        )
+
+    shuffled = list(pool)
+    rng.shuffle(shuffled)
+    selected: List[Dict[str, Any]] = []
+    running_total = 0
+    for scenario in shuffled:
+        if running_total >= SECTION7_TARGET_QUESTION_COUNT:
+            break
+        needed = SECTION7_TARGET_QUESTION_COUNT - running_total
+        questions = scenario.get("questions") or []
+        if len(questions) > needed:
+            scenario = {**scenario, "questions": rng.sample(questions, needed)}
+        selected.append(scenario)
+        running_total += len(scenario["questions"])
+
+    assert running_total == SECTION7_TARGET_QUESTION_COUNT, (
+        f"internal error: drew {running_total} questions, expected {SECTION7_TARGET_QUESTION_COUNT}"
+    )
+    if not strip:
+        return [dict(s) for s in selected]
+    return [_strip_ai_literacy_for_client(s) for s in selected]

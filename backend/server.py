@@ -12,11 +12,13 @@ import re
 import random
 import difflib
 import asyncio
+import contextlib
 import uuid
 import hmac
 import hashlib
 import logging
 import json
+import time
 import subprocess
 import tempfile
 import bcrypt
@@ -49,13 +51,77 @@ from pydantic import BaseModel, EmailStr, Field
 import pdfplumber
 
 from companies import COMPANIES, DEPARTMENTS, get_company, get_department
-from services.code_runner import run_code as _lang_run_code, run_tests as _lang_run_tests, SUPPORTED_LANGUAGES
+
+# Companies whose EVERY section is marked "source": "static_bank_only"
+# (today: only TCS NQT) -- derived from the registry itself, not
+# hardcoded, so marking a future company the same way in companies.py
+# automatically extends the per-attempt AIForbiddenError guard (see
+# submit_section/finish_oa_part_a/final_report below) and
+# check_tcs_static_feasibility's sibling checks without a second place to
+# update. A company with NO sections at all is deliberately excluded
+# (all() on an empty generator is vacuously True, which would be wrong here).
+_STATIC_BANK_ONLY_COMPANY_IDS = {
+    c["id"] for c in COMPANIES
+    if c.get("sections") and all(s.get("source") == "static_bank_only" for s in c["sections"])
+}
+
+# Companies with no interview phase at all. Checked at the very top of
+# /interview/start for BOTH start paths (attempt_id and company_id) so a
+# TCS attempt_id can no longer reach the generic interview planner either
+# -- before this (2026-10) nothing actually blocked that, it just happened
+# to never be exercised. Deliberately a separate set from
+# _STATIC_BANK_ONLY_COMPANY_IDS above: that one is about where OA questions
+# come from, this one is about whether a POST-OA interview exists.
+#
+# TCS NQT used to be a permanent, unconditional member of this set (its
+# interview didn't exist yet). It is now flag-gated instead (2026-10,
+# TCS_INTERVIEW_ENABLED) -- see _no_interview_company_ids() below, which
+# BOTH call sites of this set use instead of the set itself, so the flag is
+# read live rather than baked in at import time. The static set itself is
+# empty today (no company besides the now-flag-gated TCS lacks an interview
+# phase), but kept as a named, extensible set rather than deleted outright
+# in case a future company needs the same unconditional block.
+_NO_INTERVIEW_COMPANY_IDS: set = set()
+
+
+def _no_interview_company_ids() -> set:
+    """`_NO_INTERVIEW_COMPANY_IDS`, plus "tcs-nqt" whenever
+    TCS_INTERVIEW_ENABLED is off (the default) -- read live on every call,
+    same live-read philosophy as _auth_disabled()/tcs_interview_enabled(),
+    so flipping the env var takes effect immediately (no process restart,
+    no caching). With the flag on, "tcs-nqt" is no longer in this set at
+    all, and its interview becomes reachable."""
+    ids = set(_NO_INTERVIEW_COMPANY_IDS)
+    if not tcs_interview_enabled():
+        ids.add("tcs-nqt")
+    return ids
+from services import capgemini_tiers
+from services import tcs_tiers
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_recruitment_process import (
+    apply_coding_profile as _tcs_apply_coding_profile,
+    draw_tcs_foundation_and_advanced as _tcs_draw_foundation_and_advanced,
+    draw_tcs_coding_problems as _tcs_draw_coding_problems,
+    check_tcs_static_feasibility as _tcs_check_static_feasibility,
+    TCSBankBlockedError as _TCSBankBlockedError,
+)
+from services.code_runner import (
+    run_code as _lang_run_code,
+    run_tests as _lang_run_tests,
+    run_tests_with_canary_check as _lang_run_tests_with_canary_check,
+    DEFAULT_TIMEOUT as _CODE_RUNNER_DEFAULT_TIMEOUT,
+    SUPPORTED_LANGUAGES,
+)
 from banks.problem_bank import sample_problems as _sample_problems
+from banks import problem_bank
+from banks import debugging_bank
+from banks import ai_assisted_bank
 from services.ai_service import (
     call_json,
     call_json_gpt,
     call_text,
     SONNET,
+    stage_sufficiency_prompt,
+    bug_explanation_grading_prompt,
     resume_prompt,
     mcq_prompt,
     coding_prompt,
@@ -78,6 +144,17 @@ from services.ai_service import (
     INTERVIEW_SYSTEM,
     GRADING_INJECTION_DEFENSE,
     flag_suspicious_grading,
+    spark_followup_prompt,
+    spark_project_flags_prompt,
+    spark_dsa_flags_prompt,
+    dave_project2_prompt,
+    dave_project2_flags_prompt,
+    dave_dsa_flags_prompt,
+    dave_complexity_prompt,
+    dave_cs_flags_prompt,
+    dave_hr_flags_prompt,
+    AIForbiddenError,
+    forbid_ai_calls,
 )
 from banks import mcq_pool
 from banks import mcq_static_bank
@@ -90,8 +167,29 @@ from core import auth0_middleware
 # questions(...) etc.) were updated to capgemini_recruitment_process.<name>
 # accordingly; the function names themselves are unchanged.
 from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini import (
+    capgemini_interview,
     capgemini_recruitment_process,
 )
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini.capgemini_interview import (
+    commit as capgemini_commit,
+)
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.capgemini.capgemini_interview import (
+    humanize as capgemini_humanize,
+    pushback as capgemini_pushback,
+    dsa_hints as capgemini_dsa_hints,
+)
+# TCS NQT interview (2026-10, TCS_INTERVIEW_ENABLED, default OFF -- see
+# tcs_interview_enabled() below): a brand-new module beside the Capgemini
+# interview package, not a refactor of it -- zero edits to any file under
+# departments/.../capgemini/ anywhere in this feature (confirmed by
+# `git diff <base>..HEAD -- backend/departments/*/capgemini/` being empty).
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs import (
+    tcs_interview,
+)
+from departments.computer_science_and_it.group1_it_services_mass_recruiters.tcs.tcs_interview import (
+    orchestration as tcs_orchestration,
+)
+from collections import Counter
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -215,12 +313,21 @@ def make_jwt(user_id: str) -> str:
 # a separate concern -- account creation / session issuance, not route
 # gating) and still create accounts and set session cookies exactly as
 # before. But since NOTHING reads that cookie/JWT anymore, those flows are
-# now functionally dead ends for reaching any Depends(require_user) route --
+# functional dead ends for reaching any Depends(require_user) route --
 # including /auth/me, which the frontend's OWN AuthProvider polls to
-# determine login state. The frontend's Protected/useAuth() (App.js) was
-# NOT updated to use Auth0 in this pass (out of scope here) -- so a user who
-# logs in via the app's own /login page will still see protected pages
-# render client-side, but every API call they make will now 401.
+# determine login state.
+#
+# UPDATE (2026-10, frontend "wire /login to Auth0" pass): the real /login
+# and /signup pages now call Auth0's loginWithRedirect() as their primary
+# path (the old Google-session/email-password UI is still there, collapsed
+# under an "Other sign-in options" disclosure, but is no longer the
+# default -- it still only reaches the dead-end flows above). The
+# frontend's own AuthProvider/useAuth() still drives Header/Dashboard/
+# OnboardingModal/etc., but is now kept correctly in sync with Auth0 by
+# frontend/src/auth/Auth0TokenSync.jsx, which re-fetches /auth/me once
+# Auth0 resolves a real access token -- so a user who signs in via Auth0
+# now gets a working session everywhere, including every
+# Depends(require_user) route.
 # ---- Test-only auth bypass (2026-08, E2E click-through testing) -----------
 # Exists so a scripted Playwright run can authenticate as a designated
 # synthetic user WITHOUT a real Auth0 login (no test Auth0 tenant/user
@@ -263,7 +370,50 @@ if _test_bypass_active():
     logger.warning("=" * 70)
 
 
+# ---- "No login required yet" switch (2026-10, temporary, owner-requested) -
+# The real app is still under active development and the Auth0 tenant isn't
+# configured correctly yet (frontend/.env's REACT_APP_AUTH0_CLIENT_ID
+# doesn't match any application in that tenant -- confirmed via Auth0's own
+# "Unknown client" error). Rather than fight that config while building the
+# rest of the app, EVERY request is treated as one fixed synthetic dev user
+# when DISABLE_AUTH is set -- no token, no login, no signup needed at all.
+# Deliberately separate from the Playwright test-bypass above (different
+# env var, different synthetic sub, no token-matching at all) so re-
+# enabling real auth later is simply: unset DISABLE_AUTH (backend) and
+# REACT_APP_DISABLE_AUTH (frontend, see App.js's `Protected`) -- no code
+# change needed on either side. Same safety shape as the test bypass: reads
+# the env var fresh on every request (never cached), and is unset in every
+# committed .env / real deployment, so omission is what keeps it off.
+_DISABLE_AUTH_USER_SUB = "dev-no-auth|local"
+
+
+def _auth_disabled() -> bool:
+    return os.environ.get("DISABLE_AUTH", "").strip().lower() in ("1", "true", "yes")
+
+
+# ---- TCS NQT interview feature flag (2026-10, default OFF) ----------------
+# Same exact env-var-reading convention as _auth_disabled() above (read live
+# on every call, never cached at import time; "1"/"true"/"yes" turn it on --
+# no "on"/"0" distinction, matching that function precisely rather than the
+# broader _FEATURE_FLAG_ON_VALUES set other flags in this file use). With
+# this OFF (the default), every new TCS interview hook below is a no-op and
+# tcs-nqt's /interview/start behaves EXACTLY as it did before this feature
+# existed (blocked, same "interview_not_available" response). ALL new TCS
+# interview behaviour in this file is gated behind this one flag.
+def tcs_interview_enabled() -> bool:
+    return os.environ.get("TCS_INTERVIEW_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
+if _auth_disabled():
+    logger.warning("=" * 70)
+    logger.warning("AUTH IS COMPLETELY DISABLED (DISABLE_AUTH=1). Every request is the same")
+    logger.warning("local dev user -- TEMPORARY, remove before any real deployment.")
+    logger.warning("=" * 70)
+
+
 async def _resolve_auth0_sub(authorization: Optional[str]) -> str:
+    if _auth_disabled():
+        return _DISABLE_AUTH_USER_SUB
     if _test_bypass_active():
         test_token = os.environ.get("TEST_AUTH_TOKEN", "")
         if (
@@ -883,7 +1033,7 @@ def _get_hidden_answer_key(attempt: dict, section_key: str, question_id: str) ->
     return (attempt.get("_hidden_answer_keys") or {}).get(section_key, {}).get(str(question_id))
 
 
-async def _generate_extra_topics(company_name: str, extra_topics: List[dict], diff: Optional[str], user_id: str) -> List[dict]:
+async def _generate_extra_topics(company_name: str, extra_topics: List[dict], diff: Optional[str], user_id: str, static_only: bool = False) -> List[dict]:
     """Shared per-topic pool-or-live-verify loop — pulled out of the
     pseudocode branch's extra_topics handling (Capgemini's OOPS/DBMS/OS/CN
     fix) so a plain topic-only MCQ section (e.g. LTIMindtree's Computer
@@ -894,13 +1044,32 @@ async def _generate_extra_topics(company_name: str, extra_topics: List[dict], di
     changed 2026-07-21 from the original 50/50): each topic pulls ceil(tcount*0.9)
     from the static bank (excluding this candidate's already-seen questions) and
     backfills the rest — including any static shortfall — from the existing
-    pool-or-live-verify path, shuffled together before being tagged and returned."""
+    pool-or-live-verify path, shuffled together before being tagged and returned.
+
+    static_only=True (Capgemini Round 2 technical): no LLM call at all. Each
+    topic is served from the static bank; any shortfall is filled with the
+    candidate's least-recently-seen static questions, with a warning logged."""
     data: List[dict] = []
     for t in extra_topics:
         tkey = t.get("key")
         tname = t.get("name", tkey)
         tcount = t.get("count", 5)
         if not tkey:
+            continue
+        if static_only:
+            if tkey not in mcq_static_bank.CANONICAL_TOPICS:
+                logger.warning("static-only draw: topic %r has no static bank; %d questions unfilled", tkey, tcount)
+                continue
+            got, reused, unfilled = await mcq_static_bank.sample_static_with_reuse(user_id, tkey, tcount)
+            if reused or unfilled:
+                logger.warning(
+                    "static bank shortfall for topic %r: requested %d, reused %d, unfilled %d (company %s)",
+                    tkey, tcount, reused, unfilled, company_name,
+                )
+            random.shuffle(got)
+            for q in got:
+                q["topic"] = tname
+            data = data + got
             continue
         static_items: List[dict] = []
         live_n = tcount
@@ -971,6 +1140,12 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         # expected_output" bug class entirely.
         needs_buggy = bool(section.get("automata_fix"))
         difficulty_targets = section.get("difficulty_targets")
+        # Cross-attempt repetition fix (2026-09, Phase 0 migration): merge
+        # this candidate's already-seen problem ids into the exclusion set
+        # from the start, so a retaken assessment doesn't repeat a coding
+        # problem. `exclude_ids` previously only prevented duplicates WITHIN
+        # one draw (the per-difficulty-target loop below).
+        seen_ids = await problem_bank.get_seen_ids(user_id)
         if difficulty_targets:
             # Per-problem difficulty (e.g. Wipro: Problem 1 easy-medium,
             # Problem 2 hard) — sample each individually rather than one
@@ -979,7 +1154,7 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             # both easy_medium and hard's top-up) can't draw the same
             # problem twice across separate calls.
             picks = []
-            excluded: set = set()
+            excluded: set = set(seen_ids)
             for t in difficulty_targets:
                 got = _sample_problems(1, difficulty_target=t, needs_buggy=needs_buggy, exclude_ids=excluded)
                 picks.extend(got)
@@ -988,12 +1163,91 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
                 extra = _sample_problems(count - len(picks), difficulty_target=diff, needs_buggy=needs_buggy, exclude_ids=excluded)
                 picks.extend(extra)
         else:
-            picks = _sample_problems(count, difficulty_target=diff, needs_buggy=needs_buggy)
+            picks = _sample_problems(count, difficulty_target=diff, needs_buggy=needs_buggy, exclude_ids=seen_ids)
+        if len(picks) < count:
+            # Graceful shortfall: seen-exclusion left too few UNSEEN problems
+            # to satisfy `count` (small 29-problem bank, long candidate
+            # history) -- backfill by allowing repeats rather than
+            # under-serving the section, same "never a hard failure"
+            # philosophy mcq_static_bank's shortfall handling already uses.
+            picked_ids = {p.get("id") for p in picks if p.get("id")}
+            extra = _sample_problems(count - len(picks), difficulty_target=diff, needs_buggy=needs_buggy, exclude_ids=picked_ids)
+            picks.extend(extra)
         # Normalize ids to strings (bank ids are already strings but be safe)
         for i, p in enumerate(picks):
             p.setdefault("id", f"q{i+1}")
             p["id"] = str(p["id"])
+        await problem_bank.mark_seen(user_id, [p["id"] for p in picks])
         return picks
+    elif stype == "debugging":
+        # Round 3: Debugging Assessment. Draws exactly 1 problem via
+        # debugging_bank.sample_debug_session() (2026-09, R3/R4-config-
+        # correction pass: was 2 problems from 2 different topics --
+        # reversed per explicit instruction; see that function's own
+        # docstring). NOT the same code path as /dev/debugging-preview,
+        # which uses its own hardcoded 2-problem sample array and never
+        # calls sample_debug_session() at all -- confirmed via audit
+        # before this change, so this change has zero effect on it.
+        # Cross-attempt repetition uses debugging_bank's OWN seen tracker
+        # (debugging_bank_seen collection), kept deliberately separate from
+        # problem_bank's tracker -- this is its own ~25-item pool, not a
+        # sub-split of the 104-item coding bank (see debugging_bank.py's
+        # own comment on this).
+        seen_ids = await debugging_bank.get_seen_ids(user_id)
+        picks = debugging_bank.sample_debug_session(exclude_ids=seen_ids)
+        await debugging_bank.mark_seen(user_id, [p["id"] for p in picks])
+        return picks
+    elif stype == "ai_assisted":
+        # Round 4: AI-Assisted Coding. Draws exactly 1 problem via
+        # ai_assisted_bank.sample_one() -- its own seen tracker
+        # (ai_assisted_bank_seen collection), same "own pool, own
+        # tracker" convention as Round 3's debugging_bank. UNLIKE every
+        # other branch here, this ALSO creates the live conversation's
+        # session doc right now (not lazily on first message) in its own
+        # db.ai_assisted_sessions collection, attempt+section_key+user
+        # scoped -- so the conversation is ready the instant the
+        # candidate reaches this section. This section's `questions`
+        # deliberately holds only an OPAQUE {session_id, problem_id}
+        # pointer, never problem/answer content -- see companies.py's
+        # round4_ai_assisted comment and _strip_ai_assisted_problem's
+        # docstring for why (flawed_code/corrected_code/bug_explanation_
+        # key_points must never reach get_oa's response; they only ever
+        # travel through session["revealed_code"], server-controlled).
+        #
+        # Deliberately NOT calling into /dev/ai-assisted/start's route
+        # body (which builds an equivalent but NOT attempt-scoped session
+        # doc for the standalone dev-preview) -- kept as two independent
+        # code paths, same "dev route stays untouched, real flow is its
+        # own thing" separation Round 3 used for /api/dev/debugging/run
+        # vs. the real coding/debugging dispatch.
+        seen_ids = await ai_assisted_bank.get_seen_ids(user_id)
+        problem = ai_assisted_bank.sample_one(exclude_ids=seen_ids)
+        await ai_assisted_bank.mark_seen(user_id, [problem["id"]])
+        session_id = new_id("aas")
+        welcome = f"Let's talk through \"{problem['title']}\". " + _AI_ASSISTED_STAGE_OPENERS["understand"]
+        session = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "attempt_id": attempt_id,
+            "section_key": section["key"],
+            "company_name": company_name,
+            "problem_id": problem["id"],
+            "problem": _strip_ai_assisted_problem(problem),
+            "current_stage": "understand",
+            "transcript": [{"role": "ai", "stage": "understand", "text": welcome, "at": iso(now_utc())}],
+            "stage_attempts": {"understand": 0, "approach": 0, "complexity": 0, "explain_bug": 0},
+            "consent_given": None,
+            "self_review_result": None,
+            "bug_explanation_text": None,
+            "bug_explanation_score": None,
+            "revealed_code": None,
+            "final_outcome": None,
+            "status": "in_progress",
+            "created_at": iso(now_utc()),
+            "completed_at": None,
+        }
+        await db.ai_assisted_sessions.insert_one(session)
+        return [{"session_id": session_id, "problem_id": problem["id"]}]
     elif stype == "pseudocode":
         # Pseudocode sections go through the 3-stage ground-truth pipeline
         # (transpile-execute preferred; solver-agreement fallback). Ground
@@ -1010,9 +1264,22 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         # across pseudocode + all extra topics).
         extra_topics = section.get("extra_topics") or []
         pseudo_count = section.get("pseudocode_count", count) if extra_topics else count
-        data = await mcq_pool.fallback_live_verify(
-            company_name, section_name, section.get("key") or "pseudocode", pseudo_count, diff,
-        )
+        # 90/10 static-bank/live split (2026-09 Phase 0 migration), same
+        # pattern as every other canonical topic (mcq_static_bank.py) --
+        # "pseudocode" has 130 once-verified seeded questions instead of
+        # always calling the live 3-stage ground-truth pipeline. Live
+        # fallback (transpile-execute/solver-agreement) stays as the safety
+        # net for the 10% + any shortfall, kept deliberately rather than
+        # removed now, since 130 questions isn't yet proven enough depth to
+        # guarantee zero shortfalls across every company's pseudocode_count.
+        static_items, live_n = await mcq_static_bank.sample_mixed_static_part(user_id, "pseudocode", pseudo_count)
+        data = list(static_items)
+        if live_n > 0:
+            live_data = await mcq_pool.fallback_live_verify(
+                company_name, section_name, section.get("key") or "pseudocode", live_n, diff,
+            )
+            data.extend(live_data)
+        random.shuffle(data)
         for q in data:
             if isinstance(q, dict):
                 q["topic"] = "Pseudocode"
@@ -1118,6 +1385,23 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
         game_types_list = (config.get("gameTypes") if config else None) or ["deductive_grid"]
         # EVERY game type listed in gameTypes runs in EVERY session -- not a
         # random pick-1-of-N (that was the old model, replaced 2026-08).
+        #
+        # drawCount (2026-10, R5-random-draw pass): OPTIONAL per-company
+        # override -- when a company's gamified_round_config doc sets this
+        # (currently only Capgemini, drawCount=4), that many game TYPES are
+        # drawn at random from gameTypes for THIS session (no repeats within
+        # the draw, since random.sample draws without replacement), instead
+        # of running the full list. Every other company's config doc has no
+        # drawCount field, so `config.get("drawCount")` is None for them and
+        # this is a complete no-op -- game_types_list stays the full list,
+        # identical to pre-2026-10 behavior. Nothing downstream (grading's
+        # types_present, OARunner.jsx's groups) needs to know this happened:
+        # both already derive which types are "present" from the actual
+        # served puzzles, not from gameTypes' length, which is exactly what
+        # makes this safe to add here alone.
+        draw_count = (config.get("drawCount") if config else None)
+        if draw_count and 0 < draw_count < len(game_types_list):
+            game_types_list = random.sample(game_types_list, draw_count)
         # perType holds per-type tunables: subPuzzlesPerGame for the flat-list
         # types (deductive_grid/switch_challenge), instancesPerGame for
         # grid_challenge (always 1 -- it's one instance with internal blocks,
@@ -1219,12 +1503,23 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             {"section": "spoken_simulation"}, {"_id": 0},
         ).to_list(None)
 
-        grammar_items = capgemini_recruitment_process.draw_section1_questions(grammar_pool, strip=False)
-        business_items = capgemini_recruitment_process.draw_section2_questions(business_pool, strip=False)
-        situational_items = capgemini_recruitment_process.draw_section3_questions(situational_pool, strip=False)
-        reading_items = capgemini_recruitment_process.draw_section4_questions(reading_pool)
-        listening_items = capgemini_recruitment_process.draw_section5_questions(listening_pool, strip=False)
-        spoken_items = capgemini_recruitment_process.draw_section6_questions(spoken_pool, strip=False)
+        # Cross-attempt repetition fix (2026-09, Phase 0 migration): each
+        # draw call now gets this candidate's already-seen ids for that
+        # specific section, keyed by the same `section` value used in the
+        # queries above -- see capgemini_recruitment_process.get_seen_ids.
+        grammar_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "grammar_correction")
+        business_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "business_writing")
+        situational_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "situational_response")
+        reading_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "reading_comprehension")
+        listening_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "listening_comprehension")
+        spoken_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "spoken_simulation")
+
+        grammar_items = capgemini_recruitment_process.draw_section1_questions(grammar_pool, strip=False, exclude_ids=grammar_seen)
+        business_items = capgemini_recruitment_process.draw_section2_questions(business_pool, strip=False, exclude_ids=business_seen)
+        situational_items = capgemini_recruitment_process.draw_section3_questions(situational_pool, strip=False, exclude_ids=situational_seen)
+        reading_items = capgemini_recruitment_process.draw_section4_questions(reading_pool, exclude_ids=reading_seen)
+        listening_items = capgemini_recruitment_process.draw_section5_questions(listening_pool, strip=False, exclude_ids=listening_seen)
+        spoken_items = capgemini_recruitment_process.draw_section6_questions(spoken_pool, strip=False, exclude_ids=spoken_seen)
 
         for q in grammar_items:
             q["part"] = "grammar"
@@ -1245,7 +1540,70 @@ async def _generate_section_questions(company_name: str, section: dict, user_id:
             it["part"] = "spoken_sim"
             it["id"] = it["item_id"]
 
+        await capgemini_recruitment_process.mark_seen(user_id, "grammar_correction", [q["question_id"] for q in grammar_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "business_writing", [q["scenario_id"] for q in business_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "situational_response", [q["question_id"] for q in situational_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "reading_comprehension", [p["passage_id"] for p in reading_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "listening_comprehension", [c["clip_id"] for c in listening_items])
+        await capgemini_recruitment_process.mark_seen(user_id, "spoken_simulation", [it["item_id"] for it in spoken_items])
+
         data = grammar_items + business_items + situational_items + reading_items + listening_items + spoken_items
+    elif stype == "capgemini_round2_ai_literacy":
+        # Round 2 -- AI Literacy (2026-09, Phase 0 migration, Task 2). Content
+        # is DRAWN from capgemini_round2_bank (separate collection from
+        # Round 1's capgemini_round1_bank), not LLM-generated -- same "store
+        # full, strip at response" pattern as capgemini_round1 above.
+        # NOT YET reachable in practice: companies.py's Capgemini Round 2
+        # config doesn't have a section with this `type` yet (see this
+        # module's top docstring) -- this branch exists, tested, so that
+        # decision (where in Round 2, what count/weight) can be made
+        # separately without ever having shipped un-wired dispatch code in
+        # between, same precedent as Section 5 before its own wiring pass.
+        ai_literacy_pool = await db.capgemini_round2_bank.find({}, {"_id": 0}).to_list(None)
+        ai_literacy_seen = await capgemini_recruitment_process.get_seen_ids(user_id, "ai_literacy")
+        ai_literacy_items = capgemini_recruitment_process.draw_section7_questions(
+            ai_literacy_pool, strip=False, exclude_ids=ai_literacy_seen,
+        )
+        for s in ai_literacy_items:
+            s["part"] = "ai_literacy"
+            s["id"] = s["scenario_id"]
+        await capgemini_recruitment_process.mark_seen(user_id, "ai_literacy", [s["scenario_id"] for s in ai_literacy_items])
+        data = ai_literacy_items
+    elif stype == "capgemini_round2_technical":
+        # Round 2 -- Technical Assessment (2026-09/10, Round 2 wiring pass).
+        # Fixed 20-question, 4-way split: 5 from "programming_logic", 5 from
+        # "dsa", 5 mixed across oops/dbms/swe_fundamentals (balanced,
+        # randomized per draw -- not a fixed per-topic count, unlike a plain
+        # extra_topics section), and 5 mixed across cn/modern_engineering
+        # (weighted 3:2 toward cn). All four source topics are now in
+        # mcq_static_bank.CANONICAL_TOPICS (see that module), so this
+        # delegates the actual draw -- static/live 90/10 split, seen-
+        # tracking, shuffling -- to the SAME shared _generate_extra_topics
+        # helper OOPS/DBMS/OS/CN already go through elsewhere in this file;
+        # the only new logic here is picking each mixed pool's per-topic
+        # counts fresh on every call, via weighted random.choices over 5
+        # slots (so the split varies draw to draw around its target ratio
+        # rather than being identical every time -- verified via a 500-draw
+        # simulation before wiring: swe-mix lands close to an even 3-way
+        # split with no source systematically favored, modern-mix lands
+        # close to 3:2 cn:modern_engineering on average).
+        swe_mix_counts = Counter(random.choices(["oops", "dbms", "swe_fundamentals"], k=5))
+        modern_mix_counts = Counter(random.choices(["cn", "modern_engineering"], weights=[3, 2], k=5))
+        _TOPIC_DISPLAY_NAMES = {
+            "programming_logic": "Programming Logic", "dsa": "DSA", "oops": "OOPS", "dbms": "DBMS",
+            "swe_fundamentals": "SWE Fundamentals", "cn": "Computer Networks", "modern_engineering": "Modern Engineering",
+        }
+        extra_topics = [
+            {"key": "programming_logic", "name": _TOPIC_DISPLAY_NAMES["programming_logic"], "count": 5},
+            {"key": "dsa", "name": _TOPIC_DISPLAY_NAMES["dsa"], "count": 5},
+        ] + [
+            {"key": k, "name": _TOPIC_DISPLAY_NAMES[k], "count": c}
+            for k, c in swe_mix_counts.items() if c > 0
+        ] + [
+            {"key": k, "name": _TOPIC_DISPLAY_NAMES[k], "count": c}
+            for k, c in modern_mix_counts.items() if c > 0
+        ]
+        data = await _generate_extra_topics(company_name, extra_topics, diff, user_id, static_only=True)
     else:  # mcq / topic_mcq
         skey = section.get("key")
         stype = section.get("type")
@@ -1500,6 +1858,63 @@ async def _gen_and_persist_section(attempt_id: str, company_name: str, index: in
         chunk_idx += 1
 
 
+async def _generate_tcs_sections_bg(attempt_id: str, company: dict, user_id: str):
+    """TCS-only background generation (2026-10 zero-AI-calls pass): static-
+    bank-only, SEQUENTIAL (not asyncio.gather'd like every other company's
+    _generate_all_sections_bg below) -- draw_tcs_foundation_and_advanced's
+    own docstring explains why sequential ordering is what makes "never
+    repeat a question within one attempt" hold for free, across sections
+    that share a canonical topic (numerical/advanced both draw "aptitude";
+    reasoning/advanced both draw "reasoning"). forbid_ai_calls() wraps the
+    whole thing as a tripwire: the draw functions never call an LLM by
+    construction, so this should be a complete no-op in practice, but makes
+    any future regression here raise loudly instead of silently billing a
+    model call."""
+    sections = company["sections"]
+    try:
+        with forbid_ai_calls():
+            attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id}, {"sections": 1, "_id": 0})
+            current_sections = (attempt or {}).get("sections") or sections
+
+            mcq_results = await _tcs_draw_foundation_and_advanced(attempt_id, user_id, current_sections)
+            for key, questions in mcq_results.items():
+                index = next(i for i, s in enumerate(sections) if s["key"] == key)
+                await db.oa_attempts.update_one(
+                    {"attempt_id": attempt_id},
+                    {"$set": {f"sections.{index}.questions": questions}},
+                )
+
+            coding_section = next((s for s in current_sections if s["key"] == "coding"), None)
+            coding_index = next(i for i, s in enumerate(sections) if s["key"] == "coding")
+            difficulty_targets = (coding_section or {}).get("difficulty_targets") or ["medium", "medium"]
+            existing_coding = (coding_section or {}).get("questions")
+            coding_questions = await _tcs_draw_coding_problems(
+                attempt_id, user_id, difficulty_targets, existing_questions=existing_coding,
+            )
+            await db.oa_attempts.update_one(
+                {"attempt_id": attempt_id},
+                {"$set": {f"sections.{coding_index}.questions": coding_questions}},
+            )
+
+        await db.oa_attempts.update_one(
+            {"attempt_id": attempt_id},
+            {"$set": {"generation_status": "ready"}},
+        )
+        logger.info("bg gen: TCS attempt %s ready (static-bank-only, zero AI calls)", attempt_id)
+    except _TCSBankBlockedError as e:
+        logger.warning("TCS static bank blocked for attempt %s: %s", attempt_id, e)
+        await db.oa_attempts.update_one(
+            {"attempt_id": attempt_id},
+            {"$set": {"generation_status": "failed", "generation_error": str(e)[:400]}},
+        )
+    except Exception as e:  # pragma: no cover
+        logger.exception("TCS bg gen crashed for %s: %s", attempt_id, e)
+        await db.oa_attempts.update_one(
+            {"attempt_id": attempt_id},
+            {"$set": {"generation_status": "failed", "generation_error": str(e)[:400]}},
+        )
+
+
 async def _generate_all_sections_bg(attempt_id: str, company: dict, user_id: str):
     """Background task: generate each section concurrently. Every finished
     section is written back to Mongo AS SOON as it's ready (not batched at the
@@ -1535,6 +1950,65 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
     if cluster_options and body.cluster not in cluster_options:
         raise HTTPException(400, f"cluster must be one of {cluster_options}")
 
+    # Ownership/scope check (2026-10): a resume_id must belong to the
+    # requesting user AND have been analyzed for this same company --
+    # otherwise it's rejected outright, same 404-on-scope-mismatch
+    # convention as get_resume's own user_id-scoped lookup above. This
+    # mirrors cluster's existing "an optional field, if given, must be
+    # valid" treatment rather than silently ignoring a bad value.
+    #
+    # When resume_id is omitted entirely (2026-10 follow-up: the hub is now
+    # the only place that calls this endpoint, and it never collects a
+    # resume_id itself -- resume upload is a separate step on CompanyDetail)
+    # fall back to this user's latest resume on file for this company, if
+    # any -- same _latest_resume_for_company helper /interview/start already
+    # uses for its own "designated tier" lookup, so a resume analyzed before
+    # landing on the hub still gets associated with the OA automatically,
+    # instead of silently going in as resume_id=None.
+    effective_resume_id = body.resume_id
+    if body.resume_id:
+        resume_doc = await db.resumes.find_one(
+            {"resume_id": body.resume_id, "user_id": user["user_id"], "company_id": body.company_id},
+            {"_id": 0},
+        )
+        if not resume_doc:
+            raise HTTPException(404, "Resume not found")
+    else:
+        latest_resume = await _latest_resume_for_company(user["user_id"], body.company_id)
+        if latest_resume:
+            effective_resume_id = latest_resume["resume_id"]
+
+    # Double-start guard (2026-10): OA and interview are independent rounds
+    # that can each be retaken any number of times, but not started TWICE
+    # at once -- a completed attempt never blocks a fresh one, only an
+    # already-"in_progress" one does. 409 with the existing attempt's id,
+    # matching this codebase's existing convention for "this already
+    # exists" conflicts (e.g. section_already_submitted below).
+    existing_attempt = await db.oa_attempts.find_one(
+        {"user_id": user["user_id"], "company_id": company["id"], "status": "in_progress"}, {"_id": 0},
+    )
+    if existing_attempt:
+        raise HTTPException(409, {
+            "code": "oa_already_in_progress",
+            "message": "An OA attempt for this company is already in progress.",
+            "attempt_id": existing_attempt["attempt_id"],
+        })
+
+    # TCS static-bank feasibility pre-check (2026-10, zero-AI-calls pass):
+    # BEFORE creating the attempt or charging a run, confirm the static bank
+    # can actually fill one attempt's draw -- recycling means this never
+    # fails for an ordinary "this candidate has seen a lot of questions"
+    # reason (recycling handles that), only for a genuinely too-small bank.
+    # A real HTTP 503 here (not a silently-doomed background generation)
+    # per the explicit requirement. See
+    # tcs_recruitment_process.check_tcs_static_feasibility's own docstring
+    # for why this check doesn't need (and deliberately doesn't use) a
+    # specific user_id.
+    if company["id"] == "tcs-nqt":
+        infeasible_reason = await _tcs_check_static_feasibility()
+        if infeasible_reason:
+            raise HTTPException(503, {"code": "static_bank_too_small", "message": infeasible_reason})
+
     # -- Entitlements gate ---------------------------------------------------
     # 1) Roll the 30-day window forward for Basic/Pro if needed.
     reset_op = entitlements.maybe_reset_period(user)
@@ -1568,14 +2042,22 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
         })
 
     # Create attempt with PLACEHOLDER sections (no questions yet).
-    placeholder_sections = [{**s, "questions": []} for s in company["sections"]]
     attempt_id = new_id("oa")
+    placeholder_sections = [{**s, "questions": []} for s in company["sections"]]
+    if company["id"] == "tcs-nqt":
+        # Per-attempt seeded 50/50 coding-profile draw (profile A: 1 easy +
+        # 1 medium, profile B: 2 medium) -- must happen BEFORE this attempt's
+        # own section copy is stored, since difficulty_targets has to be
+        # baked into THIS attempt's "coding" section, not companies.py's
+        # shared config (which stays profile-agnostic). See
+        # tcs_recruitment_process.apply_coding_profile's own docstring.
+        placeholder_sections = _tcs_apply_coding_profile(placeholder_sections, attempt_id)
     attempt = {
         "attempt_id": attempt_id,
         "user_id": user["user_id"],
         "company_id": company["id"],
         "company_name": company["name"],
-        "resume_id": body.resume_id,
+        "resume_id": effective_resume_id,
         "cluster": body.cluster,
         "scoring_mode": company["scoring_mode"],
         "sections": placeholder_sections,
@@ -1609,7 +2091,14 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
         )
 
     # Kick off background generation. asyncio.create_task returns immediately.
-    asyncio.create_task(_generate_all_sections_bg(attempt_id, company, user["user_id"]))
+    # TCS: dedicated static-bank-only, sequential generator (see its own
+    # docstring for why sequential, not gathered, is required) -- never the
+    # generic concurrent per-section path every other company uses, which
+    # has a live-LLM fallback TCS must never reach.
+    if company["id"] == "tcs-nqt":
+        asyncio.create_task(_generate_tcs_sections_bg(attempt_id, company, user["user_id"]))
+    else:
+        asyncio.create_task(_generate_all_sections_bg(attempt_id, company, user["user_id"]))
     attempt.pop("_id", None)
     return attempt
 
@@ -1647,11 +2136,21 @@ async def start_oa(body: StartOAIn, user: Dict[str, Any] = Depends(require_user)
 # for sections they haven't answered. That's a gating/flow issue, not a
 # response-shape one, so it's flagged for separate follow-up rather than
 # folded into this fix.)
-_MCQ_ANSWER_BEARING_TYPES = {"mcq", "topic_mcq", "pseudocode", "comm", "grammar", "comprehension"}
+_MCQ_ANSWER_BEARING_TYPES = {"mcq", "topic_mcq", "pseudocode", "comm", "grammar", "comprehension", "capgemini_round2_technical"}
 _MIXED_MODE_TYPES = {"comm_mixed", "voice_mixed"}
 _MCQ_CLIENT_SAFE_FIELDS = ("id", "prompt", "options", "chart", "svg_diagram")
 _MCQ_MODE_CLIENT_SAFE_FIELDS = ("id", "mode", "prompt", "options")
 _SPEAKING_MODE_CLIENT_SAFE_FIELDS = ("id", "mode", "topic", "instructions", "min_words", "max_words")
+# Round 3 (Debugging Assessment) -- deliberately excludes hidden_tests and
+# reference_solution (the two fields debugging_bank.grade_debugging_
+# submission() needs server-side, that must never reach the client).
+# debugging_variant is already client-safe as stored (buggy_code/
+# bug_category/task_description only, no answer).
+_DEBUGGING_CLIENT_SAFE_FIELDS = (
+    "id", "title", "difficulty", "topic", "statement",
+    "input_format", "output_format", "constraints",
+    "visible_tests", "debugging_variant",
+)
 
 # Capgemini Round 1's six sub-parts, keyed by the `part` tag set in
 # _generate_section_questions's "capgemini_round1" branch -- each part has
@@ -1709,6 +2208,23 @@ _R1_LISTENING_SUBQ_FIELDS = ("question_id", "prompt", "question_focus", "options
 # the way the module-internal _strip_spoken_sim_for_client does.
 _R1_SPOKEN_SIM_FIELDS = ("id", "part", "item_type", "passage_text", "scenario", "estimated_duration_seconds")
 
+# Round 2 -- AI Literacy (added 2026-09, Phase 0 migration, Task 2). `id`
+# (not `scenario_id`) matches every Round 1 part's own id-field convention
+# above. Nested question fields exclude correct_option/explanation, same
+# answer-revealing exclusion as every other section -- `options` itself (the
+# letter-keyed dict of answer text) is not answer-revealing on its own.
+_R2_AI_LITERACY_SCENARIO_FIELDS = ("id", "part", "domain")
+_R2_AI_LITERACY_QUESTION_FIELDS = ("question_id", "prompt", "topic_tag", "options")
+
+
+def _strip_capgemini_round2_ai_literacy_question(q: Dict[str, Any]) -> Dict[str, Any]:
+    item = {k: q[k] for k in _R2_AI_LITERACY_SCENARIO_FIELDS if k in q}
+    item["questions"] = [
+        {k: sub[k] for k in _R2_AI_LITERACY_QUESTION_FIELDS if k in sub}
+        for sub in (q.get("questions") or [])
+    ]
+    return item
+
 
 def _strip_capgemini_round1_question(q: Dict[str, Any]) -> Dict[str, Any]:
     part = q.get("part")
@@ -1756,9 +2272,36 @@ def _strip_answer_fields_for_response(sections: List[dict]) -> List[dict]:
         elif stype == "capgemini_round1":
             new_questions = [_strip_capgemini_round1_question(q) for q in questions]
             out.append({**s, "questions": new_questions})
+        elif stype == "capgemini_round2_ai_literacy":
+            new_questions = [_strip_capgemini_round2_ai_literacy_question(q) for q in questions]
+            out.append({**s, "questions": new_questions})
+        elif stype == "debugging":
+            new_questions = [{k: q[k] for k in _DEBUGGING_CLIENT_SAFE_FIELDS if k in q} for q in questions]
+            out.append({**s, "questions": new_questions})
+        elif stype == "ai_assisted":
+            # Whitelist is really a no-op in practice -- the generation
+            # branch already only ever stores {session_id, problem_id} in
+            # `questions` (see _generate_section_questions's "ai_assisted"
+            # branch), never problem/answer content. Kept explicit anyway,
+            # matching this function's whitelist-everywhere convention,
+            # rather than relying on "nothing sensitive is in there by
+            # construction" alone.
+            new_questions = [{k: q[k] for k in ("session_id", "problem_id") if k in q} for q in questions]
+            out.append({**s, "questions": new_questions})
         else:
             out.append(s)
     return out
+
+
+def _client_section_results(section_results: Dict[str, Any]) -> Dict[str, Any]:
+    """Section results as the candidate may see them. Round 4's per-component
+    breakdown (self_review_correct, bug_explanation_quality, stage_efficiency)
+    is stored server-side and read only by the grading and tier code, so it is
+    removed here. Each section keeps its score and passed fields."""
+    return {
+        key: ({k: v for k, v in result.items() if k != "components"} if isinstance(result, dict) else result)
+        for key, result in section_results.items()
+    }
 
 
 @api.get("/oa/{attempt_id}")
@@ -1773,6 +2316,14 @@ async def get_oa(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
     if not doc:
         raise HTTPException(404, "Not found")
     doc["sections"] = _strip_answer_fields_for_response(doc.get("sections", []))
+    if doc.get("section_results"):
+        doc["section_results"] = _client_section_results(doc["section_results"])
+    # The stored capgemini_tier/tcs_tier carries the per-criterion breakdown
+    # for admin use. The candidate gets only the whitelisted client view.
+    if doc.get("capgemini_tier"):
+        doc["capgemini_tier"] = capgemini_tiers.client_view(doc["capgemini_tier"])
+    if doc.get("tcs_tier"):
+        doc["tcs_tier"] = tcs_tiers.client_view(doc["tcs_tier"])
     return doc
 
 
@@ -1924,11 +2475,77 @@ async def _grade_gamified_round_section(section: dict, answers: Dict[str, Any], 
     return result_out
 
 
-async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
+def _template_coding_note(vpass: int, vtotal: int, hpass: int, htotal: int, pct: float) -> Dict[str, Any]:
+    """Deterministic, template-based stand-in for the AI "note" on a graded
+    coding problem (2026-10, TCS zero-AI-calls pass) -- correctness/scoring
+    was ALREADY sandbox-only before this (the AI note's own score field is
+    read nowhere; `pct` from test results is what's actually used), so this
+    only replaces the free-text feedback with a fixed template built from
+    the same test counts, never a model call."""
+    if pct >= 1.0:
+        correctness = f"Passed all {vtotal + htotal} tests ({vpass} visible, {hpass} hidden)."
+    elif pct > 0:
+        correctness = f"Passed {vpass + hpass} of {vtotal + htotal} tests ({vpass}/{vtotal} visible, {hpass}/{htotal} hidden)."
+    else:
+        correctness = f"Passed 0 of {vtotal + htotal} tests."
+    return {
+        "score": int(round(pct * 100)),
+        "complexity_note": "",
+        "correctness_note": correctness,
+        "style_note": "",
+        "flagged_for_review": False,
+        "flag_reason": None,
+    }
+
+
+_MAX_GRADING_WALL_SECONDS = 180  # hard cap, whole submission, every problem combined --
+                                  # see _grade_coding_section's docstring for how this
+                                  # was sized relative to the canary scheme's own
+                                  # worst-case-per-test cost
+
+
+async def _grade_coding_section(section: dict, answers: Dict[str, Any], use_ai_note: bool = True) -> dict:
+    """`use_ai_note=False` (TCS, 2026-10 zero-AI-calls pass): skip the
+    call_json_gpt narrative-feedback call entirely and use a fixed template
+    built from the same sandbox test results instead -- never a model call.
+
+    Infra-failure handling (2026-10, reworked with a canary -- a student
+    must never be locked out of submitting by this): uses
+    run_tests_with_canary_check, which -- instead of blindly re-running a
+    suspicious test up to 3 times -- runs a trivial known-good "canary"
+    program through the SAME runner under the SAME limits whenever a
+    result looks like an infrastructure_error (see code_runner.py's
+    module docstring and _classify_timeout for the exact rule). A
+    failing/stalled canary means the SANDBOX is genuinely broken: grading
+    stops immediately and this function raises instead of returning a
+    score, so no partial score is ever stored, and -- critically --
+    submit_section's persist/track-evaluation code (further down, after
+    this call returns) never runs either, since the exception propagates
+    out of the `await` before reaching it. A healthy canary means the
+    STUDENT's program is what's actually slow, and that test is simply
+    graded as a genuine time_limit_exceeded -- normal grading continues.
+    The caller gets a 503 it can retry the whole section submission
+    against; see test_grading_infra_resubmission.py for direct proof
+    that a 503 here leaves the attempt's state (status, current_section_
+    index, section_results, answers -- i.e. every bit of state a timer or
+    the section-order check reads) completely untouched, so the exact
+    same submission can always be sent again afterward.
+
+    _MAX_GRADING_WALL_SECONDS (180s) is a hard backstop on top of the
+    canary scheme, shared across EVERY problem in this section (the same
+    `deadline` is threaded into each call below) -- the canary bounds the
+    cost of any ONE suspicious test (at most 2 canary calls + 1 test
+    re-run, each up to `timeout`), but a section with several problems,
+    each with several genuinely-slow-student tests, could still add up;
+    180s comfortably covers two 14-test Medium problems' worth of a
+    student program that blocks on every test (~75s each, see the
+    Stage 2c follow-up commit message for the derivation) with headroom,
+    while still giving up well before a wait would feel unbounded."""
     problems = section.get("questions", [])
     per_problem = []
     total_score = 0.0
     graded_count = 0
+    deadline = time.monotonic() + _MAX_GRADING_WALL_SECONDS
     for p in problems:
         # Skip problems whose AI-generated tests couldn't be validated \u2013 we
         # can't fairly grade against untrusted expected outputs.
@@ -1946,18 +2563,36 @@ async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
         language = sub.get("language", "python")
         visible = p.get("visible_tests", []) or []
         hidden = p.get("hidden_tests", []) or []
-        vpass, _vdetails = await asyncio.to_thread(_lang_run_tests, language, code, visible)
-        hpass, _hdetails = await asyncio.to_thread(_lang_run_tests, language, code, hidden)
+        vpass, _vdetails, v_infra = await asyncio.to_thread(
+            _lang_run_tests_with_canary_check, language, code, visible,
+            _CODE_RUNNER_DEFAULT_TIMEOUT, deadline)
+        hpass, _hdetails, h_infra = await asyncio.to_thread(
+            _lang_run_tests_with_canary_check, language, code, hidden,
+            _CODE_RUNNER_DEFAULT_TIMEOUT, deadline)
+        if v_infra or h_infra:
+            logger.error(
+                "grading infra error (canary-confirmed or wall-time cap) for problem %s "
+                "(lang=%s) -- aborting section grade, no score stored for this attempt",
+                pid, language,
+            )
+            raise HTTPException(503, {
+                "code": "grading_infra_error",
+                "message": "We hit an infrastructure problem while grading your code. "
+                            "Nothing was scored for this section -- please resubmit.",
+            })
         vtotal, htotal = len(visible), len(hidden)
         tests_pass = vpass + hpass
         tests_total = vtotal + htotal
         pct = (tests_pass / tests_total) if tests_total else 0
-        # AI grade for note
-        note = await call_json_gpt(
-            "You are a coding interviewer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
-            grade_coding_prompt(p, code, language, vpass, vtotal, hpass, htotal),
-        ) or {"score": int(pct * 100), "complexity_note": "", "correctness_note": "", "style_note": ""}
-        note = _attach_grading_flag(note)
+        if use_ai_note:
+            # AI grade for note
+            note = await call_json_gpt(
+                "You are a coding interviewer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+                grade_coding_prompt(p, code, language, vpass, vtotal, hpass, htotal),
+            ) or {"score": int(pct * 100), "complexity_note": "", "correctness_note": "", "style_note": ""}
+            note = _attach_grading_flag(note)
+        else:
+            note = _template_coding_note(vpass, vtotal, hpass, htotal, pct)
         per_problem.append({
             "problem_id": pid,
             "title": p.get("title"),
@@ -1968,6 +2603,53 @@ async def _grade_coding_section(section: dict, answers: Dict[str, Any]) -> dict:
         total_score += pct
         graded_count += 1
     n = max(1, graded_count)
+    score = total_score / n
+    return {
+        "score": round(score, 3),
+        "problems": per_problem,
+        "passed": score >= section.get("cutoff", 0.5),
+    }
+
+
+async def _grade_debugging_section(section: dict, answers: Dict[str, Any]) -> dict:
+    """Grades Round 3 (Debugging Assessment) by reusing debugging_bank.
+    grade_debugging_submission() per problem -- the exact same code_runner.
+    run_tests() pipeline _grade_coding_section (above) already uses for the
+    existing "coding" round, and the same grading primitive
+    /api/dev/debugging/run calls for the standalone dev-preview. No AI note
+    here (unlike coding) -- a debugging problem's correctness is fully
+    determined by test pass/fail, there's nothing subjective to comment on.
+
+    grade_debugging_submission() itself returns full per-test detail
+    (including hidden test input/expected/got) -- fine for the dev-only
+    route, which has no live attempt to protect, but this response is
+    persisted into section_results and handed straight back to the client
+    in submit_section's HTTP response. Strip to aggregate counts only here,
+    matching _grade_coding_section's own convention above (which never
+    exposes hidden test detail either) -- otherwise a candidate could read
+    off the hidden tests' exact inputs/expected outputs from their own
+    submit response.
+    """
+    problems = section.get("questions", [])
+    per_problem = []
+    total_score = 0.0
+    for p in problems:
+        pid = str(p.get("id"))
+        sub = answers.get(pid) or {}
+        code = sub.get("code", "")
+        language = sub.get("language", "python")
+        result = await asyncio.to_thread(debugging_bank.grade_debugging_submission, p, code, language)
+        per_problem.append({
+            "problem_id": result["problem_id"],
+            "language": result["language"],
+            "title": p.get("title"),
+            "visible": {"passed": result["visible"]["passed"], "total": result["visible"]["total"]},
+            "hidden": {"passed": result["hidden"]["passed"], "total": result["hidden"]["total"]},
+            "score": result["score"],
+            "passed": result["passed"],
+        })
+        total_score += result["score"]
+    n = max(1, len(problems))
     score = total_score / n
     return {
         "score": round(score, 3),
@@ -2077,6 +2759,38 @@ async def _grade_capgemini_round1_section(section: dict, answers: Dict[str, Any]
     score = (sum(per_item_scores) / total) if total else 0.0
     return {
         "score": round(score, 3),
+        "total": total,
+        "breakdown": breakdown,
+        "passed": score >= section.get("cutoff", 0.5),
+    }
+
+
+async def _grade_capgemini_round2_ai_literacy_section(section: dict, answers: Dict[str, Any]) -> dict:
+    """Grades Round 2's AI Literacy section (2026-09/10, Round 2 wiring
+    pass). Doesn't fit the generic _grade_mcq_like: items here are
+    scenario-nested (scenario -> questions: [...]), same nesting shape as
+    capgemini_round1's reading_comp/listening_comp sub-questions, but each
+    leaf question uses a LETTER-KEYED correct_option ("A".."D", matching
+    how this bank was authored -- see draw_section7_questions' docstring)
+    instead of reading_comp/listening_comp's own correct_option convention
+    or the flat MCQ types' int correct_index. Re-derives correctness from
+    `section` -- the FULL, unstripped doc submit_section already fetched --
+    never the client-submitted answer, same principle as every grader
+    here."""
+    per_item_scores: List[float] = []
+    breakdown: List[Dict[str, Any]] = []
+    for scenario in section.get("questions", []):
+        for subq in scenario.get("questions") or []:
+            sub_qid = str(subq.get("question_id"))
+            submitted = answers.get(sub_qid)
+            correct = submitted is not None and str(submitted).strip().upper() == subq.get("correct_option")
+            per_item_scores.append(1.0 if correct else 0.0)
+            breakdown.append({"id": sub_qid, "submitted": submitted, "correct": correct})
+    total = len(per_item_scores)
+    score = (sum(per_item_scores) / total) if total else 0.0
+    return {
+        "score": round(score, 3),
+        "correct": int(sum(per_item_scores)),
         "total": total,
         "breakdown": breakdown,
         "passed": score >= section.get("cutoff", 0.5),
@@ -2300,6 +3014,34 @@ async def run_code(body: RunCodeIn, user: Dict[str, Any] = Depends(require_user)
     return {"results": results, "language": body.language, "supported_languages": SUPPORTED_LANGUAGES}
 
 
+class DevDebuggingRunIn(BaseModel):
+    problem_id: str
+    language: str
+    code: str
+
+
+@api.post("/dev/debugging/run")
+async def dev_debugging_run(body: DevDebuggingRunIn, user: Dict[str, Any] = Depends(require_user)):
+    """DEV/TEST-ONLY: backs /dev/debugging-preview's run+submit actions on
+    the frontend (see DevDebuggingPreview.jsx). Exercises
+    debugging_bank.grade_debugging_submission() -- which itself reuses
+    code_runner.run_tests(), the exact same pipeline _grade_coding_section
+    already uses for the real "coding" round -- through a genuine HTTP round
+    trip, so the dev-preview's click-through tests real grading wired to a
+    real UI action, not a client-side simulation.
+
+    Reads no oa_attempts document and writes nothing -- NOT part of any OA
+    attempt/section flow. Round 3 (Debugging Assessment) is still not wired
+    into companies.py or any real company's round list; this route exists
+    solely so the standalone dev-preview can be verified end-to-end.
+    """
+    problem = debugging_bank.get_problem(body.problem_id)
+    if not problem:
+        raise HTTPException(404, "Unknown debugging problem id")
+    result = await asyncio.to_thread(debugging_bank.grade_debugging_submission, problem, body.code, body.language)
+    return result
+
+
 @api.post("/oa/{attempt_id}/transcribe")
 async def oa_transcribe(
     attempt_id: str,
@@ -2469,25 +3211,74 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
     if not section:
         raise HTTPException(404, "Section not found")
 
+    # Server-side section-order enforcement, generic across every company
+    # (see the registry-wide test in test_oa_section_order_enforcement.py).
+    # Previously submit_section found the target section purely by key, with
+    # no check that it was the CURRENT one, and always advanced
+    # current_section_index by 1 regardless of which key was actually
+    # submitted -- a client could submit sections out of order, or submit
+    # the same section twice, and the server would accept and grade both.
+    # The attempt_not_in_progress check also covers the attempt-already-
+    # completed case reached via POST .../finish-part-a, which marks
+    # "completed" WITHOUT advancing current_section_index past whatever
+    # optional section was skipped -- so a plain index-vs-key check alone
+    # would not have caught a late submit to that still-"current" section.
+    if attempt.get("status") != "in_progress":
+        raise HTTPException(409, {
+            "code": "attempt_not_in_progress",
+            "message": "This attempt is not in progress.",
+        })
+    if body.section_key in attempt.get("section_results", {}):
+        raise HTTPException(409, {
+            "code": "section_already_submitted",
+            "message": "This section was already submitted.",
+        })
+    current_idx = attempt.get("current_section_index", 0)
+    current_key = attempt["sections"][current_idx]["key"] if current_idx < len(attempt["sections"]) else None
+    if body.section_key != current_key:
+        raise HTTPException(409, {
+            "code": "wrong_section_order",
+            "message": "Sections must be submitted in order.",
+            "expected_section_key": current_key,
+        })
+
     stype = section["type"]
-    if stype == "coding":
-        result = await _grade_coding_section(section, body.answers)
-    elif stype == "essay":
-        result = await _grade_essay_section(section, body.answers)
-    elif stype == "speaking":
-        result = await _grade_speaking_section(section, body.answers)
-    elif stype == "reading_listening":
-        result = _grade_reading_listening_section(section, body.answers)
-    elif stype == "comm_mixed":
-        result = await _grade_comm_mixed_section(section, body.answers)
-    elif stype == "voice_mixed":
-        result = await _grade_voice_mixed_section(section, body.answers)
-    elif stype == "gamified_round":
-        result = await _grade_gamified_round_section(section, body.answers, attempt_id)
-    elif stype == "capgemini_round1":
-        result = await _grade_capgemini_round1_section(section, body.answers)
-    else:  # mcq / topic_mcq / pseudocode / comm / grammar / comprehension
-        result = _grade_mcq_like(section, body.answers)
+    # Per-attempt AI-forbidden guard (2026-10, zero-AI-calls pass): any
+    # attempt for a static_bank_only company (today: TCS) must never reach
+    # a model call anywhere in its grading, not just coding -- wrapping the
+    # WHOLE dispatch below, not just the coding branch, is the genuine
+    # "per-attempt guard" the task asked for, not a TCS-coding-only patch.
+    is_static_bank_only = attempt.get("company_id") in _STATIC_BANK_ONLY_COMPANY_IDS
+    ai_guard = forbid_ai_calls() if is_static_bank_only else contextlib.nullcontext()
+    with ai_guard:
+        if stype == "coding":
+            result = await _grade_coding_section(section, body.answers, use_ai_note=not is_static_bank_only)
+        elif stype == "debugging":
+            result = await _grade_debugging_section(section, body.answers)
+        elif stype == "ai_assisted":
+            # body.answers is deliberately IGNORED here -- see
+            # _finalize_ai_assisted_section's docstring for why (Round 4's
+            # true state lives in db.ai_assisted_sessions, not an answers
+            # payload; a client-supplied score/stage claim has no effect).
+            result = await _finalize_ai_assisted_section(section, attempt_id, user["user_id"])
+        elif stype == "essay":
+            result = await _grade_essay_section(section, body.answers)
+        elif stype == "speaking":
+            result = await _grade_speaking_section(section, body.answers)
+        elif stype == "reading_listening":
+            result = _grade_reading_listening_section(section, body.answers)
+        elif stype == "comm_mixed":
+            result = await _grade_comm_mixed_section(section, body.answers)
+        elif stype == "voice_mixed":
+            result = await _grade_voice_mixed_section(section, body.answers)
+        elif stype == "gamified_round":
+            result = await _grade_gamified_round_section(section, body.answers, attempt_id)
+        elif stype == "capgemini_round1":
+            result = await _grade_capgemini_round1_section(section, body.answers)
+        elif stype == "capgemini_round2_ai_literacy":
+            result = await _grade_capgemini_round2_ai_literacy_section(section, body.answers)
+        else:  # mcq / topic_mcq / pseudocode / comm / grammar / comprehension / capgemini_round2_technical
+            result = _grade_mcq_like(section, body.answers)
 
     # Persist
     section_results = attempt.get("section_results", {})
@@ -2499,17 +3290,79 @@ async def submit_section(attempt_id: str, body: SubmitSectionIn, user: Dict[str,
     status = "in_progress"
     if current_idx >= total_sections:
         status = "completed"
-    await db.oa_attempts.update_one(
-        {"attempt_id": attempt_id},
-        {"$set": {
-            "section_results": section_results,
-            "answers": answers,
-            "current_section_index": current_idx,
-            "status": status,
-            "completed_at": iso(now_utc()) if status == "completed" else None,
-        }},
-    )
-    return {"section_result": result, "next_index": current_idx, "status": status}
+    # Capgemini tier / TCS track estimate: computed here, server-side, only
+    # once the attempt is completed. Reads stored section_results alone, so
+    # nothing the client sends in this request can change the outcome.
+    tier_eval = None
+    tcs_tier_eval = None
+    if status == "completed" and attempt.get("company_id") == "capgemini":
+        tier_eval = capgemini_tiers.evaluate(section_results)
+    elif status == "completed" and attempt.get("company_id") == "tcs-nqt":
+        # Reaching "completed" via the normal sequential path means every
+        # section, including the optional Part B ones, was actually
+        # submitted -- part_b_attempted=True. The finish-early path (POST
+        # /oa/{id}/finish-part-a) is the other way to reach "completed" for
+        # this company, and passes False there instead.
+        tcs_tier_eval = tcs_tiers.evaluate(section_results, part_b_attempted=True)
+    update = {
+        "section_results": section_results,
+        "answers": answers,
+        "current_section_index": current_idx,
+        "status": status,
+        "completed_at": iso(now_utc()) if status == "completed" else None,
+    }
+    if tier_eval is not None:
+        update["capgemini_tier"] = {**tier_eval, "computed_at": iso(now_utc())}
+    if tcs_tier_eval is not None:
+        update["tcs_tier"] = {**tcs_tier_eval, "computed_at": iso(now_utc())}
+    await db.oa_attempts.update_one({"attempt_id": attempt_id}, {"$set": update})
+    response = {"section_result": result, "next_index": current_idx, "status": status}
+    if tier_eval is not None:
+        response["capgemini_tier"] = {"tier": tier_eval["tier"], "lpa": tier_eval["lpa"]}
+    if tcs_tier_eval is not None:
+        response["tcs_tier"] = tcs_tiers.client_view(tcs_tier_eval)
+    return response
+
+
+# Generic "finish early" for a company whose REMAINING sections are all
+# marked "optional": True in its companies.py config (today: only TCS's
+# "advanced"/"coding" Part B, per the official page's "mandatory if you
+# aspire for a Digital or Prime offer" wording -- see
+# tcs_recruitment_process.py's PART_B_OPTIONAL_NOTE). Written generically
+# (not "if company_id == tcs-nqt") so a future company with its own optional
+# tail doesn't need a second copy of this endpoint -- but it only does
+# anything today because TCS is the only company with any "optional": True
+# section at all. Deliberately a NEW route rather than overloading
+# submit_section: this never changes behavior for the other 13 companies'
+# existing submit flow, which has no "optional" concept and never will
+# unless a company's config adds one.
+@api.post("/oa/{attempt_id}/finish-part-a")
+async def finish_oa_part_a(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Not found")
+    if attempt.get("status") != "in_progress":
+        raise HTTPException(409, {"code": "not_in_progress", "message": "This attempt is not in progress."})
+    current_idx = attempt.get("current_section_index", 0)
+    remaining = attempt["sections"][current_idx:]
+    if not remaining:
+        raise HTTPException(400, {"code": "no_sections_remain", "message": "Nothing left to finish early."})
+    if not all(s.get("optional") for s in remaining):
+        raise HTTPException(409, {
+            "code": "mandatory_section_remains",
+            "message": "A mandatory section still remains; it must be submitted before finishing.",
+        })
+    section_results = attempt.get("section_results", {})
+    update: Dict[str, Any] = {"status": "completed", "completed_at": iso(now_utc())}
+    tcs_tier_eval = None
+    if attempt.get("company_id") == "tcs-nqt":
+        tcs_tier_eval = tcs_tiers.evaluate(section_results, part_b_attempted=False)
+        update["tcs_tier"] = {**tcs_tier_eval, "computed_at": iso(now_utc())}
+    await db.oa_attempts.update_one({"attempt_id": attempt_id}, {"$set": update})
+    response: Dict[str, Any] = {"status": "completed"}
+    if tcs_tier_eval is not None:
+        response["tcs_tier"] = tcs_tiers.client_view(tcs_tier_eval)
+    return response
 
 
 @api.get("/oa/{attempt_id}/review")
@@ -2638,7 +3491,7 @@ async def oa_review(attempt_id: str, user: Dict[str, Any] = Depends(require_user
         "attempt_id": attempt_id,
         "company_name": attempt["company_name"],
         "scoring_mode": scoring_mode,
-        "section_results": section_results,
+        "section_results": _client_section_results(section_results),
         "composite_score": round(composite, 3),
         "weakest_section": weakest,
         "verdict": verdict,
@@ -2787,14 +3640,190 @@ async def deck_delete(card_id: str, user: Dict[str, Any] = Depends(require_user)
 # =============================================================================
 
 class StartInterviewIn(BaseModel):
-    attempt_id: str
+    attempt_id: Optional[str] = None
+    company_id: Optional[str] = None
+    use_designated: Optional[bool] = None
+    tier: Optional[str] = None
+
+
+# ---- OA/interview independence helpers (2026-10) ---------------------------
+# A user may now start an interview either from a specific OA attempt
+# (existing behaviour, untouched for current clients) or straight from a
+# company_id -- picking either the best tier an OA already cleared, or an
+# explicit tier -- with no OA attempt at all. These three helpers are shared
+# by both paths.
+
+_BEST_TIER_DISPATCH: Dict[str, Dict[str, Any]] = {
+    "capgemini": {"field": "capgemini_tier", "order": list(capgemini_tiers.TIER_ORDER), "none_values": set()},
+    "tcs-nqt": {
+        "field": "tcs_tier",
+        "order": [t for t in tcs_tiers.TIER_ORDER if t != tcs_tiers.NOT_QUALIFIED],
+        "none_values": {tcs_tiers.NOT_QUALIFIED},
+    },
+}
+
+
+async def best_cleared_tier(user_id: str, company_id: str) -> Optional[str]:
+    """The highest tier this user has EVER cleared for this company, across
+    every OA attempt (OA can be retaken any number of times, in any order,
+    independent of the interview) -- one helper with per-company dispatch,
+    so a future tier-routed company only adds a row to _BEST_TIER_DISPATCH
+    above. Returns None if the company has no tier concept at all (every
+    company besides Capgemini and TCS today), the user has no attempts for
+    it, or no attempt ever cleared a tier. TCS's own "not_qualified" tier
+    counts as no tier cleared, same as a missing/null capgemini_tier --
+    both are listed in `none_values` rather than ever appearing in `order`."""
+    cfg = _BEST_TIER_DISPATCH.get(company_id)
+    if not cfg:
+        return None
+    attempts = await db.oa_attempts.find(
+        {"user_id": user_id, "company_id": company_id}, {cfg["field"]: 1, "_id": 0},
+    ).to_list(1000)
+    cleared = {(a.get(cfg["field"]) or {}).get("tier") for a in attempts} - cfg["none_values"] - {None}
+    return next((tier for tier in cfg["order"] if tier in cleared), None)
+
+
+def _valid_interview_tiers(company_id: str) -> List[str]:
+    """Tier NAMES an explicit tier= may name for this company's interview --
+    empty for a company whose interview isn't tier-routed at all (every
+    company besides Capgemini and -- while TCS_INTERVIEW_ENABLED is on --
+    TCS). Derived from is_spark/is_dave/is_commit (so a tier core.py marks
+    "not_designed" is correctly excluded from this list too), never
+    duplicated as a separate hardcoded list.
+
+    TCS branch (2026-10, flag-gated): with TCS_INTERVIEW_ENABLED off, this
+    returns [] for "tcs-nqt" exactly as it always has (no interview to
+    route), so /interview/start's company_id path still 400s with
+    no_designated_tier/unknown_tier, same as before this feature existed.
+    With the flag on, every one of TCS_INTERVIEW_TIERS ("ninja", "digital",
+    "prime") is valid -- the OA's designated tier only PRE-SELECTS one of
+    these (use_designated=true); a student may equally choose any of the
+    three regardless of their own OA result, same permissiveness Capgemini
+    already has here for an explicit tier= with use_designated=false."""
+    if company_id == "tcs-nqt":
+        return list(tcs_interview.TCS_INTERVIEW_TIERS) if tcs_interview_enabled() else []
+    if company_id != "capgemini":
+        return []
+    return [
+        t for t in capgemini_tiers.TIER_ORDER
+        if capgemini_interview.is_spark(t) or capgemini_interview.is_dave(t) or capgemini_commit.is_commit(t)
+    ]
+
+
+def _tier_start_fn(company_id: str, tier: Optional[str]):
+    """The Spark/Dave/Commit/TCS start function for this company+tier, or
+    None for a non-tier-routed company (generic interview) or an
+    unrecognized/not-yet-designed tier (also generic, or -- for the
+    company_id start path -- already rejected earlier as unknown_tier/
+    no_designated_tier).
+
+    TCS branch (2026-10, flag-gated): returns None when
+    TCS_INTERVIEW_ENABLED is off, so this function's behaviour for
+    "tcs-nqt" is unchanged from before this feature existed. _start_tcs_
+    interview is never actually reachable with the flag off anyway --
+    _valid_interview_tiers above already returns [] for TCS in that case,
+    so /interview/start's company_id path 400s before this function is
+    even consulted -- but the explicit flag check here means this function
+    is also correct in isolation, not only correct as a side effect of
+    another gate."""
+    if company_id == "tcs-nqt":
+        if not tcs_interview_enabled() or not tier:
+            return None
+        return _start_tcs_interview if tier in tcs_interview.TCS_INTERVIEW_TIERS else None
+    if company_id != "capgemini" or not tier:
+        return None
+    if capgemini_interview.is_spark(tier):
+        return _start_spark_interview
+    if capgemini_interview.is_dave(tier):
+        return _start_dave_interview
+    if capgemini_commit.is_commit(tier):
+        return _start_commit_interview
+    return None
+
+
+async def _latest_resume_for_company(user_id: str, company_id: str) -> Optional[dict]:
+    """The user's own most-recently-analyzed resume for this company --
+    ownership-scoped by user_id AND company_id, same philosophy as
+    /oa/start's (resume_id, user_id, company_id) lookup. A resume can be
+    re-analyzed for the same company any number of times; this picks
+    whichever analysis is newest."""
+    docs = await db.resumes.find({"user_id": user_id, "company_id": company_id}, {"_id": 0}).to_list(100)
+    if not docs:
+        return None
+    return max(docs, key=lambda d: d.get("created_at") or "")
+
+
+async def _existing_in_progress_interview(user_id: str, company_id: str) -> Optional[dict]:
+    """Double-start guard. A single top-level `status` field, kept in sync
+    with each tier's own state machine by _spark_persist/_dave_persist/
+    _commit_persist (and set directly by the generic flow), covers every
+    interview shape -- so one plain query is enough regardless of which
+    flow is running."""
+    return await db.interviews.find_one(
+        {"user_id": user_id, "company_id": company_id, "status": "in_progress"}, {"_id": 0},
+    )
 
 
 @api.post("/interview/start")
 async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends(require_user)):
-    attempt = await db.oa_attempts.find_one({"attempt_id": body.attempt_id, "user_id": user["user_id"]}, {"_id": 0})
-    if not attempt:
-        raise HTTPException(404, "Attempt not found")
+    attempt: Optional[dict] = None
+    attempt_id_to_store: Optional[str] = None
+    company: Optional[dict] = None
+
+    if body.attempt_id:
+        attempt = await db.oa_attempts.find_one({"attempt_id": body.attempt_id, "user_id": user["user_id"]}, {"_id": 0})
+        if not attempt:
+            raise HTTPException(404, "Attempt not found")
+        company_id = attempt.get("company_id")
+        attempt_id_to_store = body.attempt_id
+    else:
+        if not body.company_id or bool(body.use_designated) == bool(body.tier):
+            raise HTTPException(400, {
+                "code": "invalid_start_body",
+                "message": "Provide either attempt_id, or company_id with exactly one of use_designated or tier.",
+            })
+        company = get_company(body.company_id)
+        if not company:
+            raise HTTPException(404, "Company not found")
+        company_id = company["id"]
+
+    # Company without an interview phase at all (today: TCS, unless
+    # TCS_INTERVIEW_ENABLED is on) -- checked before any entitlement/guard
+    # work, for both start paths.
+    if company_id in _no_interview_company_ids():
+        raise HTTPException(400, {
+            "code": "interview_not_available",
+            "message": "This company does not have an interview phase yet.",
+        })
+
+    # TCS NQT interviews must be started from the hub (company_id + tier),
+    # never from a completed OA attempt_id. The attempt_id path above only
+    # ever resolves a `tier` from attempt.get("capgemini_tier") (a
+    # Capgemini-only field -- a TCS attempt never has it), so a TCS
+    # attempt_id would fall through _tier_start_fn() with tier=None,
+    # landing in the generic AI-planned interview plan below instead of
+    # the real TCS tiered-phase flow -- and that mismatch then corrupts
+    # the final report (_build_tcs_template_report reads only OA section
+    # results, discarding the generic interview's actual content/answers
+    # entirely). Checked here, right after the no-interview-phase check
+    # above, and unconditionally (no TCS_INTERVIEW_ENABLED check of its
+    # own): with the flag OFF, "tcs-nqt" is already in
+    # _no_interview_company_ids() and raises interview_not_available
+    # before this line is ever reached (existing/unchanged behaviour --
+    # see tests/test_interview_oa_independence.py's
+    # test_tcs_attempt_id_start_is_also_blocked and
+    # tests/test_tcs_interview.py's flag-off tests), so this guard only
+    # ever actually fires once the flag is on and the company_id+tier
+    # path has become the viable one. It is written without its own flag
+    # check anyway, on purpose, so it keeps protecting this broken path
+    # even if that ordering/gating ever changes later -- the attempt_id
+    # path for TCS has no correct destination regardless of the flag.
+    if company_id == "tcs-nqt" and attempt is not None:
+        raise HTTPException(400, {
+            "code": "tcs_interview_hub_only",
+            "message": "TCS NQT interviews must be started from the hub by choosing a tier -- "
+                       "not from a completed OA attempt.",
+        })
 
     # Free-tier lock: after the contest window ends, Free plan gets OA-only.
     if entitlements.free_is_oa_only(user):
@@ -2803,12 +3832,83 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
             "message": "The Interview + Report phases are unlocked on paid plans. Upgrade to continue.",
         })
 
-    resume_projects: List[dict] = []
-    if attempt.get("resume_id"):
-        resume = await db.resumes.find_one({"resume_id": attempt["resume_id"]}, {"_id": 0})
-        if resume:
-            resume_projects = resume.get("analysis", {}).get("extracted_projects", []) or []
+    # Double-start guard: OA and interview can each be taken any number of
+    # times, in any order, but never started twice at once. A completed/
+    # timed-out interview never blocks a fresh one.
+    existing_interview = await _existing_in_progress_interview(user["user_id"], company_id)
+    if existing_interview:
+        raise HTTPException(409, {
+            "code": "interview_already_in_progress",
+            "message": "An interview for this company is already in progress.",
+            "interview_id": existing_interview["interview_id"],
+        })
 
+    if attempt is not None:
+        resume_projects: List[dict] = []
+        if attempt.get("resume_id"):
+            # Ownership check (2026-10): scope by user_id too, not just
+            # resume_id -- a mismatch behaves exactly like "no resume at all"
+            # (the existing graceful path below), never leaking whether a
+            # resume with that id exists for someone else.
+            resume = await db.resumes.find_one(
+                {"resume_id": attempt["resume_id"], "user_id": user["user_id"]}, {"_id": 0}
+            )
+            if resume:
+                resume_projects = resume.get("analysis", {}).get("extracted_projects", []) or []
+        # The server-side tier already computed on the attempt by the OA
+        # picks the flow -- never re-derived from, or overridable by, the
+        # client. null and every non-tier-routed company keep the generic
+        # plan below.
+        tier: Optional[str] = (attempt.get("capgemini_tier") or {}).get("tier")
+        tier_source = "oa_designated"
+    else:
+        # company_id path: a resume is REQUIRED (no attempt to fall back
+        # to). This is a new gate for this NEW path only -- the attempt_id
+        # path above keeps its existing graceful "no resume -> empty
+        # resume_projects" behaviour unchanged for current clients.
+        resume_doc = await _latest_resume_for_company(user["user_id"], company_id)
+        if not resume_doc:
+            raise HTTPException(400, {
+                "code": "resume_required",
+                "message": "Analyze a resume for this company before starting an interview.",
+            })
+        resume_projects = resume_doc.get("analysis", {}).get("extracted_projects", []) or []
+        if body.use_designated:
+            tier = await best_cleared_tier(user["user_id"], company_id)
+            if not tier or tier not in _valid_interview_tiers(company_id):
+                raise HTTPException(400, {
+                    "code": "no_designated_tier",
+                    "message": "No cleared OA tier was found for this company.",
+                })
+            tier_source = "oa_designated"
+        else:
+            tier = body.tier
+            if tier not in _valid_interview_tiers(company_id):
+                raise HTTPException(400, {
+                    "code": "unknown_tier",
+                    "message": f"'{tier}' is not a valid tier for this company.",
+                })
+            tier_source = "chosen"
+        # A minimal attempt-shaped dict: the three Spark/Dave/Commit start
+        # functions only ever read user_id/company_name/resume_id off it --
+        # see 1b's audit. There is no real OA attempt behind this interview
+        # at all, so attempt_id_to_store stays None.
+        attempt = {"user_id": user["user_id"], "company_name": company["name"], "resume_id": resume_doc["resume_id"]}
+
+    # Capgemini Spark (text, 35 min) / Dave (text, 55 min) / Commit (text,
+    # 75 min) -- the tier resolved above (from the attempt's own OA-computed
+    # tier, from best_cleared_tier, or chosen explicitly) picks the flow.
+    start_fn = _tier_start_fn(company_id, tier)
+    if start_fn is not None:
+        result = await start_fn(attempt, attempt_id_to_store, resume_projects, user,
+                                 tier=tier, tier_source=tier_source, company_id=company_id)
+        return _capgemini_tag_view(result)
+
+    # Generic interview plan -- every non-tier-routed company. Only reachable
+    # via the attempt_id path: _valid_interview_tiers/_tier_start_fn return
+    # nothing for a company with no tier-routed interview, so the company_id
+    # path always raises unknown_tier/no_designated_tier before reaching here.
+    #
     # If the source company defines an interview_difficulty (e.g. "Core
     # Assessment (Default)" wants medium-skew DSA), pass that hint through
     # so the interviewer LLM raises the DSA bar for this company.
@@ -2856,7 +3956,8 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
     interview = {
         "interview_id": interview_id,
         "user_id": user["user_id"],
-        "attempt_id": body.attempt_id,
+        "attempt_id": attempt_id_to_store,
+        "company_id": company_id,
         "company_name": attempt["company_name"],
         "resume_id": attempt.get("resume_id"),
         "questions": questions,
@@ -2870,12 +3971,90 @@ async def start_interview(body: StartInterviewIn, user: Dict[str, Any] = Depends
     return interview
 
 
+# Registered BEFORE /interview/{interview_id} -- route matching is order-
+# sensitive, and a path param would otherwise swallow the literal "list"
+# segment as an interview_id.
+@api.get("/interview/list")
+async def list_my_interviews(user: Dict[str, Any] = Depends(require_user)):
+    docs = await db.interviews.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(200)
+    docs = sorted(docs, key=lambda d: d.get("created_at") or "", reverse=True)
+    interviews = [{
+        "interview_id": d["interview_id"],
+        "company_id": d.get("company_id"),
+        "tier": d.get("tier"),
+        "tier_source": d.get("tier_source"),
+        "status": d.get("status"),
+        "created_at": d.get("created_at"),
+    } for d in docs]
+
+    companies_info = []
+    no_interview_ids = _no_interview_company_ids()
+    for c in COMPANIES:
+        companies_info.append({
+            "company_id": c["id"],
+            "interview_available": c["id"] not in no_interview_ids,
+            "designated_tier": await best_cleared_tier(user["user_id"], c["id"]),
+        })
+
+    return {"interviews": interviews, "companies": companies_info}
+
+
 @api.get("/interview/{interview_id}")
 async def get_interview(interview_id: str, user: Dict[str, Any] = Depends(require_user)):
     doc = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Not found")
+    if doc.get("mode") == "spark":
+        return _capgemini_tag_view(await _spark_refresh(doc), doc)
+    if doc.get("mode") == "dave":
+        return _capgemini_tag_view(await _dave_refresh(doc), doc)
+    if doc.get("mode") == "commit":
+        return _capgemini_tag_view(await _commit_refresh(doc), doc)
+    if doc.get("mode") == "tcs":
+        return await _tcs_refresh(doc)
     return doc
+
+
+@api.post("/interview/{interview_id}/idle")
+async def interview_idle(interview_id: str, user: Dict[str, Any] = Depends(require_user)):
+    """FEATURE A idle prompt (STATED): the frontend calls this after
+    IDLE_SECONDS of no input. Rule-based, no model call, at most once per
+    question, never when under 2 minutes remain. A no-op (just the current
+    view, same as a refresh) when HUMANIZE_ENABLED is off, the interview
+    isn't in_progress, or the interview is not one of the three designed
+    Capgemini tiers (the generic flow has no humanizer wiring at all, per
+    the owner's stated scope)."""
+    interview = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not interview:
+        raise HTTPException(404, "Not found")
+    mode = interview.get("mode")
+    refresh_fn = {"spark": _spark_refresh, "dave": _dave_refresh, "commit": _commit_refresh}.get(mode)
+    if refresh_fn is None:
+        raise HTTPException(404, "Not an idle-aware interview")
+    if not humanize_enabled():
+        return _capgemini_tag_view(await refresh_fn(interview), interview)
+    interview = await {"spark": _spark_finalize_if_expired, "dave": _dave_finalize_if_expired,
+                       "commit": _commit_finalize_if_expired}[mode](interview)
+    now = now_utc().timestamp()
+    state = interview["state"]
+    view_fn = {"spark": capgemini_interview.client_view, "dave": capgemini_interview.dave_client_view,
+              "commit": capgemini_commit.commit_client_view}[mode]
+    if state["status"] != "in_progress":
+        return _capgemini_tag_view(view_fn(interview, now), interview)
+    current = interview.get("current_question") or {}
+    qid = current.get("id")
+    remaining = state["deadline_at"] - now
+    idle_used_ids = list(interview.get("idle_used_question_ids", []))
+    if qid and qid not in idle_used_ids and remaining >= capgemini_humanize.IDLE_MIN_REMAINING_SECONDS:
+        idle_used_ids.append(qid)
+        persist_fn = {"spark": _spark_persist, "dave": _dave_persist, "commit": _commit_persist}[mode]
+        count = interview.get("turn_count", 0)
+        await persist_fn(interview, count, {"idle_used_question_ids": idle_used_ids})
+        interview["idle_used_question_ids"] = idle_used_ids
+        view = view_fn(interview, now)
+        view["current_question"] = {"id": qid, "stage": current.get("stage"), "prompt": capgemini_humanize.IDLE_LINE}
+        return _capgemini_tag_view(view, interview)
+    return _capgemini_tag_view(view_fn(interview, now), interview)
 
 
 class AnswerIn(BaseModel):
@@ -2888,6 +4067,32 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
     interview = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
     if not interview:
         raise HTTPException(404, "Not found")
+    if interview.get("mode") in ("spark", "dave", "commit", "tcs"):
+        # Atomic claim BEFORE dispatching into the tier's own answer function
+        # at all -- see _claim_turn_or_409's docstring. A genuine concurrent
+        # double-submit on the same still-open question is rejected here with
+        # zero model calls, rather than reaching _spark_answer/_dave_answer/
+        # _commit_answer/_tcs_answer's own grading calls first and only
+        # losing later at persist time. Generic by construction (keyed off
+        # current_question/turn_count, not mode), so TCS gets this guard
+        # for free, same as the other three.
+        claim = await _claim_turn_or_409(interview, now_utc().timestamp())
+        try:
+            if interview["mode"] == "spark":
+                result = await _spark_answer(interview, body)
+            elif interview["mode"] == "dave":
+                result = await _dave_answer(interview, body)
+            elif interview["mode"] == "commit":
+                result = await _commit_answer(interview, body)
+            else:
+                result = await _tcs_answer(interview, body)
+        finally:
+            await _release_turn_claim(interview, claim)
+        # _capgemini_tag_view is a no-op for mode=="tcs" (it only acts on
+        # spark/dave/commit, by construction) -- skipped here rather than
+        # called-and-ignored, so TCS's own route path makes zero reference
+        # to anything named "capgemini".
+        return result if interview["mode"] == "tcs" else _capgemini_tag_view(result, interview)
     question = next((q for q in interview["questions"] if str(q.get("id")) == str(body.question_id)), None)
     if not question:
         raise HTTPException(404, "Question not found")
@@ -2914,9 +4119,2665 @@ async def submit_interview_answer(interview_id: str, body: AnswerIn, user: Dict[
     return {"grade": grade, "next_index": current_index, "status": status}
 
 
+# ---- TCS NQT interview (text; ONE interview round per tier -- USER-STATED:
+# Ninja 30 minutes, Digital/Prime 60 minutes each, phases within that one
+# round, see tcs_interview/core.py's TCS_TIER_PHASE_ORDER) ----------------
+# (2026-10, TCS_INTERVIEW_ENABLED, default OFF.) Routes stay thin, same
+# philosophy as the Capgemini section below: these three functions are
+# mechanical trampolines into tcs_interview/orchestration.py (built as a
+# brand-new, self-contained module in an earlier commit; see that module's
+# own docstring for why the real DB-touching logic lives there and not
+# here) -- each one forwards this file's own module-level `db`/`now_utc`/
+# `new_id`/`iso`/`call_json_gpt` as explicit keyword arguments, since
+# orchestration.py cannot import server.py (server.py imports it) and so
+# cannot reach those as globals itself. Matches _start_spark_interview's
+# exact call signature (server.py's `_tier_start_fn` dispatch calls every
+# start function identically) so wiring it into that dispatch above was
+# mechanical.
+async def _start_tcs_interview(attempt: dict, attempt_id: Optional[str], resume_projects: List[dict],
+                               user: Dict[str, Any], *, tier: str = "ninja", tier_source: str = "oa_designated",
+                               company_id: str = "tcs-nqt") -> dict:
+    return await tcs_orchestration.start_interview(
+        db=db, now_utc=now_utc, new_id=new_id, iso=iso,
+        attempt=attempt, attempt_id=attempt_id, resume_projects=resume_projects, user=user,
+        tier=tier, tier_source=tier_source, company_id=company_id,
+    )
+
+
+async def _tcs_answer(interview: dict, body: "AnswerIn") -> dict:
+    return await tcs_orchestration.answer_interview(
+        db=db, now_utc=now_utc, iso=iso, call_json_gpt=call_json_gpt, interview=interview, body=body,
+    )
+
+
+async def _tcs_refresh(interview: dict) -> dict:
+    return await tcs_orchestration.refresh_interview(db=db, now_utc=now_utc, iso=iso, interview=interview)
+
+
+async def _tcs_finalize_if_expired(interview: dict) -> dict:
+    return await tcs_orchestration.finalize_if_expired(db=db, now_utc=now_utc, iso=iso, interview=interview)
+
+
+# ---- Capgemini Spark interview (text, 35 minutes) --------------------------
+# Routes stay thin. Stage moves, the deadline, scoring and what the browser may
+# see live in capgemini_interview/core.py; prompts live in ai_service.py. Flags
+# and scores are stored on the interview document and never returned to the client.
+_SPARK_SYSTEM_WRITER = "You write interview follow-up questions. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE
+_SPARK_SYSTEM_GRADER = "You grade interview answers as an experienced engineer. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE
+_SPARK_MODEL_ANSWER_CAP = 4000   # INTERPOLATED: characters of one answer sent to the model
+_SPARK_STORED_ANSWER_CAP = 8000  # INTERPOLATED: characters of one answer kept
+
+
+async def _spark_call(prompt: str, system: str, temperature: float, usage: list, purpose: str) -> Any:
+    sink: list = []
+    try:
+        out = await call_json_gpt(system, prompt, model=capgemini_interview.INTERVIEW_MODEL,
+                                  temperature=temperature, usage_sink=sink)
+    except Exception:
+        logger.exception("spark %s: model call failed", purpose)
+        out = None
+    usage.extend({**rec, "purpose": purpose} for rec in sink)
+    return out
+
+
+def _spark_verdict(raw: Any, fallback: str) -> str:
+    text = raw.get("verdict") if isinstance(raw, dict) else None
+    return " ".join(text.split())[:300] if isinstance(text, str) and text.strip() else fallback
+
+
+async def _spark_next_followup(interview: dict, state: dict, last_answer: str, now: float, usage: list,
+                               turns: list) -> dict:
+    wrap = capgemini_interview.wrap_up_now(state, now)
+    asked = [t["question"] for t in turns if t.get("stage") == "followups"]
+    raw = await _spark_call(spark_followup_prompt(interview["project_text"], last_answer, wrap, asked),
+                            _SPARK_SYSTEM_WRITER, capgemini_interview.WRITER_TEMPERATURE, usage, "write_followup")
+    text = raw.get("question") if isinstance(raw, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        text = capgemini_interview.FALLBACK_FOLLOWUP
+    return {"id": f"spark-f{state['followups_asked'] + 1}", "stage": "followups",
+            "prompt": " ".join(text.split())[:300]}
+
+
+async def _spark_grade_answer(prompt: str, usage: list, purpose: str, fallback: str):
+    raw = await _spark_call(prompt, _SPARK_SYSTEM_GRADER, capgemini_interview.GRADING_TEMPERATURE, usage, purpose)
+    return raw, _spark_verdict(raw, fallback)
+
+
+def _spark_score_doc(turns: list, dsa_flags: Optional[dict], hints_used: int = 0) -> dict:
+    pf_flags = [t["flags"] for t in turns if t.get("stage") in ("project", "followups") and t.get("flags")]
+    dsa = capgemini_interview.dsa_score(dsa_flags)
+    if hints_enabled():
+        dsa = capgemini_dsa_hints.apply_hint_penalty(dsa, hints_used)
+    return capgemini_interview.interview_score(
+        capgemini_interview.project_followups_score(pf_flags),
+        dsa,
+    )
+
+
+def _spark_log_rejections(interview_id: str, question_id: str, rejections: list, answer: str) -> list:
+    """A flag whose quote failed the evidence check is false. The log line never
+    carries the candidate's answer: only the flag name, the rejection reason and
+    the first 80 characters of the quote. Returns one full record per rejection
+    (flag, reason, the answer, a timestamp) for the caller to store on the
+    interview document under a server-only field -- never logged, never returned
+    to the client, never sent to the report."""
+    records = []
+    now_iso = iso(now_utc())
+    for r in rejections:
+        logger.warning("spark interview %s question %s: flag %r rejected (%s); quote[:80]=%r",
+                       interview_id, question_id, r["flag"], r["reason"], str(r.get("quote") or "")[:80])
+        records.append({"question_id": question_id, "flag": r["flag"], "reason": r["reason"],
+                        "answer": answer, "timestamp": now_iso})
+    return records
+
+
+def _report_answer_entry(t: dict) -> dict:
+    """Shared by Spark/Dave/Commit's own _xxx_report_answers below. The
+    "needed_hint" key is added ONLY when HINTS_ENABLED is on AND this
+    particular turn was actually flagged needed_hint=True (by the DSA-stage
+    grading branch, when hints_used > 0 at grading time) -- so with the flag
+    off, or on any turn that never used a hint, this is byte-for-byte the
+    same 2-key grade dict as before this feature existed."""
+    entry = {"question_id": t["question_id"], "answer": t["answer"],
+             "grade": {"one_line_verdict": t.get("verdict") or "",
+                       "score": round(100 * capgemini_interview.flags_score(t["flags"]))}}
+    if hints_enabled() and t.get("needed_hint"):
+        entry["needed_hint"] = True
+    return entry
+
+
+def _spark_report_answers(turns: list) -> list:
+    # Only graded turns go to the report (the ungraded intro is context, not a
+    # score). The 0-100 score is the element-flag score of that turn (INTERPOLATED).
+    return [_report_answer_entry(t) for t in turns if t.get("flags")]
+
+
+# ---- Shared turn-claim guard (Spark/Dave/Commit) ---------------------------
+# A concurrent double-submit on the same still-open question used to reach
+# the real grading/writer model call(s) on BOTH requests -- only the later
+# turn_count-guarded persist (_spark_persist/_dave_persist/_commit_persist
+# below, UNCHANGED) was exclusive, so the losing request still paid for a
+# real call it was always going to lose. _claim_turn_or_409 closes that gap
+# at the top of submit_interview_answer (below), before dispatching into
+# _spark_answer/_dave_answer/_commit_answer at all -- so it is in place
+# before any of their own checks, let alone a grading/writer call. It does
+# not replace the turn_count persist guard -- it is an earlier, cheaper
+# rejection in front of it, and every dispatch is wrapped so the claim is
+# released in a `finally` regardless of how that dispatch call ends.
+_TURN_CLAIM_STALE_SECONDS = 60
+
+
+def _turn_claim_is_stale(claim: Optional[dict], now: float) -> bool:
+    """A crashed process (or any path that raises before the route's own
+    `finally` runs) could leave `in_flight` set forever otherwise -- after
+    this many seconds a claim is treated as abandoned and may be
+    overridden, so a single bad request can never wedge an interview."""
+    if not claim:
+        return False
+    claimed_at = claim.get("claimed_at")
+    if not isinstance(claimed_at, (int, float)):
+        return True  # malformed marker -- treat as stale rather than wedge the interview
+    return (now - claimed_at) > _TURN_CLAIM_STALE_SECONDS
+
+
+def _subdoc_leaf_filter(field: str, value: Optional[dict]) -> dict:
+    """A filter matching an embedded sub-document (`current_question`,
+    `in_flight`) by its individual leaf fields via Mongo dot-notation,
+    rather than by whole-object equality. MongoDB's whole-subdocument
+    equality match (`{field: {...}}`) compares the exact BSON byte
+    layout, which is sensitive to embedded field ORDER -- confirmed
+    empirically against a real mongod: {"a": 1, "b": 2} does not match a
+    stored {"b": 2, "a": 1}, even though they are the same dict in
+    Python. `current_question`/`in_flight` dicts are built at several
+    call sites across this file, so relying on every one of them using
+    the exact same key order would be fragile; per-leaf-field dot-paths
+    sidestep the issue entirely, in both Mongo (native dot-notation) and
+    the test suite's in-memory fake (spark_support.py's _Coll._match,
+    which also resolves dot-paths)."""
+    if value is None:
+        return {field: None}
+    return {f"{field}.{k}": v for k, v in value.items()}
+
+
+async def _claim_turn_or_409(interview: dict, now: float) -> Optional[dict]:
+    """Atomic compare-and-swap on `in_flight`, keyed by {interview_id,
+    turn_count, current_question} -- turn_count is the SAME atomicity key
+    the persist guard already uses; current_question and in_flight are
+    both matched per-leaf-field via dot-notation (_subdoc_leaf_filter),
+    not whole-object equality (see its docstring for why). `prior` is
+    whatever this request's own (already-fetched) copy of the interview
+    showed for `in_flight` -- the CAS re-checks that against the LIVE
+    document atomically, so a second concurrent request that raced in
+    after `prior` was captured still correctly loses here, with zero
+    model calls made. Raises 409 immediately (no DB round-trip) when the
+    fast, in-memory check alone already shows a live, non-stale claim
+    held by someone else.
+
+    Returns None for a company/mode this guard does not apply to (no
+    current_question at all -- the generic, non-Capgemini interview path),
+    so the caller can skip claiming/releasing entirely; otherwise returns
+    the new claim dict to pass to _release_turn_claim in a `finally`."""
+    current_question = interview.get("current_question")
+    if current_question is None:
+        return None
+    prior = interview.get("in_flight")
+    if prior and not _turn_claim_is_stale(prior, now):
+        raise HTTPException(409, {"code": "turn_in_progress",
+                                   "message": "That question is already being answered. Please wait a moment and refresh."})
+    claim = {"question_id": str(current_question.get("id")), "claimed_at": now}
+    result = await db.interviews.update_one(
+        {"interview_id": interview["interview_id"], "turn_count": interview.get("turn_count", 0),
+         **_subdoc_leaf_filter("current_question", current_question),
+         **_subdoc_leaf_filter("in_flight", prior)},
+        {"$set": {"in_flight": claim}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(409, {"code": "turn_in_progress",
+                                   "message": "That question is already being answered. Please wait a moment and refresh."})
+    interview["in_flight"] = claim
+    return claim
+
+
+async def _release_turn_claim(interview: dict, claim: Optional[dict]) -> None:
+    """Best-effort clear, called in a `finally` block around every
+    dispatch call _claim_turn_or_409 guards. A no-op if `claim` is None
+    (nothing was ever claimed) or if the live document's `in_flight` no
+    longer equals exactly this claim (someone/something else already
+    cleared or overrode it, e.g. a stale-claim override) -- this only
+    does real work on the ordinary path, where nothing else clears it.
+    Matched per-leaf-field (_subdoc_leaf_filter), not whole-object
+    equality -- see that function's docstring."""
+    if claim is None:
+        return
+    try:
+        await db.interviews.update_one(
+            {"interview_id": interview["interview_id"], **_subdoc_leaf_filter("in_flight", claim)},
+            {"$set": {"in_flight": None}},
+        )
+    except Exception:
+        logger.exception("failed to release turn claim for interview %s", interview.get("interview_id"))
+
+
+# ---- Shared DSA-hint interception (Spark/Dave/Commit) ----------------------
+# Runs at the very top of the DSA solving stage, before any grading/model
+# call, so a hint/answer-request/confirmation message costs nothing and never
+# reaches the real grader. See capgemini_dsa_hints for the detection and
+# ladder-dispensing logic; this wrapper is only the server-side plumbing
+# shared by all three tiers: build the hint-turn, persist it through the SAME
+# turn_count-guarded persist every other turn uses (so it also passes through
+# the SAME _claim_turn_or_409 atomic claim at the top of submit_interview_answer
+# -- that guard wraps the whole dispatch, not just the grading branches), and
+# return the client view. A hint/answer-request/confirmation turn DOES
+# increment turn_count -- DECISION (documented per the owner's own framing):
+# yes, it should, because it is a turn like any other for race-guard
+# purposes (the loser of a concurrent double-submit on the same question
+# must still get 409 turn_in_progress) even though it never advances the
+# interview's stage or consumes a model call. Entirely gated behind
+# hints_enabled(): with the flag off this function is a no-op (returns None
+# immediately) and none of its callers' behaviour changes at all.
+#
+# The DSA problem statement is NEVER overwritten by any reply here, for any
+# of the four kinds (hint / hint_exhausted / answer_request / confirmation):
+# current_question is left completely untouched in both the persisted
+# document AND the returned view, unlike FEATURE A's clarification-rephrase/
+# idle-nudge overlays above (which DO swap the shown prompt) -- a hint is
+# supplementary feedback on an unchanged question, not a replacement
+# question, and the candidate must always be able to see the problem
+# statement and keep typing their real answer. _claim_turn_or_409's
+# next-request CAS filter keeps matching the same stable current_question
+# it always has.
+#
+# A granted HINT is persisted to `dsa_hints_shown` (interview document) and
+# surfaced in every view's `hints.shown` for as long as the flag is on --
+# it must survive a refresh. An answer-request/confirmation/exhausted reply
+# is NOT persisted anywhere beyond its own turn in `turns` -- it is
+# delivered as a one-off `notice` on THIS response only (STATED: "may stay
+# a one-off note"), via the same toast mechanism the frontend already uses
+# for soft-refetch messages, and never reappears on a later refresh.
+#
+# The request itself is always recorded as its own turn in `turns`
+# (question=the original prompt, answer=what the candidate typed, flags=
+# None so it's never graded/reported), so the exchange is never lost from
+# the transcript either way.
+async def _handle_dsa_hint_message(interview: dict, tier: str, answer: str, current: dict, stage: str,
+                                   dsa_problem_id: Optional[str], stored_answer: str, now: float, count: int,
+                                   turns: list, persist_fn, view_fn) -> Optional[dict]:
+    cur_id = str(current.get("id") or "")
+    if not (hints_enabled() and stage == "dsa" and capgemini_dsa_hints.is_dsa_solving_question(cur_id)):
+        return None
+    hints_used = interview.get("hints_used", 0)
+    result = capgemini_dsa_hints.handle_dsa_message(
+        tier, answer, dsa_problem_id, hints_used, random, interview.get("last_hint_lead_in"))
+    if result is None:
+        return None  # a genuine solving attempt (or unmatched chatter) -- caller proceeds with normal grading
+    turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
+            "answer": stored_answer, "verdict": None, "flags": None,
+            "is_hint_turn": True, "hint_kind": result["kind"]}
+    changes = {
+        "turns": turns + [turn], "turn_count": count + 1, "hints_used": result["hints_used"],
+        "last_hint_lead_in": (result["lead_in"] if result["lead_in"] is not None
+                              else interview.get("last_hint_lead_in")),
+    }
+    if result["kind"] == "hint":
+        shown = list(interview.get("dsa_hints_shown", []))
+        shown.append({"level": result["hints_used"], "text": result["text"], "lead_in": result["lead_in"]})
+        changes["dsa_hints_shown"] = shown
+    await persist_fn(interview, count, changes)
+    interview.update(changes)
+    view = view_fn(interview, now)
+    if result["kind"] != "hint":
+        view["notice"] = {"kind": result["kind"], "text": result["reply"]}
+    return view
+
+
+async def _invalidate_cached_report(interview: dict) -> None:
+    """The interview has ended: any report cached for it was built without
+    it, so drop it -- the next report call regenerates with the interview
+    included. Invalidates by interview_id always, and ADDITIONALLY by
+    attempt_id when one exists (an interview started via company_id has
+    none -- `attempt_id: None` is deliberately never queried on its own,
+    since that would also match every OTHER no-OA interview's stale
+    None-valued attempt_id)."""
+    await db.reports.delete_many({"interview_id": interview["interview_id"], "user_id": interview["user_id"]})
+    if interview.get("attempt_id"):
+        await db.reports.delete_many({"attempt_id": interview["attempt_id"], "user_id": interview["user_id"]})
+
+
+async def _spark_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
+    # Optimistic guard: a double-submitted answer cannot advance the stage twice.
+    res = await db.interviews.update_one(
+        {"interview_id": interview["interview_id"], "turn_count": expected_turn_count},
+        {"$set": changes},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
+    if changes.get("status") in ("completed", "timed_out"):
+        await _invalidate_cached_report(interview)
+
+
+async def _spark_finish(interview: dict, now: float, timed_out: bool) -> None:
+    state = dict(interview["state"])
+    if timed_out:
+        capgemini_interview.finish_timed_out(state)
+    turns = interview.get("turns", [])
+    count = interview.get("turn_count", 0)
+    changes = {
+        "state": state, "status": state["status"], "current_question": None,
+        "spark_score": _spark_score_doc(turns, interview.get("dsa_flags"), interview.get("hints_used", 0)),
+        "answers": _spark_report_answers(turns), "completed_at": iso(now_utc()),
+        "turn_count": count + 1,
+    }
+    await _spark_persist(interview, count, changes)
+    interview.update(changes)
+
+
+async def _spark_finalize_if_expired(interview: dict) -> dict:
+    """Idempotent: a Spark interview past its deadline is closed as timed out
+    the first time anything reads it (the interview page, the report, or a
+    listing). Already-finished interviews are returned unchanged. If a
+    concurrent answer or finaliser wins the race, the stored state is re-read."""
+    now = now_utc().timestamp()
+    if interview["state"]["status"] != "in_progress" or not capgemini_interview.is_expired(interview["state"], now):
+        return interview
+    try:
+        await _spark_finish(interview, now, timed_out=True)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        fresh = await db.interviews.find_one({"interview_id": interview["interview_id"]}, {"_id": 0})
+        return fresh or interview
+    return interview
+
+
+async def _spark_refresh(interview: dict) -> dict:
+    interview = await _spark_finalize_if_expired(interview)
+    return capgemini_interview.client_view(interview, now_utc().timestamp())
+
+
+async def _start_spark_interview(attempt: dict, attempt_id: Optional[str], resume_projects: List[dict],
+                                 user: Dict[str, Any], *, tier: str = "spark", tier_source: str = "oa_designated",
+                                 company_id: str = "capgemini") -> dict:
+    now = now_utc().timestamp()
+    chosen = capgemini_interview.pick_project(resume_projects)
+    interview = {
+        "interview_id": new_id("intv"),
+        "user_id": attempt["user_id"],
+        "attempt_id": attempt_id,
+        "company_id": company_id,
+        "company_name": attempt["company_name"],
+        "resume_id": attempt.get("resume_id"),
+        "tier": tier,
+        "tier_source": tier_source,
+        # Account name, validated (no email, no placeholder), used only for the
+        # closing message. Never sent to a model.
+        "candidate_name": capgemini_interview.usable_account_name(user.get("name"), user.get("email")),
+        "mode": "spark",
+        "state": capgemini_interview.new_state(now, capgemini_interview.spark_duration_seconds()),
+        "status": "in_progress",
+        "turn_count": 0,
+        "current_question": {"id": "spark-intro", "stage": "intro", "prompt": capgemini_interview.INTRO_QUESTION},
+        "project": chosen,
+        "project_text": capgemini_interview.project_text(chosen),
+        "dsa_problem_id": None,
+        "dsa_flags": None,
+        "turns": [],
+        "answers": [],
+        "usage": [],
+        "flag_review": [],
+        "spark_score": None,
+        "created_at": iso(now_utc()),
+    }
+    await db.interviews.insert_one(interview)
+    interview.pop("_id", None)
+    return capgemini_interview.client_view(interview, now)
+
+
+async def _spark_answer(interview: dict, body: "AnswerIn") -> dict:
+    now = now_utc().timestamp()
+    state = interview["state"]
+    if state["status"] != "in_progress":
+        raise HTTPException(409, {"code": "interview_closed", "message": "This interview is already finished."})
+    if capgemini_interview.is_expired(state, now):
+        await _spark_finish(interview, now, timed_out=True)
+        raise HTTPException(409, {"code": "time_up", "message": "Time is up. Your answers so far are saved."})
+    current = interview.get("current_question") or {}
+    if str(body.question_id) != str(current.get("id")):
+        raise HTTPException(409, {"code": "stale_question", "message": "That question is no longer open. Refresh to continue."})
+    answer = (body.answer or "").strip()
+    if not answer:
+        raise HTTPException(400, "Answer is empty")
+
+    stored = answer[:_SPARK_STORED_ANSWER_CAP]
+    model_answer = answer[:_SPARK_MODEL_ANSWER_CAP]
+    usage = list(interview.get("usage", []))
+    turns = list(interview.get("turns", []))
+    flag_review = list(interview.get("flag_review", []))
+    count = interview.get("turn_count", 0)
+    dsa_flags = interview.get("dsa_flags")
+    dsa_problem_id = interview.get("dsa_problem_id")
+    stage = state["stage"]
+    cur_id = str(current.get("id") or "")
+    humanize_on = humanize_enabled()
+
+    if humanize_on and capgemini_humanize.is_clarification_request(answer):
+        rephrased_ids = list(interview.get("rephrased_question_ids", []))
+        if cur_id not in rephrased_ids:
+            key = _capgemini_rephrase_key(stage, cur_id, state, dsa_problem_id, None, None)
+            rephrase_text = capgemini_humanize.rephrase_for(key, current["prompt"])
+            rephrased_ids.append(cur_id)
+            await _spark_persist(interview, count, {"rephrased_question_ids": rephrased_ids})
+            interview["rephrased_question_ids"] = rephrased_ids
+            view = capgemini_interview.client_view(interview, now)
+            view["current_question"] = {"id": cur_id, "stage": stage, "prompt": rephrase_text}
+            return view
+
+    is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
+
+    hint_view = await _handle_dsa_hint_message(interview, "spark", answer, current, stage, dsa_problem_id,
+                                               stored, now, count, turns, _spark_persist,
+                                               capgemini_interview.client_view)
+    if hint_view is not None:
+        return hint_view
+
+    turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
+            "answer": stored, "verdict": None, "flags": None}
+    turns.append(turn)  # appended first so the follow-up writer sees the question just answered
+    nxt = None
+
+    if stage == "intro":
+        capgemini_interview.advance_after_intro(state, now)
+        nxt = {"id": "spark-project", "stage": "project",
+               "prompt": capgemini_interview.project_question(interview.get("project"))}
+    elif stage == "project":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _spark_grade_answer(prompt, usage, "grade_project", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.advance_after_project(state)
+        nxt = await _spark_next_followup(interview, state, model_answer, now, usage, turns)
+    elif stage == "followups":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _spark_grade_answer(prompt, usage, "grade_followup", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.advance_after_followup(state, now)
+        if state["stage"] == "followups":
+            nxt = await _spark_next_followup(interview, state, model_answer, now, usage, turns)
+        else:
+            problem = capgemini_interview.pick_dsa_problem()
+            dsa_problem_id = problem["id"]
+            nxt = {"id": "spark-dsa", "stage": "dsa", "prompt": capgemini_interview.dsa_question(problem)}
+    elif stage == "dsa":
+        problem = capgemini_interview.get_dsa_problem(dsa_problem_id)
+        complexity_only = state["dsa_turns"] >= 1
+        rub = problem["rubric"]
+        prompt = spark_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"],
+                                        model_answer, complexity_only)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _spark_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dsa_flags(raw, len(rub["required_approach"]), model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        if not complexity_only and hints_enabled() and interview.get("hints_used", 0) > 0:
+            turn["needed_hint"] = True
+        flag_review += _spark_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        if dsa_flags is None:
+            dsa_flags = flags
+        else:
+            dsa_flags = {**dsa_flags, "complexity_stated": dsa_flags["complexity_stated"] or flags["complexity_stated"]}
+        capgemini_interview.advance_after_dsa_turn(state, dsa_flags["complexity_stated"])
+        if state["stage"] != "done":
+            nxt = {"id": "spark-dsa-complexity", "stage": "dsa", "prompt": capgemini_interview.COMPLEXITY_QUESTION}
+
+    humanize_prefix = (_capgemini_humanizer_prefix(nxt, state, stage, now, random)
+                      if (humanize_on and nxt is not None) else None)
+
+    changes = {
+        "state": state, "status": state["status"], "current_question": nxt, "turns": turns,
+        "usage": usage, "dsa_problem_id": dsa_problem_id, "dsa_flags": dsa_flags,
+        "flag_review": flag_review, "turn_count": count + 1,
+    }
+    if state["status"] == "completed":
+        changes.update(
+            spark_score=_spark_score_doc(turns, dsa_flags, interview.get("hints_used", 0)),
+            answers=_spark_report_answers(turns),
+            completed_at=iso(now_utc()),
+        )
+    await _spark_persist(interview, count, changes)
+    interview.update(changes)
+    view = capgemini_interview.client_view(interview, now)
+    if humanize_prefix and view.get("current_question"):
+        view["current_question"]["prompt"] = humanize_prefix + view["current_question"]["prompt"]
+    return view
+
+
+# ---- Capgemini Dave interview (text, 45 minutes) ---------------------------
+# Same thin-routes discipline as Spark above. Dave's own state machine lives
+# in capgemini_interview/core.py as a parallel set of dave_* functions --
+# nothing here calls or changes any Spark-only function, and nothing in
+# capgemini_interview/core.py's Spark functions was touched to build this.
+_DAVE_SYSTEM_WRITER = _SPARK_SYSTEM_WRITER
+_DAVE_SYSTEM_GRADER = _SPARK_SYSTEM_GRADER
+
+
+async def _dave_call(prompt: str, system: str, temperature: float, usage: list, purpose: str) -> Any:
+    sink: list = []
+    try:
+        out = await call_json_gpt(system, prompt, model=capgemini_interview.INTERVIEW_MODEL,
+                                  temperature=temperature, usage_sink=sink)
+    except Exception:
+        logger.exception("dave %s: model call failed", purpose)
+        out = None
+    usage.extend({**rec, "purpose": purpose} for rec in sink)
+    return out
+
+
+def _dave_verdict(raw: Any, fallback: str) -> str:
+    return _spark_verdict(raw, fallback)
+
+
+async def _dave_next_followup(interview: dict, state: dict, last_answer: str, now: float, usage: list,
+                              turns: list) -> dict:
+    wrap = capgemini_interview.dave_wrap_up_now(state, now)
+    asked = [t["question"] for t in turns if t.get("stage") == "followups"]
+    raw = await _dave_call(spark_followup_prompt(interview["project1_text"], last_answer, wrap, asked),
+                           _DAVE_SYSTEM_WRITER, capgemini_interview.WRITER_TEMPERATURE, usage, "write_followup")
+    text = raw.get("question") if isinstance(raw, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        text = capgemini_interview.FALLBACK_FOLLOWUP
+    return {"id": f"dave-f{state['followups_asked'] + 1}", "stage": "followups",
+            "prompt": " ".join(text.split())[:300]}
+
+
+async def _dave_project2_write(interview: dict, focus: str, last_answer: str, usage: list, turns: list) -> str:
+    asked1 = [t["question"] for t in turns if t.get("stage") in ("project1", "followups")]
+    asked2 = [t["question"] for t in turns if t.get("stage") == "project2"]
+    raw = await _dave_call(
+        dave_project2_prompt(interview["project2_text"], focus, last_answer, asked1, asked2),
+        _DAVE_SYSTEM_WRITER, capgemini_interview.WRITER_TEMPERATURE, usage, "write_project2",
+    )
+    text = raw.get("question") if isinstance(raw, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        text = capgemini_interview.FALLBACK_FOLLOWUP
+    return " ".join(text.split())[:300]
+
+
+async def _dave_grade_answer(prompt: str, usage: list, purpose: str, fallback: str):
+    raw = await _dave_call(prompt, _DAVE_SYSTEM_GRADER, capgemini_interview.GRADING_TEMPERATURE, usage, purpose)
+    return raw, _dave_verdict(raw, fallback)
+
+
+def _dave_score_doc(turns: list, dsa_flags: Optional[dict], time_flags: Optional[dict],
+                    space_flags: Optional[dict], hints_used: int = 0) -> dict:
+    p1f_flags = [t["flags"] for t in turns if t.get("stage") in ("project1", "followups") and t.get("flags")]
+    p2_flags = [t["flags"] for t in turns if t.get("stage") == "project2" and t.get("flags")]
+    cs_flags = [t["flags"] for t in turns if t.get("stage") == "cs_fundamentals" and t.get("flags")]
+    hr_flags = [t["flags"] for t in turns if t.get("stage") == "hr" and t.get("flags")]
+    dsa_complexity = capgemini_interview.dave_dsa_complexity_score(dsa_flags, time_flags, space_flags)
+    if hints_enabled():
+        dsa_complexity = capgemini_dsa_hints.apply_hint_penalty(dsa_complexity, hints_used)
+    return capgemini_interview.dave_interview_score(
+        capgemini_interview.project_followups_score(p1f_flags),
+        capgemini_interview.project_followups_score(p2_flags),
+        dsa_complexity,
+        capgemini_interview.project_followups_score(cs_flags),
+        capgemini_interview.project_followups_score(hr_flags),
+    )
+
+
+def _dave_cs_advance_and_pick(state: dict, now: float, idx: int, cs_questions: list) -> Tuple[Optional[dict], Optional[list]]:
+    """After CS-fundamentals question `idx` (0-based) has been graded:
+    advance the stage machine and decide the next question. Returns
+    (next_question_or_None, hr_questions_or_None) -- hr_questions is set
+    only on the transition into the hr stage. `cs_questions` is mutated in
+    place to append a newly-picked Q3/Q4."""
+    if idx == 0:
+        capgemini_interview.dave_advance_after_cs(state, now, True)
+        return {"id": "dave-cs-1", "stage": "cs_fundamentals", "prompt": cs_questions[1]["text"]}, None
+    if idx == 1:
+        capgemini_interview.dave_advance_after_cs(state, now, True)
+        asked_ids = {q["id"] for q in cs_questions}
+        q3 = capgemini_interview.dave_cs_pick_weighted(asked_ids)
+        cs_questions.append(q3)
+        return {"id": "dave-cs-2", "stage": "cs_fundamentals", "prompt": q3["text"]}, None
+    if idx == 2:
+        ask_q4 = not capgemini_interview.dave_budget_exceeded(state, now, "cs_fundamentals")
+        capgemini_interview.dave_advance_after_cs(state, now, ask_q4)
+        if ask_q4:
+            asked_ids = {q["id"] for q in cs_questions}
+            q4 = capgemini_interview.dave_cs_pick_weighted(asked_ids)
+            cs_questions.append(q4)
+            return {"id": "dave-cs-3", "stage": "cs_fundamentals", "prompt": q4["text"]}, None
+        hr_pair, hr_second_category = capgemini_interview.dave_pick_hr_first_two()
+        state["hr_second_category"] = hr_second_category
+        return {"id": "dave-hr-0", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_pair[0])}, hr_pair
+    # idx == 3 (the optional fourth question, if it was asked)
+    capgemini_interview.dave_advance_after_cs(state, now, False)
+    hr_pair, hr_second_category = capgemini_interview.dave_pick_hr_first_two()
+    state["hr_second_category"] = hr_second_category
+    return {"id": "dave-hr-0", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_pair[0])}, hr_pair
+
+
+def _dave_hr_advance_and_pick(state: dict, now: float, idx: int, hr_questions: list) -> Optional[dict]:
+    """After HR question `idx` (0-based) has been graded: advance the stage
+    machine and decide the next question (or None when HR -- Dave's last
+    stage -- is over). `hr_questions` is mutated in place to append the
+    optional third question when it's drawn."""
+    if idx == 0:
+        capgemini_interview.dave_advance_after_hr(state, True)
+        return {"id": "dave-hr-1", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_questions[1])}
+    if idx == 1:
+        ask_third = not capgemini_interview.dave_budget_exceeded(state, now, "hr")
+        capgemini_interview.dave_advance_after_hr(state, ask_third)
+        if ask_third:
+            third = capgemini_interview.dave_pick_hr_third(state["hr_second_category"], hr_questions)
+            hr_questions.append(third)
+            return {"id": "dave-hr-2", "stage": "hr", "prompt": capgemini_interview.hr_question_text(third)}
+        return None
+    # idx == 2 (the optional third question, if it was asked)
+    capgemini_interview.dave_advance_after_hr(state, False)
+    return None
+
+
+def _dave_log_rejections(interview_id: str, question_id: str, rejections: list, answer: str) -> list:
+    """Same discipline as _spark_log_rejections: never logs the full answer."""
+    records = []
+    now_iso = iso(now_utc())
+    for r in rejections:
+        logger.warning("dave interview %s question %s: flag %r rejected (%s); quote[:80]=%r",
+                       interview_id, question_id, r["flag"], r["reason"], str(r.get("quote") or "")[:80])
+        records.append({"question_id": question_id, "flag": r["flag"], "reason": r["reason"],
+                        "answer": answer, "timestamp": now_iso})
+    return records
+
+
+def _dave_report_answers(turns: list) -> list:
+    return [_report_answer_entry(t) for t in turns if t.get("flags")]
+
+
+async def _dave_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
+    res = await db.interviews.update_one(
+        {"interview_id": interview["interview_id"], "turn_count": expected_turn_count},
+        {"$set": changes},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
+    if changes.get("status") in ("completed", "timed_out"):
+        await _invalidate_cached_report(interview)
+
+
+async def _dave_finish(interview: dict, now: float, timed_out: bool) -> None:
+    state = dict(interview["state"])
+    if timed_out:
+        capgemini_interview.finish_timed_out(state)
+    turns = interview.get("turns", [])
+    count = interview.get("turn_count", 0)
+    changes = {
+        "state": state, "status": state["status"], "current_question": None,
+        "dave_score": _dave_score_doc(turns, interview.get("dave_dsa_flags"), interview.get("dave_time_flags"),
+                                      interview.get("dave_space_flags"), interview.get("hints_used", 0)),
+        "answers": _dave_report_answers(turns), "completed_at": iso(now_utc()),
+        "turn_count": count + 1,
+    }
+    await _dave_persist(interview, count, changes)
+    interview.update(changes)
+
+
+async def _dave_finalize_if_expired(interview: dict) -> dict:
+    now = now_utc().timestamp()
+    if interview["state"]["status"] != "in_progress" or not capgemini_interview.is_expired(interview["state"], now):
+        return interview
+    try:
+        await _dave_finish(interview, now, timed_out=True)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        fresh = await db.interviews.find_one({"interview_id": interview["interview_id"]}, {"_id": 0})
+        return fresh or interview
+    return interview
+
+
+async def _dave_refresh(interview: dict) -> dict:
+    interview = await _dave_finalize_if_expired(interview)
+    return capgemini_interview.dave_client_view(interview, now_utc().timestamp())
+
+
+async def _start_dave_interview(attempt: dict, attempt_id: Optional[str], resume_projects: List[dict],
+                                user: Dict[str, Any], *, tier: str = "dave", tier_source: str = "oa_designated",
+                                company_id: str = "capgemini") -> dict:
+    now = now_utc().timestamp()
+    project1, project2 = capgemini_interview.dave_pick_two_projects(resume_projects)
+    interview = {
+        "interview_id": new_id("intv"),
+        "user_id": attempt["user_id"],
+        "attempt_id": attempt_id,
+        "company_id": company_id,
+        "company_name": attempt["company_name"],
+        "resume_id": attempt.get("resume_id"),
+        "tier": tier,
+        "tier_source": tier_source,
+        "candidate_name": capgemini_interview.usable_account_name(user.get("name"), user.get("email")),
+        "mode": "dave",
+        "state": capgemini_interview.dave_new_state(now, capgemini_interview.dave_duration_seconds()),
+        "status": "in_progress",
+        "turn_count": 0,
+        "current_question": {"id": "dave-intro", "stage": "intro", "prompt": capgemini_interview.INTRO_QUESTION},
+        "project1": project1,
+        "project1_text": capgemini_interview.project_text(project1),
+        "project2": project2,
+        "project2_text": capgemini_interview.project_text(project2),
+        "dave_dsa_problem_id": None,
+        "dave_dsa_flags": None,
+        "dave_dsa_answer": None,
+        "dave_time_flags": None,
+        "dave_space_flags": None,
+        "cs_questions": None,
+        "hr_questions": None,
+        "turns": [],
+        "answers": [],
+        "usage": [],
+        "flag_review": [],
+        "dave_score": None,
+        "created_at": iso(now_utc()),
+    }
+    await db.interviews.insert_one(interview)
+    interview.pop("_id", None)
+    return capgemini_interview.dave_client_view(interview, now)
+
+
+async def _dave_answer(interview: dict, body: "AnswerIn") -> dict:
+    now = now_utc().timestamp()
+    state = interview["state"]
+    if state["status"] != "in_progress":
+        raise HTTPException(409, {"code": "interview_closed", "message": "This interview is already finished."})
+    if capgemini_interview.is_expired(state, now):
+        await _dave_finish(interview, now, timed_out=True)
+        raise HTTPException(409, {"code": "time_up", "message": "Time is up. Your answers so far are saved."})
+    current = interview.get("current_question") or {}
+    if str(body.question_id) != str(current.get("id")):
+        raise HTTPException(409, {"code": "stale_question", "message": "That question is no longer open. Refresh to continue."})
+    answer = (body.answer or "").strip()
+    if not answer:
+        raise HTTPException(400, "Answer is empty")
+
+    stored = answer[:_SPARK_STORED_ANSWER_CAP]
+    model_answer = answer[:_SPARK_MODEL_ANSWER_CAP]
+    usage = list(interview.get("usage", []))
+    turns = list(interview.get("turns", []))
+    flag_review = list(interview.get("flag_review", []))
+    count = interview.get("turn_count", 0)
+    dsa_flags = interview.get("dave_dsa_flags")
+    dsa_answer = interview.get("dave_dsa_answer")
+    dsa_problem_id = interview.get("dave_dsa_problem_id")
+    time_flags = interview.get("dave_time_flags")
+    space_flags = interview.get("dave_space_flags")
+    cs_questions = interview.get("cs_questions")
+    hr_questions = interview.get("hr_questions")
+    stage = state["stage"]
+    cur_id = str(current.get("id") or "")
+    is_nudge_reply = cur_id.endswith("-nudge")
+    humanize_on = humanize_enabled()
+    pushback_on = pushback_enabled()
+
+    # ---- FEATURE A: clarification request -- rule-based, no model call,
+    # no grading, consumes no quota (STATED). Must run before any state
+    # mutation below, and before the turn is even recorded.
+    if humanize_on and capgemini_humanize.is_clarification_request(answer):
+        rephrased_ids = list(interview.get("rephrased_question_ids", []))
+        if cur_id not in rephrased_ids:
+            key = _capgemini_rephrase_key(stage, cur_id, state, dsa_problem_id, cs_questions, hr_questions)
+            company = _CAPGEMINI_COMPANY_NAME if stage == "hr" else None
+            rephrase_text = capgemini_humanize.rephrase_for(key, current["prompt"], company=company)
+            rephrased_ids.append(cur_id)
+            await _dave_persist(interview, count, {"rephrased_question_ids": rephrased_ids})
+            interview["rephrased_question_ids"] = rephrased_ids
+            view = capgemini_interview.dave_client_view(interview, now)
+            view["current_question"] = {"id": cur_id, "stage": stage, "prompt": rephrase_text}
+            return view
+
+    # ---- FEATURE A: pass phrase -- rule-based, no model call. Every
+    # grading call site below is wrapped to short-circuit to empty-raw
+    # (all key points absent, by construction of the existing normalize_*
+    # functions) instead of calling the model, when this is true.
+    is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
+
+    hint_view = await _handle_dsa_hint_message(interview, "dave", answer, current, stage, dsa_problem_id,
+                                               stored, now, count, turns, _dave_persist,
+                                               capgemini_interview.dave_client_view)
+    if hint_view is not None:
+        return hint_view
+
+    turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
+            "answer": stored, "verdict": None, "flags": None}
+    turns.append(turn)
+    nxt = None
+
+    if stage == "intro":
+        capgemini_interview.dave_advance_after_intro(state, now)
+        nxt = {"id": "dave-project1", "stage": "project1",
+               "prompt": capgemini_interview.project_question(interview.get("project1"))}
+    elif stage == "project1":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project1", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.dave_advance_after_project1(state)
+        nxt = await _dave_next_followup(interview, state, model_answer, now, usage, turns)
+    elif stage == "followups":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_followup", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.dave_advance_after_followup(state, now)
+        if state["stage"] == "followups":
+            nxt = await _dave_next_followup(interview, state, model_answer, now, usage, turns)
+        else:
+            q_text = capgemini_interview.dave_project2_question(interview.get("project2"))
+            nxt = {"id": "dave-project2-overview", "stage": "project2", "prompt": q_text}
+    elif stage == "project2" and current["id"] == "dave-project2-overview":
+        capgemini_interview.dave_advance_after_project2_overview(state)
+        q_text = await _dave_project2_write(interview, capgemini_interview.DAVE_PROJECT2_ROLE_FOCUS,
+                                            model_answer, usage, turns)
+        nxt = {"id": "dave-project2-role", "stage": "project2", "prompt": q_text}
+    elif stage == "project2" and current["id"] == "dave-project2-role":
+        prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_role", "Your answer is recorded.")
+        role_flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
+        turn.update(flags=role_flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.dave_advance_after_project2_role(state)
+        q_text = await _dave_project2_write(interview, capgemini_interview.DAVE_PROJECT2_CHALLENGE_FOCUS,
+                                            model_answer, usage, turns)
+        nxt = {"id": "dave-project2-challenge", "stage": "project2", "prompt": q_text}
+    elif stage == "project2" and current["id"] == "dave-project2-challenge":
+        prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_challenge", "Your answer is recorded.")
+        challenge_flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
+        turn.update(flags=challenge_flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        role_flags = next((t["flags"] for t in turns if t.get("question_id") == "dave-project2-role"), None)
+        role_thin = role_flags is not None and not role_flags.get("own_contribution", False)
+        challenge_thin = not challenge_flags.get("challenge_described", False)
+        budget_ok = not capgemini_interview.dave_budget_exceeded(state, now, "project2")
+        ask_optional = (role_thin or challenge_thin) and budget_ok
+        capgemini_interview.dave_advance_after_project2_challenge(state, now, ask_optional)
+        if state["stage"] == "project2":
+            # INTERPOLATED tie-break: if both were thin, the optional question targets the role first.
+            focus = capgemini_interview.DAVE_PROJECT2_THIN_ROLE_FOCUS if role_thin else capgemini_interview.DAVE_PROJECT2_THIN_CHALLENGE_FOCUS
+            q_text = await _dave_project2_write(interview, focus, model_answer, usage, turns)
+            nxt = {"id": "dave-project2-optional", "stage": "project2", "prompt": q_text}
+        else:
+            problem = capgemini_interview.pick_dave_dsa_problem()
+            dsa_problem_id = problem["id"]
+            nxt = {"id": "dave-dsa", "stage": "dsa", "prompt": capgemini_interview.dsa_question(problem)}
+    elif stage == "project2" and current["id"] == "dave-project2-optional":
+        prompt = dave_project2_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_project2_optional", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project2_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_interview.dave_advance_after_project2_optional(state, now)
+        problem = capgemini_interview.pick_dave_dsa_problem()
+        dsa_problem_id = problem["id"]
+        nxt = {"id": "dave-dsa", "stage": "dsa", "prompt": capgemini_interview.dsa_question(problem)}
+    elif stage == "dsa":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        rub = problem["rubric"]
+        prompt = dave_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"], model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        if hints_enabled() and interview.get("hints_used", 0) > 0:
+            turn["needed_hint"] = True
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        dsa_flags = flags
+        dsa_answer = model_answer
+        capgemini_interview.dave_advance_after_dsa(state, now)
+        nxt = {"id": "dave-time-complexity", "stage": "time_complexity", "prompt": capgemini_interview.DAVE_TIME_COMPLEXITY_QUESTION}
+    elif stage == "time_complexity" and cur_id == "dave-time-complexity":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "time", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        time_flags = flags
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_interview.dave_budget_exceeded(state, now, "complexity")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags, "time")
+                and capgemini_pushback.pushback_allowed("dave-time-complexity" in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append("dave-time-complexity")
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": "dave-time-complexity-pushback", "stage": "time_complexity", "prompt": pb_line}
+        else:
+            capgemini_interview.dave_advance_after_time_complexity(state)
+            nxt = {"id": "dave-space-complexity", "stage": "space_complexity", "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
+    elif stage == "time_complexity" and cur_id == "dave-time-complexity-pushback":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "time", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
+        first_flags = next((t["flags"] for t in turns if t.get("question_id") == "dave-time-complexity" and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        time_flags = credited
+        capgemini_interview.dave_advance_after_time_complexity(state)
+        nxt = {"id": "dave-space-complexity", "stage": "space_complexity", "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
+    elif stage == "space_complexity" and cur_id == "dave-space-complexity":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "space", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        space_flags = flags
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_interview.dave_budget_exceeded(state, now, "complexity")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags, "space")
+                and capgemini_pushback.pushback_allowed("dave-space-complexity" in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append("dave-space-complexity")
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": "dave-space-complexity-pushback", "stage": "space_complexity", "prompt": pb_line}
+        else:
+            capgemini_interview.dave_advance_after_space_complexity(state, now)
+            cs_questions = [dict(q) for q in capgemini_interview.dave_cs_pick_first_two()]
+            nxt = {"id": "dave-cs-0", "stage": "cs_fundamentals", "prompt": cs_questions[0]["text"]}
+    elif stage == "space_complexity" and cur_id == "dave-space-complexity-pushback":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "space", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
+        first_flags = next((t["flags"] for t in turns if t.get("question_id") == "dave-space-complexity" and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        space_flags = credited
+        capgemini_interview.dave_advance_after_space_complexity(state, now)
+        cs_questions = [dict(q) for q in capgemini_interview.dave_cs_pick_first_two()]
+        nxt = {"id": "dave-cs-0", "stage": "cs_fundamentals", "prompt": cs_questions[0]["text"]}
+    elif stage == "cs_fundamentals" and not is_nudge_reply and cur_id == f"dave-cs-{state.get('cs_index')}":
+        idx = state["cs_index"]
+        word_count = len(answer.split())
+        remaining = state["deadline_at"] - now
+        if not is_pass and capgemini_interview.dave_cs_needs_nudge(state, word_count, remaining):
+            capgemini_interview.dave_mark_cs_nudged(state)
+            nxt = {"id": f"dave-cs-{idx}-nudge", "stage": "cs_fundamentals", "prompt": capgemini_interview.CS_NUDGE_TEXT}
+        else:
+            q = cs_questions[idx]
+            prompt = dave_cs_flags_prompt(current["prompt"], q["key_points"], model_answer)
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
+            flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+            turn.update(flags=flags, verdict=verdict, rejections=rejections)
+            flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            budget_gone = capgemini_interview.dave_budget_exceeded(state, now, "cs_fundamentals")
+            pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+            main_id = f"dave-cs-{idx}"
+            if (pushback_on and not is_pass
+                    and capgemini_pushback.should_pushback(model_answer, flags)
+                    and capgemini_pushback.pushback_allowed(main_id in pushed_back_ids,
+                                                            state.get("pushbacks_used", 0), remaining, budget_gone)):
+                pushed_back_ids.append(main_id)
+                state["pushed_back_question_ids"] = pushed_back_ids
+                state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+                pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+                state["last_pushback_line"] = pb_line
+                nxt = {"id": f"dave-cs-{idx}-pushback", "stage": "cs_fundamentals", "prompt": pb_line}
+            else:
+                nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
+                if maybe_hr_questions is not None:
+                    hr_questions = maybe_hr_questions
+    elif stage == "cs_fundamentals" and is_nudge_reply:
+        idx = state["cs_index"]
+        q = cs_questions[idx]
+        asked_prompt = turns[-2]["question"] if len(turns) >= 2 else current["prompt"]
+        prompt = dave_cs_flags_prompt(asked_prompt, q["key_points"], model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_interview.dave_budget_exceeded(state, now, "cs_fundamentals")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        main_id = f"dave-cs-{idx}"
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags)
+                and capgemini_pushback.pushback_allowed(main_id in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append(main_id)
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": f"dave-cs-{idx}-pushback", "stage": "cs_fundamentals", "prompt": pb_line}
+        else:
+            nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
+            if maybe_hr_questions is not None:
+                hr_questions = maybe_hr_questions
+    elif stage == "cs_fundamentals" and cur_id == f"dave-cs-{state.get('cs_index')}-pushback":
+        idx = state["cs_index"]
+        q = cs_questions[idx]
+        prompt = dave_cs_flags_prompt(q["text"], q["key_points"], model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_cs", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+        first_flags = next((t["flags"] for t in turns
+                            if t.get("question_id") in (f"dave-cs-{idx}", f"dave-cs-{idx}-nudge") and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        nxt, maybe_hr_questions = _dave_cs_advance_and_pick(state, now, idx, cs_questions)
+        if maybe_hr_questions is not None:
+            hr_questions = maybe_hr_questions
+    elif stage == "hr" and not is_nudge_reply:
+        idx = state["hr_index"]
+        word_count = len(answer.split())
+        remaining = state["deadline_at"] - now
+        if capgemini_interview.dave_hr_needs_nudge(state, word_count, remaining):
+            capgemini_interview.dave_mark_hr_nudged(state)
+            nxt = {"id": f"dave-hr-{idx}-nudge", "stage": "hr", "prompt": capgemini_interview.HR_NUDGE_TEXT}
+        else:
+            prompt = dave_hr_flags_prompt(current["prompt"], model_answer)
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _dave_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+            flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
+            turn.update(flags=flags, verdict=verdict, rejections=rejections)
+            flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            nxt = _dave_hr_advance_and_pick(state, now, idx, hr_questions)
+    elif stage == "hr" and is_nudge_reply:
+        idx = state["hr_index"]
+        prompt = dave_hr_flags_prompt(turns[-2]["question"] if len(turns) >= 2 else current["prompt"], model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _dave_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _dave_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        nxt = _dave_hr_advance_and_pick(state, now, idx, hr_questions)
+
+    humanize_prefix = (_capgemini_humanizer_prefix(nxt, state, stage, now, random)
+                      if (humanize_on and nxt is not None) else None)
+
+    changes = {
+        "state": state, "status": state["status"], "current_question": nxt, "turns": turns,
+        "usage": usage, "dave_dsa_problem_id": dsa_problem_id, "dave_dsa_flags": dsa_flags,
+        "dave_dsa_answer": dsa_answer, "dave_time_flags": time_flags, "dave_space_flags": space_flags,
+        "cs_questions": cs_questions, "hr_questions": hr_questions, "flag_review": flag_review,
+        "turn_count": count + 1,
+    }
+    if state["status"] == "completed":
+        changes.update(
+            dave_score=_dave_score_doc(turns, dsa_flags, time_flags, space_flags, interview.get("hints_used", 0)),
+            answers=_dave_report_answers(turns),
+            completed_at=iso(now_utc()),
+        )
+    await _dave_persist(interview, count, changes)
+    interview.update(changes)
+    view = capgemini_interview.dave_client_view(interview, now)
+    if humanize_prefix and view.get("current_question"):
+        view["current_question"]["prompt"] = humanize_prefix + view["current_question"]["prompt"]
+    return view
+
+
+# ---- Capgemini Commit interview (text, 75 minutes, 7.50 LPA) ---------------
+# Same thin-routes discipline as Spark/Dave above. Commit's own stage machine
+# lives in capgemini_interview/commit/flow.py as commit_* functions -- nothing
+# here calls or changes any Spark- or Dave-only function, and nothing in
+# capgemini_interview/core.py's or dave/*'s existing code was touched to
+# build this (core.py's only change is its TIER_TABLE["commit"] entry).
+# Reuses Spark/Dave's project follow-up writer+grader prompts (both projects
+# get the same open-ended follow-up loop, not Dave's role/challenge/optional
+# pattern), Dave's DSA bank + complexity prompts, and Dave's CS-flags/HR-flags
+# prompts (fully generic -- their actual prompt text has no Dave-specific
+# content, only their docstrings do) for Commit's own Java/OOPs/SQL questions
+# and HR stage. Spark/Dave branches were deliberately NOT refactored into a
+# shared per-tier dispatch: their stage machines differ enough (4 vs 9 vs 10
+# stages, different per-stage logic, not just parameter differences) that
+# doing so would not be a mechanical change -- reported, not attempted, per
+# instructions not to touch Spark or Dave code.
+_COMMIT_SYSTEM_WRITER = _SPARK_SYSTEM_WRITER
+_COMMIT_SYSTEM_GRADER = _SPARK_SYSTEM_GRADER
+
+
+async def _commit_call(prompt: str, system: str, temperature: float, usage: list, purpose: str) -> Any:
+    sink: list = []
+    try:
+        out = await call_json_gpt(system, prompt, model=capgemini_interview.INTERVIEW_MODEL,
+                                  temperature=temperature, usage_sink=sink)
+    except Exception:
+        logger.exception("commit %s: model call failed", purpose)
+        out = None
+    usage.extend({**rec, "purpose": purpose} for rec in sink)
+    return out
+
+
+def _commit_verdict(raw: Any, fallback: str) -> str:
+    return _spark_verdict(raw, fallback)
+
+
+async def _commit_grade_answer(prompt: str, usage: list, purpose: str, fallback: str):
+    raw = await _commit_call(prompt, _COMMIT_SYSTEM_GRADER, capgemini_interview.GRADING_TEMPERATURE, usage, purpose)
+    return raw, _commit_verdict(raw, fallback)
+
+
+async def _commit_next_followup(project_text_: str, last_answer: str, wrap: bool, asked: List[str],
+                                usage: list, purpose: str) -> str:
+    raw = await _commit_call(spark_followup_prompt(project_text_, last_answer, wrap, asked),
+                             _COMMIT_SYSTEM_WRITER, capgemini_interview.WRITER_TEMPERATURE, usage, purpose)
+    text = raw.get("question") if isinstance(raw, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        text = capgemini_interview.FALLBACK_FOLLOWUP
+    return " ".join(text.split())[:300]
+
+
+def _commit_log_rejections(interview_id: str, question_id: str, rejections: list, answer: str) -> list:
+    """Same discipline as _dave_log_rejections: never logs the full answer."""
+    records = []
+    now_iso = iso(now_utc())
+    for r in rejections:
+        logger.warning("commit interview %s question %s: flag %r rejected (%s); quote[:80]=%r",
+                       interview_id, question_id, r["flag"], r["reason"], str(r.get("quote") or "")[:80])
+        records.append({"question_id": question_id, "flag": r["flag"], "reason": r["reason"],
+                        "answer": answer, "timestamp": now_iso})
+    return records
+
+
+def _commit_report_answers(turns: list) -> list:
+    return [_report_answer_entry(t) for t in turns if t.get("flags")]
+
+
+def _commit_score_doc(turns: list, dsa_flags: Optional[dict], efficiency_flags: Optional[dict],
+                      time_flags: Optional[dict], space_flags: Optional[dict],
+                      cs_turn_flags: Optional[list], hints_used: int = 0) -> dict:
+    p1_flags = [t["flags"] for t in turns if t.get("stage") in ("project1", "project1_followups") and t.get("flags")]
+    p2_flags = [t["flags"] for t in turns if t.get("stage") in ("project2", "project2_followups") and t.get("flags")]
+    cs_pooled = [capgemini_commit.commit_cs_question_pooled_flags(q_flags) for q_flags in (cs_turn_flags or []) if q_flags]
+    hr_flags = [t["flags"] for t in turns if t.get("stage") == "hr" and t.get("flags")]
+    dsa_complexity = capgemini_commit.commit_dsa_complexity_score(dsa_flags, efficiency_flags, time_flags, space_flags)
+    if hints_enabled():
+        dsa_complexity = capgemini_dsa_hints.apply_hint_penalty(dsa_complexity, hints_used)
+    return capgemini_commit.commit_interview_score(
+        capgemini_interview.project_followups_score(p1_flags),
+        capgemini_interview.project_followups_score(p2_flags),
+        dsa_complexity,
+        capgemini_interview.project_followups_score(cs_pooled) if cs_pooled else None,
+        capgemini_interview.project_followups_score(hr_flags),
+    )
+
+
+async def _commit_persist(interview: dict, expected_turn_count: int, changes: dict) -> None:
+    res = await db.interviews.update_one(
+        {"interview_id": interview["interview_id"], "turn_count": expected_turn_count},
+        {"$set": changes},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(409, {"code": "stale_turn", "message": "That question was already answered. Refresh to continue."})
+    if changes.get("status") in ("completed", "timed_out"):
+        await _invalidate_cached_report(interview)
+
+
+async def _commit_finish(interview: dict, now: float, timed_out: bool) -> None:
+    state = dict(interview["state"])
+    if timed_out:
+        capgemini_interview.finish_timed_out(state)
+    turns = interview.get("turns", [])
+    count = interview.get("turn_count", 0)
+    changes = {
+        "state": state, "status": state["status"], "current_question": None,
+        "commit_score": _commit_score_doc(
+            turns, interview.get("commit_dsa_flags"), interview.get("commit_efficiency_flags"),
+            interview.get("commit_time_flags"), interview.get("commit_space_flags"),
+            interview.get("commit_cs_turn_flags"), interview.get("hints_used", 0),
+        ),
+        "answers": _commit_report_answers(turns), "completed_at": iso(now_utc()),
+        "turn_count": count + 1,
+    }
+    await _commit_persist(interview, count, changes)
+    interview.update(changes)
+
+
+async def _commit_finalize_if_expired(interview: dict) -> dict:
+    now = now_utc().timestamp()
+    if interview["state"]["status"] != "in_progress" or not capgemini_interview.is_expired(interview["state"], now):
+        return interview
+    try:
+        await _commit_finish(interview, now, timed_out=True)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        fresh = await db.interviews.find_one({"interview_id": interview["interview_id"]}, {"_id": 0})
+        return fresh or interview
+    return interview
+
+
+async def _commit_refresh(interview: dict) -> dict:
+    interview = await _commit_finalize_if_expired(interview)
+    return capgemini_commit.commit_client_view(interview, now_utc().timestamp())
+
+
+async def _start_commit_interview(attempt: dict, attempt_id: Optional[str], resume_projects: List[dict],
+                                  user: Dict[str, Any], *, tier: str = "commit", tier_source: str = "oa_designated",
+                                  company_id: str = "capgemini") -> dict:
+    now = now_utc().timestamp()
+    project1, project2 = capgemini_interview.dave_pick_two_projects(resume_projects)
+    interview = {
+        "interview_id": new_id("intv"),
+        "user_id": attempt["user_id"],
+        "attempt_id": attempt_id,
+        "company_id": company_id,
+        "company_name": attempt["company_name"],
+        "resume_id": attempt.get("resume_id"),
+        "tier": tier,
+        "tier_source": tier_source,
+        "candidate_name": capgemini_interview.usable_account_name(user.get("name"), user.get("email")),
+        "mode": "commit",
+        "state": capgemini_commit.commit_new_state(now, capgemini_commit.commit_duration_seconds()),
+        "status": "in_progress",
+        "turn_count": 0,
+        "current_question": {"id": "commit-intro", "stage": "intro", "prompt": capgemini_interview.INTRO_QUESTION},
+        "project1": project1,
+        "project1_text": capgemini_interview.project_text(project1),
+        "project2": project2,
+        "project2_text": capgemini_interview.project_text(project2),
+        "commit_dsa_problem_id": None,
+        "commit_dsa_flags": None,
+        "commit_dsa_answer": None,
+        "commit_efficiency_flags": None,
+        "commit_time_flags": None,
+        "commit_space_flags": None,
+        "cs_questions": None,
+        "commit_cs_turn_flags": None,
+        "hr_questions": None,
+        "turns": [],
+        "answers": [],
+        "usage": [],
+        "flag_review": [],
+        "commit_score": None,
+        "created_at": iso(now_utc()),
+    }
+    await db.interviews.insert_one(interview)
+    interview.pop("_id", None)
+    return capgemini_commit.commit_client_view(interview, now)
+
+
+def _commit_cs_advance_and_pick(state: dict, now: float, cs_questions: list) -> Tuple[Optional[dict], Optional[list]]:
+    """Called when the CURRENT cs_grilling question (main + whichever
+    follow-ups were asked) is fully done. Decides the next question (drawing
+    Q3/Q4 as needed) or the transition into hr. Returns
+    (next_question_or_None, hr_questions_or_None)."""
+    idx = state["cs_index"]
+    bank = capgemini_commit.commit_cs_bank()
+    if idx == 0:
+        capgemini_commit.commit_advance_cs_sub(state, now, continue_question=True, continue_followup=False)
+        q = cs_questions[1]
+        return {"id": "commit-cs-1-main", "stage": "cs_grilling", "prompt": q["text"]}, None
+    if idx == 1:
+        capgemini_commit.commit_advance_cs_sub(state, now, continue_question=True, continue_followup=False)
+        asked_ids = {q["id"] for q in cs_questions}
+        q3 = capgemini_commit.commit_cs_pick_weighted(bank, asked_ids)
+        cs_questions.append(q3)
+        return {"id": "commit-cs-2-main", "stage": "cs_grilling", "prompt": q3["text"]}, None
+    if idx == 2:
+        ask_q4 = not capgemini_commit.commit_budget_exceeded(state, now, "cs_grilling")
+        capgemini_commit.commit_advance_cs_sub(state, now, continue_question=ask_q4, continue_followup=False)
+        if ask_q4:
+            asked_ids = {q["id"] for q in cs_questions}
+            q4 = capgemini_commit.commit_cs_pick_weighted(bank, asked_ids)
+            cs_questions.append(q4)
+            return {"id": "commit-cs-3-main", "stage": "cs_grilling", "prompt": q4["text"]}, None
+        hr_pair, hr_second_category = capgemini_interview.dave_pick_hr_first_two()
+        state["hr_second_category"] = hr_second_category
+        return {"id": "commit-hr-0", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_pair[0])}, hr_pair
+    # idx == 3 (the optional fourth question, if it was asked) -- never continues
+    capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=False)
+    hr_pair, hr_second_category = capgemini_interview.dave_pick_hr_first_two()
+    state["hr_second_category"] = hr_second_category
+    return {"id": "commit-hr-0", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_pair[0])}, hr_pair
+
+
+def _commit_hr_advance_and_pick(state: dict, now: float, idx: int, hr_questions: list) -> Optional[dict]:
+    """Same shape as Dave's _dave_hr_advance_and_pick, using Commit's own
+    budget/state functions. HR is Commit's last stage too."""
+    if idx == 0:
+        capgemini_commit.commit_advance_after_hr(state, True)
+        return {"id": "commit-hr-1", "stage": "hr", "prompt": capgemini_interview.hr_question_text(hr_questions[1])}
+    if idx == 1:
+        ask_third = not capgemini_commit.commit_budget_exceeded(state, now, "hr")
+        capgemini_commit.commit_advance_after_hr(state, ask_third)
+        if ask_third:
+            third = capgemini_interview.dave_pick_hr_third(state["hr_second_category"], hr_questions)
+            hr_questions.append(third)
+            return {"id": "commit-hr-2", "stage": "hr", "prompt": capgemini_interview.hr_question_text(third)}
+        return None
+    # idx == 2 (the optional third question, if it was asked)
+    capgemini_commit.commit_advance_after_hr(state, False)
+    return None
+
+
+async def _commit_answer(interview: dict, body: "AnswerIn") -> dict:
+    now = now_utc().timestamp()
+    state = interview["state"]
+    if state["status"] != "in_progress":
+        raise HTTPException(409, {"code": "interview_closed", "message": "This interview is already finished."})
+    if capgemini_interview.is_expired(state, now):
+        await _commit_finish(interview, now, timed_out=True)
+        raise HTTPException(409, {"code": "time_up", "message": "Time is up. Your answers so far are saved."})
+    current = interview.get("current_question") or {}
+    if str(body.question_id) != str(current.get("id")):
+        raise HTTPException(409, {"code": "stale_question", "message": "That question is no longer open. Refresh to continue."})
+    answer = (body.answer or "").strip()
+    if not answer:
+        raise HTTPException(400, "Answer is empty")
+
+    stored = answer[:_SPARK_STORED_ANSWER_CAP]
+    model_answer = answer[:_SPARK_MODEL_ANSWER_CAP]
+    usage = list(interview.get("usage", []))
+    turns = list(interview.get("turns", []))
+    flag_review = list(interview.get("flag_review", []))
+    count = interview.get("turn_count", 0)
+    dsa_flags = interview.get("commit_dsa_flags")
+    efficiency_flags = interview.get("commit_efficiency_flags")
+    dsa_answer = interview.get("commit_dsa_answer")
+    dsa_problem_id = interview.get("commit_dsa_problem_id")
+    time_flags = interview.get("commit_time_flags")
+    space_flags = interview.get("commit_space_flags")
+    cs_questions = interview.get("cs_questions")
+    cs_turn_flags = interview.get("commit_cs_turn_flags")
+    hr_questions = interview.get("hr_questions")
+    stage = state["stage"]
+    cur_id = str(current.get("id") or "")
+    humanize_on = humanize_enabled()
+    pushback_on = pushback_enabled()
+
+    if humanize_on and capgemini_humanize.is_clarification_request(answer):
+        rephrased_ids = list(interview.get("rephrased_question_ids", []))
+        if cur_id not in rephrased_ids:
+            key = _capgemini_rephrase_key(stage, cur_id, state, dsa_problem_id, cs_questions, hr_questions)
+            company = _CAPGEMINI_COMPANY_NAME if stage == "hr" else None
+            rephrase_text = capgemini_humanize.rephrase_for(key, current["prompt"], company=company)
+            rephrased_ids.append(cur_id)
+            await _commit_persist(interview, count, {"rephrased_question_ids": rephrased_ids})
+            interview["rephrased_question_ids"] = rephrased_ids
+            view = capgemini_commit.commit_client_view(interview, now)
+            view["current_question"] = {"id": cur_id, "stage": stage, "prompt": rephrase_text}
+            return view
+
+    is_pass = humanize_on and capgemini_humanize.is_pass_phrase(answer)
+
+    hint_view = await _handle_dsa_hint_message(interview, "commit", answer, current, stage, dsa_problem_id,
+                                               stored, now, count, turns, _commit_persist,
+                                               capgemini_commit.commit_client_view)
+    if hint_view is not None:
+        return hint_view
+
+    turn = {"stage": stage, "question_id": current["id"], "question": current["prompt"],
+            "answer": stored, "verdict": None, "flags": None}
+    turns.append(turn)
+    nxt = None
+
+    if stage == "intro":
+        capgemini_interview.dave_advance_after_intro(state, now)
+        nxt = {"id": "commit-project1", "stage": "project1",
+               "prompt": capgemini_interview.project_question(interview.get("project1"))}
+    elif stage == "project1":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_project1", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_commit.commit_advance_after_project1(state)
+        wrap = capgemini_commit.commit_wrap_up_now(state, now)
+        asked = [t["question"] for t in turns if t.get("stage") in ("project1", "project1_followups")]
+        text = await _commit_next_followup(interview["project1_text"], model_answer, wrap, asked, usage, "write_p1_followup")
+        nxt = {"id": f"commit-p1f{state['p1_followups_asked'] + 1}", "stage": "project1_followups", "prompt": text}
+    elif stage == "project1_followups":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project1_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_p1_followup", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_commit.commit_advance_after_project1_followup(state, now)
+        if state["stage"] == "project1_followups":
+            wrap = capgemini_commit.commit_wrap_up_now(state, now)
+            asked = [t["question"] for t in turns if t.get("stage") in ("project1", "project1_followups")]
+            text = await _commit_next_followup(interview["project1_text"], model_answer, wrap, asked, usage, "write_p1_followup")
+            nxt = {"id": f"commit-p1f{state['p1_followups_asked'] + 1}", "stage": "project1_followups", "prompt": text}
+        else:
+            q_text = capgemini_interview.dave_project2_question(interview.get("project2"))
+            nxt = {"id": "commit-project2", "stage": "project2", "prompt": q_text}
+    elif stage == "project2":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_project2", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_commit.commit_advance_after_project2(state)
+        wrap = capgemini_commit.commit_wrap_up_now(state, now)
+        asked = [t["question"] for t in turns if t.get("stage") in ("project2", "project2_followups")]
+        text = await _commit_next_followup(interview["project2_text"], model_answer, wrap, asked, usage, "write_p2_followup")
+        nxt = {"id": f"commit-p2f{state['p2_followups_asked'] + 1}", "stage": "project2_followups", "prompt": text}
+    elif stage == "project2_followups":
+        prompt = spark_project_flags_prompt(current["prompt"], model_answer, interview["project2_text"])
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_p2_followup", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_project_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        capgemini_commit.commit_advance_after_project2_followup(state, now)
+        if state["stage"] == "project2_followups":
+            wrap = capgemini_commit.commit_wrap_up_now(state, now)
+            asked = [t["question"] for t in turns if t.get("stage") in ("project2", "project2_followups")]
+            text = await _commit_next_followup(interview["project2_text"], model_answer, wrap, asked, usage, "write_p2_followup")
+            nxt = {"id": f"commit-p2f{state['p2_followups_asked'] + 1}", "stage": "project2_followups", "prompt": text}
+        else:
+            problem = capgemini_interview.pick_dave_dsa_problem()
+            dsa_problem_id = problem["id"]
+            nxt = {"id": "commit-dsa", "stage": "dsa", "prompt": capgemini_interview.dsa_question(problem)}
+    elif stage == "dsa" and cur_id == "commit-dsa":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        rub = problem["rubric"]
+        prompt = dave_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"], model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_dsa", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        if hints_enabled() and interview.get("hints_used", 0) > 0:
+            turn["needed_hint"] = True
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        dsa_flags = flags
+        dsa_answer = model_answer
+        efficient_flag_present = flags.get("approach_1", False)
+        if not efficient_flag_present and not state["dsa_efficiency_nudge_used"]:
+            state["dsa_efficiency_nudge_used"] = True
+            nxt = {"id": "commit-dsa-efficiency", "stage": "dsa", "prompt": capgemini_commit.COMMIT_MORE_EFFICIENT_QUESTION}
+        else:
+            capgemini_commit.commit_advance_after_dsa(state, now)
+            nxt = {"id": "commit-time-complexity", "stage": "time_complexity",
+                   "prompt": capgemini_interview.DAVE_TIME_COMPLEXITY_QUESTION}
+    elif stage == "dsa" and cur_id == "commit-dsa-efficiency":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        rub = problem["rubric"]
+        prompt = dave_dsa_flags_prompt(problem["statement"], rub["required_approach"], rub["edge_cases"], model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_dsa_efficiency", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_dsa_flags(raw, len(rub["required_approach"]), model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        if hints_enabled() and interview.get("hints_used", 0) > 0:
+            turn["needed_hint"] = True
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        efficiency_flags = flags
+        capgemini_commit.commit_advance_after_dsa(state, now)
+        nxt = {"id": "commit-time-complexity", "stage": "time_complexity",
+               "prompt": capgemini_interview.DAVE_TIME_COMPLEXITY_QUESTION}
+    elif stage == "time_complexity" and cur_id == "commit-time-complexity":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "time", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        time_flags = flags
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_commit.commit_budget_exceeded(state, now, "complexity")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags, "time")
+                and capgemini_pushback.pushback_allowed("commit-time-complexity" in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append("commit-time-complexity")
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": "commit-time-complexity-pushback", "stage": "time_complexity", "prompt": pb_line}
+        else:
+            capgemini_commit.commit_advance_after_time_complexity(state)
+            nxt = {"id": "commit-space-complexity", "stage": "space_complexity",
+                   "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
+    elif stage == "time_complexity" and cur_id == "commit-time-complexity-pushback":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "time", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_time_complexity", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "time", model_answer)
+        first_flags = next((t["flags"] for t in turns if t.get("question_id") == "commit-time-complexity" and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        time_flags = credited
+        capgemini_commit.commit_advance_after_time_complexity(state)
+        nxt = {"id": "commit-space-complexity", "stage": "space_complexity",
+               "prompt": capgemini_interview.DAVE_SPACE_COMPLEXITY_QUESTION}
+    elif stage == "space_complexity" and cur_id == "commit-space-complexity":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "space", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        space_flags = flags
+        remaining = state["deadline_at"] - now
+        budget_gone = capgemini_commit.commit_budget_exceeded(state, now, "complexity")
+        pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+        if (pushback_on and not is_pass
+                and capgemini_pushback.should_pushback(model_answer, flags, "space")
+                and capgemini_pushback.pushback_allowed("commit-space-complexity" in pushed_back_ids,
+                                                        state.get("pushbacks_used", 0), remaining, budget_gone)):
+            pushed_back_ids.append("commit-space-complexity")
+            state["pushed_back_question_ids"] = pushed_back_ids
+            state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+            pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+            state["last_pushback_line"] = pb_line
+            nxt = {"id": "commit-space-complexity-pushback", "stage": "space_complexity", "prompt": pb_line}
+        else:
+            capgemini_commit.commit_advance_after_space_complexity(state, now)
+            bank = capgemini_commit.commit_cs_bank()
+            cs_questions = [dict(q) for q in capgemini_commit.commit_cs_pick_first_two(bank["oops"], bank["java"])]
+            cs_turn_flags = [[], []]
+            nxt = {"id": "commit-cs-0-main", "stage": "cs_grilling", "prompt": cs_questions[0]["text"]}
+    elif stage == "space_complexity" and cur_id == "commit-space-complexity-pushback":
+        problem = capgemini_interview.get_dave_dsa_problem(dsa_problem_id)
+        prompt = dave_complexity_prompt(problem["statement"], dsa_answer or "", problem["rubric"]["accepted_complexities"],
+                                        "space", model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_space_complexity", "Your answer is recorded.")
+        second_flags, rejections = capgemini_interview.normalize_dave_complexity_flags(raw, "space", model_answer)
+        first_flags = next((t["flags"] for t in turns if t.get("question_id") == "commit-space-complexity" and t.get("flags")), {})
+        credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+        turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        space_flags = credited
+        capgemini_commit.commit_advance_after_space_complexity(state, now)
+        bank = capgemini_commit.commit_cs_bank()
+        cs_questions = [dict(q) for q in capgemini_commit.commit_cs_pick_first_two(bank["oops"], bank["java"])]
+        cs_turn_flags = [[], []]
+        nxt = {"id": "commit-cs-0-main", "stage": "cs_grilling", "prompt": cs_questions[0]["text"]}
+    elif stage == "cs_grilling":
+        idx = state["cs_index"]
+        q = cs_questions[idx]
+        cs_turn_flags = [list(x) for x in cs_turn_flags] if cs_turn_flags else [[] for _ in cs_questions]
+        while len(cs_turn_flags) <= idx:
+            cs_turn_flags.append([])
+        if cur_id == f"commit-cs-{idx}-nudge":
+            asked_prompt = turns[-2]["question"] if len(turns) >= 2 else q["text"]
+            prompt = dave_cs_flags_prompt(asked_prompt, q["key_points"], model_answer)
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_main", "Your answer is recorded.")
+            flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+            turn.update(flags=flags, verdict=verdict, rejections=rejections)
+            flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            cs_turn_flags[idx].append(flags)
+            remaining = state["deadline_at"] - now
+            budget_gone = capgemini_commit.commit_budget_exceeded(state, now, "cs_grilling")
+            pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+            main_id = f"commit-cs-{idx}-main"
+            if (pushback_on and not is_pass
+                    and capgemini_pushback.should_pushback(model_answer, flags)
+                    and capgemini_pushback.pushback_allowed(main_id in pushed_back_ids,
+                                                            state.get("pushbacks_used", 0), remaining, budget_gone)):
+                pushed_back_ids.append(main_id)
+                state["pushed_back_question_ids"] = pushed_back_ids
+                state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+                pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+                state["last_pushback_line"] = pb_line
+                nxt = {"id": f"commit-cs-{idx}-pushback", "stage": "cs_grilling", "prompt": pb_line}
+            else:
+                fu = q["follow_ups"][0]
+                capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
+                nxt = {"id": f"commit-cs-{idx}-fu1", "stage": "cs_grilling", "prompt": fu["text"]}
+        elif cur_id == f"commit-cs-{idx}-main":
+            word_count = len(answer.split())
+            remaining = state["deadline_at"] - now
+            if not is_pass and capgemini_commit.commit_cs_needs_nudge(state, word_count, remaining):
+                capgemini_commit.commit_mark_cs_nudged(state)
+                nxt = {"id": f"commit-cs-{idx}-nudge", "stage": "cs_grilling", "prompt": capgemini_commit.CS_NUDGE_TEXT}
+            else:
+                prompt = dave_cs_flags_prompt(q["text"], q["key_points"], model_answer)
+                if is_pass:
+                    raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+                else:
+                    raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_main", "Your answer is recorded.")
+                flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+                turn.update(flags=flags, verdict=verdict, rejections=rejections)
+                flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+                cs_turn_flags[idx].append(flags)
+                budget_gone = capgemini_commit.commit_budget_exceeded(state, now, "cs_grilling")
+                pushed_back_ids = list(state.get("pushed_back_question_ids", []))
+                main_id = f"commit-cs-{idx}-main"
+                if (pushback_on and not is_pass
+                        and capgemini_pushback.should_pushback(model_answer, flags)
+                        and capgemini_pushback.pushback_allowed(main_id in pushed_back_ids,
+                                                                state.get("pushbacks_used", 0), remaining, budget_gone)):
+                    pushed_back_ids.append(main_id)
+                    state["pushed_back_question_ids"] = pushed_back_ids
+                    state["pushbacks_used"] = state.get("pushbacks_used", 0) + 1
+                    pb_line = capgemini_pushback.pick_pushback_line(random, state.get("last_pushback_line"))
+                    state["last_pushback_line"] = pb_line
+                    nxt = {"id": f"commit-cs-{idx}-pushback", "stage": "cs_grilling", "prompt": pb_line}
+                else:
+                    fu = q["follow_ups"][0]
+                    capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
+                    nxt = {"id": f"commit-cs-{idx}-fu1", "stage": "cs_grilling", "prompt": fu["text"]}
+        elif cur_id == f"commit-cs-{idx}-pushback":
+            prompt = dave_cs_flags_prompt(q["text"], q["key_points"], model_answer)
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_main", "Your answer is recorded.")
+            second_flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(q["key_points"]), model_answer)
+            first_flags = next((t["flags"] for t in turns
+                                if t.get("question_id") in (f"commit-cs-{idx}-main", f"commit-cs-{idx}-nudge")
+                                and t.get("flags")), {})
+            credited = capgemini_pushback.apply_hint_credit(first_flags, second_flags) if first_flags else second_flags
+            turn.update(flags=credited, verdict=verdict, rejections=rejections, needed_hint=True)
+            flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            cs_turn_flags[idx].append(credited)
+            fu = q["follow_ups"][0]
+            capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
+            nxt = {"id": f"commit-cs-{idx}-fu1", "stage": "cs_grilling", "prompt": fu["text"]}
+        elif cur_id == f"commit-cs-{idx}-fu1":
+            fu = q["follow_ups"][0]
+            prompt = dave_cs_flags_prompt(fu["text"], fu["key_points"], model_answer)
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_fu1", "Your answer is recorded.")
+            flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(fu["key_points"]), model_answer)
+            turn.update(flags=flags, verdict=verdict, rejections=rejections)
+            flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            cs_turn_flags[idx].append(flags)
+            ask_fu2 = not capgemini_commit.commit_budget_exceeded(state, now, "cs_grilling")
+            if ask_fu2:
+                fu2 = q["follow_ups"][1]
+                capgemini_commit.commit_advance_cs_sub(state, now, continue_question=False, continue_followup=True)
+                nxt = {"id": f"commit-cs-{idx}-fu2", "stage": "cs_grilling", "prompt": fu2["text"]}
+            else:
+                nxt, maybe_hr_questions = _commit_cs_advance_and_pick(state, now, cs_questions)
+                if maybe_hr_questions is not None:
+                    hr_questions = maybe_hr_questions
+        elif cur_id == f"commit-cs-{idx}-fu2":
+            fu2 = q["follow_ups"][1]
+            prompt = dave_cs_flags_prompt(fu2["text"], fu2["key_points"], model_answer)
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_cs_fu2", "Your answer is recorded.")
+            flags, rejections = capgemini_interview.normalize_cs_flags(raw, len(fu2["key_points"]), model_answer)
+            turn.update(flags=flags, verdict=verdict, rejections=rejections)
+            flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            cs_turn_flags[idx].append(flags)
+            nxt, maybe_hr_questions = _commit_cs_advance_and_pick(state, now, cs_questions)
+            if maybe_hr_questions is not None:
+                hr_questions = maybe_hr_questions
+    elif stage == "hr" and not cur_id.endswith("-nudge"):
+        idx = state["hr_index"]
+        word_count = len(answer.split())
+        remaining = state["deadline_at"] - now
+        if not is_pass and capgemini_commit.commit_hr_needs_nudge(state, word_count, remaining,
+                                                   capgemini_interview.HR_NUDGE_WORD_THRESHOLD,
+                                                   capgemini_interview.HR_NUDGE_MIN_REMAINING_SECONDS):
+            capgemini_commit.commit_mark_hr_nudged(state)
+            nxt = {"id": f"commit-hr-{idx}-nudge", "stage": "hr", "prompt": capgemini_interview.HR_NUDGE_TEXT}
+        else:
+            prompt = dave_hr_flags_prompt(current["prompt"], model_answer)
+            if is_pass:
+                raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+            else:
+                raw, verdict = await _commit_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+            flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
+            turn.update(flags=flags, verdict=verdict, rejections=rejections)
+            flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+            nxt = _commit_hr_advance_and_pick(state, now, idx, hr_questions)
+    elif stage == "hr" and cur_id.endswith("-nudge"):
+        idx = state["hr_index"]
+        prompt = dave_hr_flags_prompt(turns[-2]["question"] if len(turns) >= 2 else current["prompt"], model_answer)
+        if is_pass:
+            raw, verdict = {}, capgemini_humanize.PASS_RESPONSE
+        else:
+            raw, verdict = await _commit_grade_answer(prompt, usage, "grade_hr", "Your answer is recorded.")
+        flags, rejections = capgemini_interview.normalize_hr_flags(raw, model_answer)
+        turn.update(flags=flags, verdict=verdict, rejections=rejections)
+        flag_review += _commit_log_rejections(interview.get("interview_id"), current["id"], rejections, stored)
+        nxt = _commit_hr_advance_and_pick(state, now, idx, hr_questions)
+
+    humanize_prefix = (_capgemini_humanizer_prefix(nxt, state, stage, now, random)
+                      if (humanize_on and nxt is not None) else None)
+
+    changes = {
+        "state": state, "status": state["status"], "current_question": nxt, "turns": turns,
+        "usage": usage, "commit_dsa_problem_id": dsa_problem_id, "commit_dsa_flags": dsa_flags,
+        "commit_dsa_answer": dsa_answer, "commit_efficiency_flags": efficiency_flags,
+        "commit_time_flags": time_flags, "commit_space_flags": space_flags,
+        "cs_questions": cs_questions, "commit_cs_turn_flags": cs_turn_flags, "hr_questions": hr_questions,
+        "flag_review": flag_review, "turn_count": count + 1,
+    }
+    if state["status"] == "completed":
+        changes.update(
+            commit_score=_commit_score_doc(turns, dsa_flags, efficiency_flags, time_flags, space_flags, cs_turn_flags,
+                                           interview.get("hints_used", 0)),
+            answers=_commit_report_answers(turns),
+            completed_at=iso(now_utc()),
+        )
+    await _commit_persist(interview, count, changes)
+    interview.update(changes)
+    view = capgemini_commit.commit_client_view(interview, now)
+    if humanize_prefix and view.get("current_question"):
+        view["current_question"]["prompt"] = humanize_prefix + view["current_question"]["prompt"]
+    return view
+
+
+# =============================================================================
+#  DEV/TEST-ONLY: Capgemini Round 4 (AI-Assisted Coding) -- live staged
+#  conversation backend. Modeled directly on the /interview/* trio above
+#  (own dedicated Mongo collection, own *_id, user_id-scoped ownership,
+#  grow-a-transcript-in-place per turn) -- the closest existing analog for
+#  genuine multi-turn stateful LLM interaction in this codebase (see the
+#  audit that preceded this pass). Schema/content/design this is built
+#  against lives in banks/ai_assisted_bank.py (STAGE_ORDER, STAGE_CONFIG,
+#  CONSENT_GATE, SELF_REVIEW, FINAL_SUMMARY_TEMPLATE).
+#
+#  NOT wired into companies.py or any real company's round list yet --
+#  same sequencing discipline as Round 3 (debugging_bank): dev-preview
+#  first, verified end-to-end, before any live-flow wiring. Backs
+#  /dev/ai-assisted-preview (DevAiAssistedPreview.jsx / AiAssistedSection.jsx).
+#
+#  current_stage/progression is derived SERVER-SIDE from actual LLM
+#  sufficiency judgments (stage_sufficiency_prompt/bug_explanation_grading_
+#  prompt, both wrap_untrusted + GRADING_INJECTION_DEFENSE hardened, same
+#  pairing as grade_answer_prompt above) or from the two deterministic
+#  button gates below -- never from a client-submitted claim of what stage
+#  it should be on.
+# =============================================================================
+
+_AI_ASSISTED_FREE_TEXT_STAGES = ("understand", "approach", "complexity", "explain_bug")
+
+# Fixed, natural candidate-facing opener per free-text stage. STAGE_CONFIG's
+# own `prompt_intro` (ai_assisted_bank.py) is written as an INSTRUCTION FOR
+# THE GRADER ("Ask the candidate...") -- reused as-is for the LLM's judging
+# context in stage_sufficiency_prompt, but not natural as literal chat text,
+# so this is the actual shown phrasing (a deliberate, small implementation
+# choice, not data-driven, since it's always the same ~3 openers).
+_AI_ASSISTED_STAGE_OPENERS = {
+    "understand": "First, in your own words -- what is this problem asking you to do? Talk me through the inputs, outputs, and any constraints that matter.",
+    "approach": "Good. Now, what's your strategy? Walk me through the algorithmic approach you'd use to solve this.",
+    "complexity": "And what's the time and space complexity of that approach?",
+}
+
+_AI_ASSISTED_CLIENT_SAFE_FIELDS = ("id", "title", "difficulty", "topic", "statement", "input_format", "output_format", "constraints")
+
+
+def _strip_ai_assisted_problem(problem: Dict[str, Any]) -> Dict[str, Any]:
+    """Client-safe projection -- deliberately excludes the ENTIRE
+    ai_assisted_variant (flawed_code, corrected_code, bug_category,
+    bug_explanation_key_points). The editor starts empty; flawed_code is
+    revealed only via the consent="yes" action, corrected_code only at
+    completion -- both delivered through session["revealed_code"], never
+    through this problem projection."""
+    return {k: problem[k] for k in _AI_ASSISTED_CLIENT_SAFE_FIELDS if k in problem}
+
+
+def _ai_assisted_lang_display(lang: str) -> str:
+    return {"cpp": "C++", "c": "C", "python": "Python", "java": "Java"}.get(lang, lang)
+
+
+def _score_ai_assisted_session(session: Dict[str, Any]) -> Dict[str, Any]:
+    """PROPOSED SCORING DEFAULT -- NOT CONFIRMED. Flagged exactly like
+    Section 2's rubric weighting was flagged earlier as an assumption
+    pending sign-off; implemented as the working default, not a locked
+    decision.
+
+    Weights: self-review correctness 0.5 (the core test per the confirmed
+    evidence -- did they correctly say "No" to the flawed code) +
+    bug-explanation quality 0.35 (graded against that problem's
+    bug_explanation_key_points) + stage-completion efficiency 0.15 across
+    understand/approach/complexity (fewer re-prompts needed = higher
+    signal of genuine understanding, min(1.0, 1/attempts) per stage,
+    averaged).
+
+    If self_review_result == "yes" (candidate blindly accepted the flawed
+    code -- the UNCONFIRMED/assumed-default path, see ai_assisted_bank.
+    SELF_REVIEW["on_yes"]), self_review_correct AND bug_explanation_quality
+    are BOTH 0 by construction (that path never reaches explain_bug), so
+    this formula alone caps the score at 0.15 * stage_efficiency <= 0.15 --
+    well under any reasonable passing cutoff (0.5), with no special-cased
+    override needed. That's the intentional "missing the actual point of
+    the round should dominate the outcome" behavior, achieved by the
+    weighting itself rather than an if-branch.
+    """
+    attempts = session.get("stage_attempts", {})
+    effs = [min(1.0, 1.0 / max(1, attempts.get(st, 1))) for st in ("understand", "approach", "complexity")]
+    stage_efficiency = sum(effs) / len(effs) if effs else 0.0
+
+    self_review_correct = 1.0 if session.get("self_review_result") == "no" else 0.0
+    bug_explanation_quality = (session.get("bug_explanation_score") or 0) / 100.0
+
+    score = 0.5 * self_review_correct + 0.35 * bug_explanation_quality + 0.15 * stage_efficiency
+    passed = score >= 0.5
+    if not self_review_correct:
+        reason = "candidate accepted the flawed code as correct -- missed the core test of this round"
+    elif bug_explanation_quality >= 0.5:
+        reason = "candidate correctly caught the flawed code and explained the real bug"
+    else:
+        reason = "candidate caught the flaw but the bug explanation was weak or generic"
+    return {
+        "score": round(score, 3),
+        "passed": passed,
+        "reason": reason,
+        "components": {
+            "self_review_correct": self_review_correct,
+            "bug_explanation_quality": round(bug_explanation_quality, 3),
+            "stage_efficiency": round(stage_efficiency, 3),
+        },
+    }
+
+
+async def _finalize_ai_assisted_section(section: dict, attempt_id: str, user_id: str) -> dict:
+    """submit_section's "ai_assisted" dispatch target. UNLIKE every other
+    section's grading function, this deliberately does NOT take
+    body.answers at all -- Round 4 is a stateful, multi-turn conversation
+    whose true state lives in db.ai_assisted_sessions (created at
+    generation time), not in an answers payload the client submits. A
+    client-supplied score or stage claim has NO code path into this
+    function to have any effect; everything is re-derived from the
+    stored session server-side, via the exact same _score_ai_assisted_
+    session() formula the live self_review="Yes"/explain_bug-sufficient
+    paths already use.
+
+    Also covers "the candidate ran out the timer or left mid-
+    conversation" -- _score_ai_assisted_session is already null-safe
+    against an in-progress session (self_review_result/
+    bug_explanation_score simply score as 0 in the formula when unset),
+    so scoring an abandoned session needs no special-casing here. Marks
+    the session "completed" if it wasn't already, so it can't keep
+    mutating after being scored."""
+    session = await db.ai_assisted_sessions.find_one(
+        {"attempt_id": attempt_id, "section_key": section["key"], "user_id": user_id}, {"_id": 0},
+    )
+    if not session:
+        # No session was ever created (generation failed/crashed) -- score
+        # as a complete miss rather than 500, same "never leave the
+        # attempt hanging" philosophy as coding's _reference_broken skip.
+        return {"score": 0.0, "passed": False, "reason": "no session found for this section", "problem_id": None}
+
+    outcome = _score_ai_assisted_session(session)
+    if session.get("status") != "completed":
+        await db.ai_assisted_sessions.update_one(
+            {"session_id": session["session_id"]},
+            {"$set": {"status": "completed", "completed_at": iso(now_utc()), "final_outcome": outcome}},
+        )
+    return {
+        "score": outcome["score"],
+        "passed": outcome["passed"],
+        "reason": outcome["reason"],
+        "problem_id": session.get("problem_id"),
+        "self_review_result": session.get("self_review_result"),
+        "components": outcome["components"],
+    }
+
+
+class StartAiAssistedIn(BaseModel):
+    problem_id: Optional[str] = None
+
+
+@api.post("/dev/ai-assisted/start")
+async def dev_ai_assisted_start(body: StartAiAssistedIn, user: Dict[str, Any] = Depends(require_user)):
+    """DEV/TEST-ONLY: starts a new Round 4 (AI-Assisted Coding) session.
+    Draws a REAL problem via ai_assisted_bank.sample_one() (the same
+    verified draw function a future live wiring would use) unless a
+    specific problem_id is passed (for reproducible manual/automated
+    testing)."""
+    if body.problem_id:
+        problem = ai_assisted_bank.get_problem(body.problem_id)
+        if not problem:
+            raise HTTPException(404, "Unknown ai-assisted problem id")
+    else:
+        seen = await ai_assisted_bank.get_seen_ids(user["user_id"])
+        problem = ai_assisted_bank.sample_one(exclude_ids=seen)
+    await ai_assisted_bank.mark_seen(user["user_id"], [problem["id"]])
+
+    session_id = new_id("aas")
+    welcome = f"Let's talk through \"{problem['title']}\". " + _AI_ASSISTED_STAGE_OPENERS["understand"]
+    session = {
+        "session_id": session_id,
+        "user_id": user["user_id"],
+        "problem_id": problem["id"],
+        "problem": _strip_ai_assisted_problem(problem),
+        "current_stage": "understand",
+        "transcript": [{"role": "ai", "stage": "understand", "text": welcome, "at": iso(now_utc())}],
+        "stage_attempts": {"understand": 0, "approach": 0, "complexity": 0, "explain_bug": 0},
+        "consent_given": None,
+        "self_review_result": None,
+        "bug_explanation_text": None,
+        "bug_explanation_score": None,
+        "revealed_code": None,
+        "final_outcome": None,
+        "status": "in_progress",
+        "created_at": iso(now_utc()),
+        "completed_at": None,
+    }
+    await db.ai_assisted_sessions.insert_one(session)
+    session.pop("_id", None)
+    return session
+
+
+@api.get("/dev/ai-assisted/{session_id}")
+async def dev_ai_assisted_get(session_id: str, user: Dict[str, Any] = Depends(require_user)):
+    doc = await db.ai_assisted_sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Not found")
+    return doc
+
+
+class AiAssistedMessageIn(BaseModel):
+    text: str
+
+
+@api.post("/dev/ai-assisted/{session_id}/message")
+async def dev_ai_assisted_message(session_id: str, body: AiAssistedMessageIn, user: Dict[str, Any] = Depends(require_user)):
+    """Free-text stages only (understand/approach/complexity/explain_bug).
+    The consent and self_review gates are button-driven -- see the two
+    routes below, never this one."""
+    session = await db.ai_assisted_sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not session:
+        raise HTTPException(404, "Not found")
+    stage = session["current_stage"]
+    if stage not in _AI_ASSISTED_FREE_TEXT_STAGES:
+        raise HTTPException(409, f"Current stage '{stage}' does not accept free-text messages")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    problem = ai_assisted_bank.get_problem(session["problem_id"])
+    variant = problem["ai_assisted_variant"]
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": stage, "text": body.text, "at": iso(now_utc())})
+    attempts = session["stage_attempts"]
+
+    update: Dict[str, Any] = {}
+
+    if stage == "explain_bug":
+        # call_json_gpt (GPT_MINI = gpt-5.4-mini, temperature 0) -- Round 4's
+        # staged-conversation grading.
+        grade = await call_json_gpt(
+            "You grade a candidate's bug-explanation for an AI-assisted coding "
+            "assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+            bug_explanation_grading_prompt(
+                problem["title"], variant["bug_category"], variant["bug_explanation_key_points"], body.text,
+            ),
+            temperature=0,
+        ) or {"sufficient": False, "reprompt": "Could you point to the specific line or condition that's wrong, and why?", "score": 0, "one_line_verdict": ""}
+        grade = _attach_grading_flag(grade)
+        sufficient = bool(grade.get("sufficient"))
+        attempts["explain_bug"] = attempts.get("explain_bug", 0) + 1
+
+        if sufficient:
+            session["bug_explanation_text"] = body.text
+            session["bug_explanation_score"] = grade.get("score", 0)
+            session["current_stage"] = "complete"
+            session["status"] = "completed"
+            session["completed_at"] = iso(now_utc())
+            session["revealed_code"] = {
+                "label": "Reference Solution (Fixed)",
+                "language": variant["display_language"],
+                "code": variant["corrected_code"],
+            }
+            final_outcome = _score_ai_assisted_session(session)
+            session["final_outcome"] = final_outcome
+            transcript.append({"role": "ai", "stage": "explain_bug", "text": grade.get("one_line_verdict") or "Correct -- that's the actual bug.", "at": iso(now_utc())})
+            transcript.append({"role": "ai", "stage": "complete", "text": ai_assisted_bank.FINAL_SUMMARY_TEMPLATE["heading"], "at": iso(now_utc())})
+            update.update({
+                "bug_explanation_text": session["bug_explanation_text"],
+                "bug_explanation_score": session["bug_explanation_score"],
+                "current_stage": "complete", "status": "completed", "completed_at": session["completed_at"],
+                "revealed_code": session["revealed_code"], "final_outcome": final_outcome,
+            })
+        else:
+            reprompt = grade.get("reprompt") or "Could you point to the specific line or condition that's wrong, and why?"
+            transcript.append({"role": "ai", "stage": "explain_bug", "text": reprompt, "at": iso(now_utc())})
+    else:
+        stage_cfg = ai_assisted_bank.STAGE_CONFIG[stage]
+        # Verdict comes from the element flags in _grade_stage_free_text, not from the model.
+        grade = await _grade_stage_free_text(stage, stage_cfg, body.text)
+        sufficient = grade["sufficient"]
+        attempts[stage] = attempts.get(stage, 0) + 1
+
+        if sufficient:
+            next_stage = ai_assisted_bank.STAGE_ORDER[ai_assisted_bank.STAGE_ORDER.index(stage) + 1]
+            session["current_stage"] = next_stage
+            if next_stage == "consent":
+                ai_msg = ai_assisted_bank.CONSENT_GATE["prompt_template"].format(
+                    language=_ai_assisted_lang_display(variant["display_language"])
+                )
+            else:
+                ai_msg = _AI_ASSISTED_STAGE_OPENERS[next_stage]
+            transcript.append({"role": "ai", "stage": next_stage, "text": ai_msg, "at": iso(now_utc())})
+            update["current_stage"] = next_stage
+        else:
+            reprompt = grade.get("reprompt") or (stage_cfg["reprompt_examples"] or ["Could you say a bit more?"])[0]
+            transcript.append({"role": "ai", "stage": stage, "text": reprompt, "at": iso(now_utc())})
+
+    update["transcript"] = transcript
+    update["stage_attempts"] = attempts
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+async def _grade_stage_free_text(stage: str, stage_cfg: Dict[str, Any], text: str) -> Dict[str, Any]:
+    """Round 4 free-text stage gate (understand / approach / complexity). The
+    model marks each required element present or absent (temperature 0). The
+    pass/fail verdict is computed here: the stage passes when the fraction of
+    present elements is at least ai_assisted_bank.STAGE_SUFFICIENCY_THRESHOLD.
+    A missing or malformed model reply counts every element as absent."""
+    required = stage_cfg["required_elements"]
+    examples = stage_cfg["reprompt_examples"]
+    grade = await call_json_gpt(
+        "You check a candidate's answer for an AI-assisted coding assessment. "
+        "Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+        stage_sufficiency_prompt(
+            stage, stage_cfg["prompt_intro"], stage_cfg["sufficiency_rubric"],
+            examples, text, required,
+        ),
+        temperature=0,
+    ) or {}
+    raw_elements = grade.get("elements") if isinstance(grade.get("elements"), dict) else {}
+    flags = {key: raw_elements.get(key) is True for key in required}
+    present = sum(flags.values())
+    sufficient = bool(required) and present / len(required) >= ai_assisted_bank.STAGE_SUFFICIENCY_THRESHOLD
+    reprompt = grade.get("reprompt") or (examples[0] if examples else "Could you say a bit more?")
+    return {"sufficient": sufficient, "elements": flags, "reprompt": reprompt}
+
+
+class AiAssistedButtonIn(BaseModel):
+    value: bool
+
+
+@api.post("/dev/ai-assisted/{session_id}/consent")
+async def dev_ai_assisted_consent(session_id: str, body: AiAssistedButtonIn, user: Dict[str, Any] = Depends(require_user)):
+    """Deterministic, button-driven -- NO LLM call. 'No' holds at the same
+    gate and re-prompts patiently (no penalty, genuine candidate pacing
+    control, per the confirmed evidence). 'Yes' reveals flawed_code into
+    the editor and advances to self_review."""
+    session = await db.ai_assisted_sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not session:
+        raise HTTPException(404, "Not found")
+    if session["current_stage"] != "consent":
+        raise HTTPException(409, f"Current stage is '{session['current_stage']}', not 'consent'")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": "consent", "text": "Yes" if body.value else "No", "at": iso(now_utc())})
+    update: Dict[str, Any] = {}
+
+    if not body.value:
+        transcript.append({"role": "ai", "stage": "consent", "text": ai_assisted_bank.CONSENT_GATE["on_no"]["message"], "at": iso(now_utc())})
+    else:
+        problem = ai_assisted_bank.get_problem(session["problem_id"])
+        variant = problem["ai_assisted_variant"]
+        rng = ai_assisted_bank.bug_marker_line_range(variant["flawed_code"])
+        session["consent_given"] = True
+        session["current_stage"] = "self_review"
+        session["revealed_code"] = {"label": "Generated Code", "language": variant["display_language"], "code": variant["flawed_code"]}
+        review_msg = ai_assisted_bank.SELF_REVIEW["prompt_template"].format(start=rng["start"], end=rng["end"])
+        transcript.append({"role": "ai", "stage": "self_review", "text": review_msg, "at": iso(now_utc())})
+        update.update({"consent_given": True, "current_stage": "self_review", "revealed_code": session["revealed_code"]})
+
+    update["transcript"] = transcript
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+@api.post("/dev/ai-assisted/{session_id}/self_review")
+async def dev_ai_assisted_self_review(session_id: str, body: AiAssistedButtonIn, user: Dict[str, Any] = Depends(require_user)):
+    """Deterministic, button-driven -- NO LLM call. 'No' (correct: caught
+    the flaw) advances to explain_bug. 'Yes' (accepted flawed code as
+    correct) applies the UNCONFIRMED/assumed-default path documented in
+    ai_assisted_bank.SELF_REVIEW["on_yes"] -- ends the round immediately,
+    scores as a miss, still shows corrected_code as the reference summary."""
+    session = await db.ai_assisted_sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not session:
+        raise HTTPException(404, "Not found")
+    if session["current_stage"] != "self_review":
+        raise HTTPException(409, f"Current stage is '{session['current_stage']}', not 'self_review'")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    problem = ai_assisted_bank.get_problem(session["problem_id"])
+    variant = problem["ai_assisted_variant"]
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": "self_review", "text": "Yes" if body.value else "No", "at": iso(now_utc())})
+    update: Dict[str, Any] = {}
+
+    if not body.value:
+        session["self_review_result"] = "no"
+        session["current_stage"] = "explain_bug"
+        transcript.append({"role": "ai", "stage": "explain_bug", "text": ai_assisted_bank.SELF_REVIEW["on_no"]["message"], "at": iso(now_utc())})
+        update.update({"self_review_result": "no", "current_stage": "explain_bug"})
+    else:
+        session["self_review_result"] = "yes"
+        session["current_stage"] = "complete"
+        session["status"] = "completed"
+        session["completed_at"] = iso(now_utc())
+        session["revealed_code"] = {"label": "Reference Solution (Fixed)", "language": variant["display_language"], "code": variant["corrected_code"]}
+        final_outcome = _score_ai_assisted_session(session)
+        session["final_outcome"] = final_outcome
+        transcript.append({"role": "ai", "stage": "complete", "text": ai_assisted_bank.FINAL_SUMMARY_TEMPLATE["heading"], "at": iso(now_utc())})
+        update.update({
+            "self_review_result": "yes", "current_stage": "complete", "status": "completed",
+            "completed_at": session["completed_at"], "revealed_code": session["revealed_code"],
+            "final_outcome": final_outcome,
+        })
+
+    update["transcript"] = transcript
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+# =============================================================================
+#  Capgemini Round 4 (AI-Assisted Coding) -- LIVE, attempt-scoped routes.
+#  Deliberately SEPARATE from the /dev/ai-assisted/* routes above (not
+#  wrappers around them, no shared route-body code) -- same "dev route
+#  stays untouched, real flow is its own code path" separation Round 3
+#  used for /api/dev/debugging/run vs. the real coding/debugging
+#  dispatch. Reuses only the shared, non-route-specific helpers those dev
+#  routes ALSO happen to use (_score_ai_assisted_session, STAGE_CONFIG,
+#  the prompt builders, etc.) -- never the dev routes' own function
+#  bodies, so the dev-preview's behavior is unaffected by this section.
+#
+#  Looked up via {attempt_id, section_key, user_id} (ownership-checked
+#  against the attempt first, then confirms the section is actually type
+#  "ai_assisted") rather than a bare session_id the client would have to
+#  separately track -- the frontend already knows attempt_id (from the
+#  URL) and section_key (from currentSection.key), matching how /oa/run
+#  is already scoped for the "coding" round above.
+# =============================================================================
+
+async def _load_ai_assisted_session_for_attempt(attempt_id: str, section_key: str, user_id: str) -> Dict[str, Any]:
+    attempt = await db.oa_attempts.find_one({"attempt_id": attempt_id, "user_id": user_id}, {"_id": 0})
+    if not attempt:
+        raise HTTPException(404, "Attempt not found")
+    section = next((s for s in attempt["sections"] if s["key"] == section_key), None)
+    if not section or section["type"] != "ai_assisted":
+        raise HTTPException(404, "Not an AI-Assisted Coding section")
+    session = await db.ai_assisted_sessions.find_one(
+        {"attempt_id": attempt_id, "section_key": section_key, "user_id": user_id}, {"_id": 0},
+    )
+    if not session:
+        raise HTTPException(404, "Session not found -- section may still be generating")
+    return session
+
+
+def _client_ai_assisted_session(session: Dict[str, Any]) -> Dict[str, Any]:
+    """The session as the candidate may see it. final_outcome keeps score, passed
+    and reason, which the completion screen reads. Its per-component breakdown is
+    left out. The stored session is not modified."""
+    outcome = session.get("final_outcome")
+    if not isinstance(outcome, dict) or "components" not in outcome:
+        return session
+    return {**session, "final_outcome": {k: v for k, v in outcome.items() if k != "components"}}
+
+
+@api.get("/oa/{attempt_id}/ai-assisted/{section_key}")
+async def oa_ai_assisted_get(attempt_id: str, section_key: str, user: Dict[str, Any] = Depends(require_user)):
+    session = await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    return _client_ai_assisted_session(session)
+
+
+@api.post("/oa/{attempt_id}/ai-assisted/{section_key}/message")
+async def oa_ai_assisted_message(attempt_id: str, section_key: str, body: AiAssistedMessageIn, user: Dict[str, Any] = Depends(require_user)):
+    """Live-flow counterpart of dev_ai_assisted_message -- same logic,
+    attempt+section_key scoped instead of bare session_id. Free-text
+    stages only (understand/approach/complexity/explain_bug); consent and
+    self_review are button-driven, see the two routes below."""
+    session = await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    session_id = session["session_id"]
+    stage = session["current_stage"]
+    if stage not in _AI_ASSISTED_FREE_TEXT_STAGES:
+        raise HTTPException(409, f"Current stage '{stage}' does not accept free-text messages")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    problem = ai_assisted_bank.get_problem(session["problem_id"])
+    variant = problem["ai_assisted_variant"]
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": stage, "text": body.text, "at": iso(now_utc())})
+    attempts = session["stage_attempts"]
+
+    update: Dict[str, Any] = {}
+
+    if stage == "explain_bug":
+        # call_json_gpt (GPT_MINI = gpt-5.4-mini, temperature 0) -- Round 4's
+        # staged-conversation grading.
+        grade = await call_json_gpt(
+            "You grade a candidate's bug-explanation for an AI-assisted coding "
+            "assessment. Return only strict JSON.\n\n" + GRADING_INJECTION_DEFENSE,
+            bug_explanation_grading_prompt(
+                problem["title"], variant["bug_category"], variant["bug_explanation_key_points"], body.text,
+            ),
+            temperature=0,
+        ) or {"sufficient": False, "reprompt": "Could you point to the specific line or condition that's wrong, and why?", "score": 0, "one_line_verdict": ""}
+        grade = _attach_grading_flag(grade)
+        sufficient = bool(grade.get("sufficient"))
+        attempts["explain_bug"] = attempts.get("explain_bug", 0) + 1
+
+        if sufficient:
+            session["bug_explanation_text"] = body.text
+            session["bug_explanation_score"] = grade.get("score", 0)
+            session["current_stage"] = "complete"
+            session["status"] = "completed"
+            session["completed_at"] = iso(now_utc())
+            session["revealed_code"] = {
+                "label": "Reference Solution (Fixed)",
+                "language": variant["display_language"],
+                "code": variant["corrected_code"],
+            }
+            final_outcome = _score_ai_assisted_session(session)
+            session["final_outcome"] = final_outcome
+            transcript.append({"role": "ai", "stage": "explain_bug", "text": grade.get("one_line_verdict") or "Correct -- that's the actual bug.", "at": iso(now_utc())})
+            transcript.append({"role": "ai", "stage": "complete", "text": ai_assisted_bank.FINAL_SUMMARY_TEMPLATE["heading"], "at": iso(now_utc())})
+            update.update({
+                "bug_explanation_text": session["bug_explanation_text"],
+                "bug_explanation_score": session["bug_explanation_score"],
+                "current_stage": "complete", "status": "completed", "completed_at": session["completed_at"],
+                "revealed_code": session["revealed_code"], "final_outcome": final_outcome,
+            })
+        else:
+            reprompt = grade.get("reprompt") or "Could you point to the specific line or condition that's wrong, and why?"
+            transcript.append({"role": "ai", "stage": "explain_bug", "text": reprompt, "at": iso(now_utc())})
+    else:
+        stage_cfg = ai_assisted_bank.STAGE_CONFIG[stage]
+        # Verdict comes from the element flags in _grade_stage_free_text, not from the model.
+        grade = await _grade_stage_free_text(stage, stage_cfg, body.text)
+        sufficient = grade["sufficient"]
+        attempts[stage] = attempts.get(stage, 0) + 1
+
+        if sufficient:
+            next_stage = ai_assisted_bank.STAGE_ORDER[ai_assisted_bank.STAGE_ORDER.index(stage) + 1]
+            session["current_stage"] = next_stage
+            if next_stage == "consent":
+                ai_msg = ai_assisted_bank.CONSENT_GATE["prompt_template"].format(
+                    language=_ai_assisted_lang_display(variant["display_language"])
+                )
+            else:
+                ai_msg = _AI_ASSISTED_STAGE_OPENERS[next_stage]
+            transcript.append({"role": "ai", "stage": next_stage, "text": ai_msg, "at": iso(now_utc())})
+            update["current_stage"] = next_stage
+        else:
+            reprompt = grade.get("reprompt") or (stage_cfg["reprompt_examples"] or ["Could you say a bit more?"])[0]
+            transcript.append({"role": "ai", "stage": stage, "text": reprompt, "at": iso(now_utc())})
+
+    update["transcript"] = transcript
+    update["stage_attempts"] = attempts
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+@api.post("/oa/{attempt_id}/ai-assisted/{section_key}/consent")
+async def oa_ai_assisted_consent(attempt_id: str, section_key: str, body: AiAssistedButtonIn, user: Dict[str, Any] = Depends(require_user)):
+    """Live-flow counterpart of dev_ai_assisted_consent -- deterministic,
+    button-driven, NO LLM call. Same logic, attempt+section_key scoped."""
+    session = await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    session_id = session["session_id"]
+    if session["current_stage"] != "consent":
+        raise HTTPException(409, f"Current stage is '{session['current_stage']}', not 'consent'")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": "consent", "text": "Yes" if body.value else "No", "at": iso(now_utc())})
+    update: Dict[str, Any] = {}
+
+    if not body.value:
+        transcript.append({"role": "ai", "stage": "consent", "text": ai_assisted_bank.CONSENT_GATE["on_no"]["message"], "at": iso(now_utc())})
+    else:
+        problem = ai_assisted_bank.get_problem(session["problem_id"])
+        variant = problem["ai_assisted_variant"]
+        rng = ai_assisted_bank.bug_marker_line_range(variant["flawed_code"])
+        session["consent_given"] = True
+        session["current_stage"] = "self_review"
+        session["revealed_code"] = {"label": "Generated Code", "language": variant["display_language"], "code": variant["flawed_code"]}
+        review_msg = ai_assisted_bank.SELF_REVIEW["prompt_template"].format(start=rng["start"], end=rng["end"])
+        transcript.append({"role": "ai", "stage": "self_review", "text": review_msg, "at": iso(now_utc())})
+        update.update({"consent_given": True, "current_stage": "self_review", "revealed_code": session["revealed_code"]})
+
+    update["transcript"] = transcript
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
+@api.post("/oa/{attempt_id}/ai-assisted/{section_key}/self_review")
+async def oa_ai_assisted_self_review(attempt_id: str, section_key: str, body: AiAssistedButtonIn, user: Dict[str, Any] = Depends(require_user)):
+    """Live-flow counterpart of dev_ai_assisted_self_review -- deterministic,
+    button-driven, NO LLM call. Same logic, attempt+section_key scoped.
+    'Yes' (accepts flawed code) applies the UNCONFIRMED/assumed-default
+    path documented in ai_assisted_bank.SELF_REVIEW["on_yes"]."""
+    session = await _load_ai_assisted_session_for_attempt(attempt_id, section_key, user["user_id"])
+    session_id = session["session_id"]
+    if session["current_stage"] != "self_review":
+        raise HTTPException(409, f"Current stage is '{session['current_stage']}', not 'self_review'")
+    if session["status"] != "in_progress":
+        raise HTTPException(409, "Session already completed")
+
+    problem = ai_assisted_bank.get_problem(session["problem_id"])
+    variant = problem["ai_assisted_variant"]
+    transcript = session["transcript"]
+    transcript.append({"role": "candidate", "stage": "self_review", "text": "Yes" if body.value else "No", "at": iso(now_utc())})
+    update: Dict[str, Any] = {}
+
+    if not body.value:
+        session["self_review_result"] = "no"
+        session["current_stage"] = "explain_bug"
+        transcript.append({"role": "ai", "stage": "explain_bug", "text": ai_assisted_bank.SELF_REVIEW["on_no"]["message"], "at": iso(now_utc())})
+        update.update({"self_review_result": "no", "current_stage": "explain_bug"})
+    else:
+        session["self_review_result"] = "yes"
+        session["current_stage"] = "complete"
+        session["status"] = "completed"
+        session["completed_at"] = iso(now_utc())
+        session["revealed_code"] = {"label": "Reference Solution (Fixed)", "language": variant["display_language"], "code": variant["corrected_code"]}
+        final_outcome = _score_ai_assisted_session(session)
+        session["final_outcome"] = final_outcome
+        transcript.append({"role": "ai", "stage": "complete", "text": ai_assisted_bank.FINAL_SUMMARY_TEMPLATE["heading"], "at": iso(now_utc())})
+        update.update({
+            "self_review_result": "yes", "current_stage": "complete", "status": "completed",
+            "completed_at": session["completed_at"], "revealed_code": session["revealed_code"],
+            "final_outcome": final_outcome,
+        })
+
+    update["transcript"] = transcript
+    await db.ai_assisted_sessions.update_one({"session_id": session_id}, {"$set": update})
+    session.update(update)
+    return session
+
+
 # =============================================================================
 #  Final cross-phase report
 # =============================================================================
+
+def _build_tcs_template_report(attempt: dict, oa_summary: dict, review: dict) -> Dict[str, Any]:
+    """Deterministic, template-based final-report narrative for TCS (2026-10
+    zero-AI-calls pass) -- no call_json, ever, unless TCS_REPORT_USE_AI is
+    explicitly turned on. Built purely from oa_summary/review (which are
+    themselves purely computed, no model call either -- see oa_review) and
+    the attempt's own stored tcs_tier (whitelisted via tcs_tiers.client_view,
+    same server-computed-only guarantee every other TCS tier display has).
+    Same {overall_verdict, overall_score, narrative, weakest_dimension,
+    strongest_dimension, next_steps} shape call_json's AI report returns, so
+    the frontend's FinalReport page needs no TCS-specific rendering."""
+    section_results = oa_summary["section_results"]
+    scored = [(k, v.get("score") or 0.0) for k, v in section_results.items()]
+    strongest = max(scored, key=lambda kv: kv[1])[0] if scored else ""
+    weak_topics = sorted((k for k, s in scored if s < 0.5), key=lambda k: section_results[k].get("score") or 0)
+
+    tcs_tier_doc = attempt.get("tcs_tier")
+    track_line = ""
+    if tcs_tier_doc:
+        track_view = tcs_tiers.client_view(tcs_tier_doc)
+        raw_tier = track_view.get("tier")
+        tier_name = tcs_tiers.TCS_TIER_DISPLAY_NAMES.get(raw_tier, raw_tier)
+        if tier_name:
+            track_line = f" Estimated track: {tier_name} ({track_view.get('reason', '')})."
+        else:
+            track_line = " No track estimate was reached (TCS does not publish its real cutoffs)."
+
+    section_lines = "; ".join(
+        f"{k}: {round((v.get('score') or 0) * 100)}%" for k, v in section_results.items()
+    )
+    narrative = (
+        f"TCS NQT -- composite score {int(oa_summary['composite_score'] * 100)}%, "
+        f"verdict: {oa_summary['verdict']}. Section scores -- {section_lines}."
+        f"{track_line}"
+    )
+    next_steps = [f"Revisit {k} (scored {round((section_results[k].get('score') or 0) * 100)}%)." for k in weak_topics] or [
+        "No section scored below 50% -- keep practicing at this level."
+    ]
+    return {
+        "overall_verdict": oa_summary["verdict"],
+        "overall_score": int(oa_summary["composite_score"] * 100),
+        "narrative": narrative,
+        "weakest_dimension": review["weakest_section"] or "",
+        "strongest_dimension": strongest,
+        "next_steps": next_steps,
+    }
+
+
+async def _finalize_interview_if_expired(interview_doc: Optional[dict]) -> Optional[dict]:
+    if interview_doc and interview_doc.get("mode") == "spark":
+        # An abandoned Spark interview is closed as timed out before the report reads it.
+        return await _spark_finalize_if_expired(interview_doc)
+    if interview_doc and interview_doc.get("mode") == "dave":
+        # Same idempotent timeout-finalization, for an abandoned Dave interview.
+        return await _dave_finalize_if_expired(interview_doc)
+    if interview_doc and interview_doc.get("mode") == "commit":
+        # Same idempotent timeout-finalization, for an abandoned Commit interview.
+        return await _commit_finalize_if_expired(interview_doc)
+    if interview_doc and interview_doc.get("mode") == "tcs":
+        # Same idempotent timeout-finalization, for an abandoned TCS interview --
+        # needed so the report-cache gate just above (capgemini_interview_open)
+        # correctly sees a timed-out status rather than a perpetually
+        # "in_progress" one for an interview nobody ever came back to.
+        return await _tcs_finalize_if_expired(interview_doc)
+    return interview_doc
+
+
+def _build_interview_summary(interview_doc: Optional[dict]) -> dict:
+    if not interview_doc:
+        return {"skipped": True}
+    answered = interview_doc.get("answers", [])
+    scores = [a["grade"].get("score", 0) for a in answered]
+    summary = {
+        "skipped": False,
+        "avg_score": round(sum(scores) / max(1, len(scores)), 1) if scores else 0,
+        "verdicts": [a["grade"].get("one_line_verdict", "") for a in answered],
+        "completed": interview_doc.get("status") == "completed",
+    }
+    if hints_enabled():
+        summary["hints_used"] = interview_doc.get("hints_used", 0)
+    # TCS-only (this key is never set by Spark/Dave/Commit, which never
+    # populate "tcs_score" -- so this is a no-op for every other mode,
+    # byte-identical to before this existed): when the interview deadline
+    # was reached before a phase was ever started, core.tcs_interview_score
+    # renormalizes weights across the phases that WERE assessed and
+    # explains that in plain English via `coverage_note` -- surfaced here
+    # so the report text states it, never silently omits it.
+    tcs_score = interview_doc.get("tcs_score")
+    if isinstance(tcs_score, dict) and tcs_score.get("coverage_note"):
+        summary["tcs_coverage_note"] = tcs_score["coverage_note"]
+    return summary
+
+
+async def _build_final_report_doc(
+    *, attempt: Optional[dict], interview_doc: Optional[dict], user: Dict[str, Any],
+    company_name: str, cache_query: Dict[str, Any], extra_doc_fields: Dict[str, Any],
+) -> dict:
+    """Shared core for both GET /report/{attempt_id} (legacy, attempt-
+    anchored -- unchanged response shape for old data and old clients) and
+    GET /interview/{interview_id}/report (new, interview-anchored). `attempt`
+    is None for an interview started via company_id with no OA attempt at
+    all -- oa_summary then degrades to {"skipped": True}, the same shape
+    interview_summary already uses when there's no interview, rather than
+    calling oa_review against an attempt that doesn't exist."""
+    resume_analysis: Dict[str, Any] = {}
+    resume_id = (attempt or {}).get("resume_id") or (interview_doc or {}).get("resume_id")
+    if resume_id:
+        r = await db.resumes.find_one({"resume_id": resume_id}, {"_id": 0})
+        if r:
+            resume_analysis = r.get("analysis", {})
+
+    review = None
+    if attempt is not None:
+        review = await oa_review(attempt["attempt_id"], user)  # reuse
+        oa_summary = {
+            "verdict": review["verdict"],
+            "composite_score": review["composite_score"],
+            "weakest_section": review["weakest_section"],
+            "section_results": {k: {"score": v.get("score"), "passed": v.get("passed")} for k, v in review["section_results"].items()},
+        }
+    else:
+        oa_summary = {"skipped": True}
+
+    interview_doc = await _finalize_interview_if_expired(interview_doc)
+    interview_summary = _build_interview_summary(interview_doc)
+
+    # A Spark, Dave, Commit or TCS attempt's report is neither read from nor
+    # written to the cache while its interview is still open: the report
+    # must not freeze without the interview. "tcs" added 2026-10 -- it was
+    # missing here even though TCS has no live interview flow yet at this
+    # point in the codebase's history, so a TCS report would have been
+    # served stale/cached while its (future) interview was still open the
+    # moment that flow existed; fixing the gate now, before the TCS flow is
+    # wired in, closes that gap pre-emptively rather than after the fact.
+    capgemini_interview_open = bool(interview_doc and interview_doc.get("mode") in ("spark", "dave", "commit", "tcs")
+                      and interview_doc["state"]["status"] == "in_progress")
+    cached = None if capgemini_interview_open else await db.reports.find_one(dict(cache_query), {"_id": 0})
+    if cached:
+        return cached
+
+    is_static_bank_only = attempt is not None and attempt.get("company_id") in _STATIC_BANK_ONLY_COMPANY_IDS
+    if is_static_bank_only and not tcs_report_use_ai_enabled():
+        # TCS, TCS_REPORT_USE_AI off (the default): deterministic template,
+        # never call_json. forbid_ai_calls() here is a tripwire, not load-
+        # bearing -- _build_tcs_template_report never calls an LLM by
+        # construction, so this should be a complete no-op in practice.
+        with forbid_ai_calls():
+            report = _build_tcs_template_report(attempt, oa_summary, review)
+    else:
+        fallback_verdict = oa_summary.get("verdict", "not_ready")
+        fallback_score = int(oa_summary["composite_score"] * 100) if "composite_score" in oa_summary else 0
+        fallback_weakest = (review or {}).get("weakest_section") or ""
+        report = await call_json(
+            "You are a senior career coach. Write ONE cohesive report. Return only strict JSON.",
+            final_report_prompt(company_name, resume_analysis, oa_summary, interview_summary),
+            model=SONNET,
+            max_tokens=8000,  # longest, most synthesis-heavy output in the app; extra
+                              # headroom above the 4096 default costs nothing if unused
+        ) or {
+            "overall_verdict": fallback_verdict,
+            "overall_score": fallback_score,
+            "narrative": "Report generation failed; showing raw OA verdict.",
+            "weakest_dimension": fallback_weakest,
+            "strongest_dimension": "",
+            "next_steps": [],
+        }
+
+    doc = {
+        "report_id": new_id("rep"),
+        "user_id": user["user_id"],
+        "company_name": company_name,
+        "resume_analysis": resume_analysis,
+        "oa_summary": oa_summary,
+        "interview_summary": interview_summary,
+        "report": report,
+        "created_at": iso(now_utc()),
+        **extra_doc_fields,
+    }
+    if not capgemini_interview_open:
+        await db.reports.insert_one(doc)
+        doc.pop("_id", None)
+    return doc
+
 
 @api.get("/report/{attempt_id}")
 async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_user)):
@@ -2924,65 +6785,46 @@ async def final_report(attempt_id: str, user: Dict[str, Any] = Depends(require_u
     if not attempt:
         raise HTTPException(404, "Attempt not found")
 
-    resume_analysis = {}
-    if attempt.get("resume_id"):
-        r = await db.resumes.find_one({"resume_id": attempt["resume_id"]}, {"_id": 0})
-        if r:
-            resume_analysis = r.get("analysis", {})
-
-    review = await oa_review(attempt_id, user)  # reuse
-    oa_summary = {
-        "verdict": review["verdict"],
-        "composite_score": review["composite_score"],
-        "weakest_section": review["weakest_section"],
-        "section_results": {k: {"score": v.get("score"), "passed": v.get("passed")} for k, v in review["section_results"].items()},
-    }
-
     interview_doc = await db.interviews.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
-    interview_summary = {"skipped": True}
-    if interview_doc:
-        answered = interview_doc.get("answers", [])
-        scores = [a["grade"].get("score", 0) for a in answered]
-        interview_summary = {
-            "skipped": False,
-            "avg_score": round(sum(scores) / max(1, len(scores)), 1) if scores else 0,
-            "verdicts": [a["grade"].get("one_line_verdict", "") for a in answered],
-            "completed": interview_doc.get("status") == "completed",
-        }
 
-    cached = await db.reports.find_one({"attempt_id": attempt_id, "user_id": user["user_id"]}, {"_id": 0})
-    if cached:
-        return cached
+    return await _build_final_report_doc(
+        attempt=attempt, interview_doc=interview_doc, user=user, company_name=attempt["company_name"],
+        cache_query={"attempt_id": attempt_id, "user_id": user["user_id"]},
+        extra_doc_fields={
+            "attempt_id": attempt_id,
+            "interview_id": interview_doc.get("interview_id") if interview_doc else None,
+            # Legacy interview docs predating this field fall back to the
+            # attempt's own tier for display continuity; a brand-new
+            # interview always has its own "tier" already (see 1b).
+            "tier": (interview_doc or {}).get("tier") or (attempt.get("capgemini_tier") or {}).get("tier"),
+            "tier_source": (interview_doc or {}).get("tier_source"),
+        },
+    )
 
-    report = await call_json(
-        "You are a senior career coach. Write ONE cohesive report. Return only strict JSON.",
-        final_report_prompt(attempt["company_name"], resume_analysis, oa_summary, interview_summary),
-        model=SONNET,
-        max_tokens=8000,  # longest, most synthesis-heavy output in the app; extra
-                          # headroom above the 4096 default costs nothing if unused
-    ) or {
-        "overall_verdict": oa_summary["verdict"],
-        "overall_score": int(oa_summary["composite_score"] * 100),
-        "narrative": "Report generation failed; showing raw OA verdict.",
-        "weakest_dimension": review["weakest_section"] or "",
-        "strongest_dimension": "",
-        "next_steps": [],
-    }
 
-    doc = {
-        "report_id": new_id("rep"),
-        "attempt_id": attempt_id,
-        "user_id": user["user_id"],
-        "company_name": attempt["company_name"],
-        "resume_analysis": resume_analysis,
-        "oa_summary": oa_summary,
-        "interview_summary": interview_summary,
-        "report": report,
-        "created_at": iso(now_utc()),
-    }
-    await db.reports.insert_one(doc)
-    doc.pop("_id", None)
-    return doc
+@api.get("/interview/{interview_id}/report")
+async def interview_report(interview_id: str, user: Dict[str, Any] = Depends(require_user)):
+    interview_doc = await db.interviews.find_one({"interview_id": interview_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not interview_doc:
+        raise HTTPException(404, "Interview not found")
+
+    attempt = None
+    if interview_doc.get("attempt_id"):
+        attempt = await db.oa_attempts.find_one(
+            {"attempt_id": interview_doc["attempt_id"], "user_id": user["user_id"]}, {"_id": 0},
+        )
+
+    company_name = (attempt or {}).get("company_name") or interview_doc.get("company_name")
+    return await _build_final_report_doc(
+        attempt=attempt, interview_doc=interview_doc, user=user, company_name=company_name,
+        cache_query={"interview_id": interview_id, "user_id": user["user_id"]},
+        extra_doc_fields={
+            "attempt_id": interview_doc.get("attempt_id"),
+            "interview_id": interview_id,
+            "tier": interview_doc.get("tier") or ((attempt or {}).get("capgemini_tier") or {}).get("tier"),
+            "tier_source": interview_doc.get("tier_source"),
+        },
+    )
 
 
 # =============================================================================
@@ -3182,6 +7024,163 @@ async def admin_mcq_stats(user: Dict[str, Any] = Depends(require_user)):
 app.include_router(api)
 
 
+_MCQ_POOL_WORKER_OFF_VALUES = {"0", "false", "no", "off"}
+
+
+def mcq_pool_worker_enabled(env_value: Optional[str] = None) -> bool:
+    """MCQ_POOL_WORKER_ENABLED: unset or any value other than 0/false/no/off keeps the worker on."""
+    raw = os.environ.get("MCQ_POOL_WORKER_ENABLED") if env_value is None else env_value
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _MCQ_POOL_WORKER_OFF_VALUES
+
+
+# ---- Capgemini interview humanizer / pushback flags (default OFF) ----------
+_FEATURE_FLAG_ON_VALUES = {"1", "true", "yes", "on"}
+
+
+def humanize_enabled(env_value: Optional[str] = None) -> bool:
+    """HUMANIZE_ENABLED: default OFF; any of 1/true/yes/on turns it on."""
+    raw = os.environ.get("HUMANIZE_ENABLED") if env_value is None else env_value
+    return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
+
+
+def _capgemini_tag_view(view: dict, interview: Optional[dict] = None) -> dict:
+    """FEATURE A: adds the "AI interviewer" persona tag to a Spark/Dave/
+    Commit client view, whenever HUMANIZE_ENABLED is on (STATED: "the UI
+    shows a small 'AI interviewer' tag. No claim to be human."). Applied at
+    every route-level return point (start/get/answer) so the tag is stable
+    across refreshes, not just on turns where an acknowledgement fired.
+
+    Also adds a "hints" field (used/limit/available/shown), whenever
+    HINTS_ENABLED is on, for the frontend's "Ask for a hint" button and its
+    display of hints already shown -- `interview` is the raw interview
+    document (for `hints_used`/`dsa_hints_shown`), optional because the
+    start routes only have the already-built view in hand; a freshly
+    created interview has used 0 hints and shown none regardless, so the
+    defaults are correct there. `shown` is the SAME list on every refresh
+    (it is read straight from the persisted document, never recomputed),
+    which is what makes a hint survive a refresh. Both additions are
+    no-ops, and this function returns `view` completely unchanged, when
+    their respective flag is off."""
+    if isinstance(view, dict) and view.get("mode") in ("spark", "dave", "commit") and humanize_enabled():
+        view["ai_interviewer"] = True
+        view["persona_label"] = capgemini_humanize.AI_INTERVIEWER_TAG
+    if isinstance(view, dict) and view.get("mode") in ("spark", "dave", "commit") and hints_enabled():
+        mode = view["mode"]
+        used = (interview or {}).get("hints_used", 0)
+        limit = capgemini_dsa_hints.HINT_LIMITS.get(mode, 0)
+        cur_id = (view.get("current_question") or {}).get("id")
+        available = (view.get("status") == "in_progress" and used < limit
+                    and capgemini_dsa_hints.is_dsa_solving_question(cur_id))
+        shown = (interview or {}).get("dsa_hints_shown", [])
+        view["hints"] = {"used": used, "limit": limit, "available": available, "shown": shown}
+    return view
+
+
+def pushback_enabled(env_value: Optional[str] = None) -> bool:
+    """PUSHBACK_ENABLED: default OFF; any of 1/true/yes/on turns it on."""
+    raw = os.environ.get("PUSHBACK_ENABLED") if env_value is None else env_value
+    return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
+
+
+def hints_enabled(env_value: Optional[str] = None) -> bool:
+    """HINTS_ENABLED: default OFF; any of 1/true/yes/on turns it on. Gates
+    every single piece of the DSA-hints feature (detection, scoring penalty,
+    and the extra "hints" field on the client view) -- with it off, none of
+    that code runs at all, so behaviour is byte-for-byte unchanged from
+    before this feature existed."""
+    raw = os.environ.get("HINTS_ENABLED") if env_value is None else env_value
+    return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
+
+
+def tcs_report_use_ai_enabled(env_value: Optional[str] = None) -> bool:
+    """TCS_REPORT_USE_AI: default OFF (opposite polarity from every other
+    flag here -- OFF is the SAFE/zero-AI-calls state, not a disabled
+    feature). With it off (the default), final_report builds TCS's report
+    narrative from a fixed template over oa_summary alone, never calling
+    call_json. Flipping it on is an explicit, deliberate opt BACK into the
+    model call every other company still gets -- not a bug, a one-line
+    escape hatch the owner asked for."""
+    raw = os.environ.get("TCS_REPORT_USE_AI") if env_value is None else env_value
+    return (raw or "").strip().lower() in _FEATURE_FLAG_ON_VALUES
+
+
+_CAPGEMINI_COMPANY_NAME = "Capgemini"  # STATED: matches dave/hr.py's own COMPANY_NAME value exactly
+
+
+def _capgemini_rephrase_key(stage: str, current_id: str, state: dict, dsa_problem_id: Optional[str],
+                           cs_questions: Optional[list], hr_questions: Optional[list]) -> str:
+    """Resolves the capgemini_humanize.REPHRASES lookup key for whatever
+    question is currently being asked, shared by Dave and Commit (and,
+    trivially, Spark's own DSA-only case). Only the MAIN fixed-question id
+    (not a nudge or a Commit CS follow-up sub-id, neither of which has its
+    own rephrase entry -- see humanize.py's module docstring) resolves to
+    the underlying bank id; anything else returns current_id unchanged,
+    which safely falls through to rephrase_for's verbatim fallback since a
+    positional/nudge/follow-up id is never itself a REPHRASES key."""
+    if stage == "dsa" and dsa_problem_id and current_id.endswith("-dsa"):
+        return dsa_problem_id
+    if stage in ("cs_fundamentals", "cs_grilling") and cs_questions:
+        idx = state.get("cs_index", 0)
+        if idx < len(cs_questions) and current_id in (f"dave-cs-{idx}", f"commit-cs-{idx}-main"):
+            return cs_questions[idx]["id"]
+    if stage == "hr" and hr_questions:
+        idx = state.get("hr_index", 0)
+        if idx < len(hr_questions) and current_id in (f"dave-hr-{idx}", f"commit-hr-{idx}"):
+            return hr_questions[idx]["id"]
+    return current_id
+
+
+# STATED: a time-awareness line fires "at named points (for example entering
+# the last stage)". INTERPOLATED choice: the named point is entering "hr",
+# the actual last real stage for both Dave and Commit (their only stage
+# after hr is the synthetic "done" state, not a question stage); Spark has
+# no hr stage at all, so this never fires for Spark (STATED: Spark keeps
+# only acknowledgements/transitions/idle, no CS/complexity/time-awareness
+# content, since it has none of those stages).
+_CAPGEMINI_STAGE_TO_HUMANIZE_KEY = {"dsa": "dsa", "cs_fundamentals": "cs", "cs_grilling": "cs", "hr": "hr"}
+_CAPGEMINI_TIME_AWARENESS_STAGE = "hr"
+
+
+def _capgemini_humanizer_prefix(nxt: dict, state: dict, prev_stage: str, now: float, rng) -> Optional[str]:
+    """FEATURE A: computes the optional acknowledgement + stage-transition +
+    one-time time-awareness prefix for nxt, WITHOUT mutating nxt itself --
+    the caller must apply the returned text only to the CLIENT-FACING
+    view's copy of current_question, never to the stored/persisted one.
+    Reason: current_question['prompt'] is reused later as grading context
+    (e.g. spark_project_flags_prompt(current['prompt'], ...), dave_cs_flags_
+    prompt(q['text'], ...)) when the candidate's answer to THIS question is
+    graded on the NEXT request -- contaminating it with cosmetic
+    interviewer chatter would leak into what the grader sees, which the
+    equivalence test (flags on vs off must produce identical grading
+    prompts when no pushback triggers) is specifically designed to catch.
+    Mutates `state`'s small bookkeeping fields (last_ack_line,
+    last_transition_line, time_awareness_given) so lines don't repeat
+    back-to-back across separate HTTP requests -- persisted automatically
+    since the caller always includes `state` in its own `changes` dict.
+    Shared by Dave, Commit and Spark; the stage-name keys above cover all
+    three tiers' stage vocabularies and this is otherwise tier-agnostic."""
+    parts = []
+    is_first_after_intro = prev_stage == "intro"
+    ack = capgemini_humanize.maybe_acknowledgement(rng, state.get("last_ack_line"), is_first_after_intro)
+    if ack:
+        parts.append(ack)
+        state["last_ack_line"] = ack
+    new_stage = nxt.get("stage")
+    if new_stage and new_stage != prev_stage:
+        key = _CAPGEMINI_STAGE_TO_HUMANIZE_KEY.get(new_stage)
+        if key:
+            line = capgemini_humanize.stage_transition_line(key, rng, state.get("last_transition_line"))
+            parts.append(line)
+            state["last_transition_line"] = line
+        if new_stage == _CAPGEMINI_TIME_AWARENESS_STAGE and not state.get("time_awareness_given"):
+            state["time_awareness_given"] = True
+            minutes = capgemini_humanize.minutes_remaining(state["deadline_at"], now)
+            parts.append(capgemini_humanize.time_remaining_line(minutes))
+    return (" ".join(parts) + " ") if parts else None
+
+
 @app.on_event("startup")
 async def _startup():
     # Wire mcq_pool with our db handle and kick off the singleton background
@@ -3189,6 +7188,10 @@ async def _startup():
     mcq_pool.init(db)
     mcq_static_bank.init(db)
     gamified_round.init(db)
+    problem_bank.init(db)
+    debugging_bank.init(db)
+    ai_assisted_bank.init(db)
+    capgemini_recruitment_process.init(db)
     try:
         await db.mcq_pool.create_index([("company_name", 1), ("section_key", 1), ("verified", 1)])
         await db.mcq_pool_stats.create_index([("company_name", 1), ("section_key", 1)], unique=True)
@@ -3203,7 +7206,12 @@ async def _startup():
         await db.game_session.create_index([("user_id", 1), ("gameType", 1)])
     except Exception as e:  # pragma: no cover
         logger.warning("mcq_pool index create failed: %s", e)
-    mcq_pool.start_worker(COMPANIES)
+    # The pool worker pre-generates MCQs with the LLM. It is on by default
+    # (existing behaviour). Set MCQ_POOL_WORKER_ENABLED=0 (or false/no/off) to disable it.
+    if mcq_pool_worker_enabled():
+        mcq_pool.start_worker(COMPANIES)
+    else:
+        logger.info("mcq_pool background worker disabled (MCQ_POOL_WORKER_ENABLED is off)")
 
 
 @app.on_event("shutdown")

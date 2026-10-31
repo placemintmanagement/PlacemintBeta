@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api";
 import { useAuth } from "../auth";
+import { PageShell } from "../components/shared";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
@@ -31,12 +32,13 @@ export default function AuthCallback() {
     })();
   }, [navigate, setUser]);
 
+  // Visual only: cream shell and the shared spinner colour. Logic unchanged.
   return (
-    <div className="min-h-screen grid place-items-center">
+    <PageShell section={false} className="grid place-items-center">
       <div className="text-center">
-        <div className="w-8 h-8 mx-auto border-2 border-pm-primary border-t-transparent rounded-full animate-spin"></div>
-        <div className="mt-4 text-sm text-pm-text2 font-mono">Finishing sign-in…</div>
+        <div className="w-9 h-9 mx-auto rounded-full animate-spin" style={{ border: "2px solid var(--pm-teal-deep)", borderTopColor: "transparent" }}></div>
+        <div className="mt-4" style={{ fontSize: 15, color: "rgba(11,42,48,0.7)" }}>Finishing sign-in…</div>
       </div>
-    </div>
+    </PageShell>
   );
 }

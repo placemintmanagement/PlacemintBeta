@@ -23,13 +23,21 @@ import { Auth0Provider } from "@auth0/auth0-react";
 // first-seen-sub provisioning can fetch a real email via Auth0's /userinfo
 // endpoint (see auth0_middleware.get_userinfo_email).
 //
-// Still true: this provider and Auth0ProtectedRoute are demonstrated on
-// /dev/auth0-preview (see App.js), NOT wired into /dashboard or
-// /oa/:attemptId's route guards. App.js's `Protected` component still
-// gates those on the app's OWN useAuth() context (signup/login/Google) --
-// which is now a functional dead end for reaching the backend, since
-// require_user only accepts Auth0 tokens. Swapping Protected for
-// Auth0ProtectedRoute on the real routes was not part of this change.
+// UPDATED AGAIN (2026-10, "wire /login to Auth0" pass): the real /login and
+// /signup pages now call loginWithRedirect() as their primary CTA (the old
+// Google-session/email-password UI is still present, collapsed under an
+// "Other sign-in options" disclosure -- untouched code, just no longer the
+// default path, since it issues a session nothing on the backend accepts
+// anymore). App.js's `Protected` was NOT swapped for Auth0ProtectedRoute
+// wholesale -- it still gates on the app's own useAuth() context (so
+// Header/Dashboard/OnboardingModal etc. keep working off the SAME user
+// object they always have, with its college/plan/runs_used/... fields
+// Auth0's own user object doesn't carry), but now ALSO reads Auth0's own
+// isAuthenticated/isLoading directly to avoid bouncing a genuinely
+// authenticated visitor to /login during the brief window before
+// Auth0TokenSync's refresh() (see that file) resolves. Auth0ProtectedRoute
+// itself remains demonstrated only on /dev/auth0-preview, unused by any
+// real route.
 // ---------------------------------------------------------------------------
 
 const AUTH0_DOMAIN = process.env.REACT_APP_AUTH0_DOMAIN;

@@ -466,28 +466,51 @@ class TestProcessOneStemTranspileSource:
 
 class TestPseudocodeSectionRouting:
     """Verify that pseudocode-typed sections in _generate_section_questions
-    are actually routed through mcq_pool.fallback_live_verify (the 3-stage
-    pipeline) instead of the old raw call_json(pseudocode_prompt) path."""
+    are actually routed through mcq_static_bank first (Phase 0 migration,
+    2026-09: "pseudocode" is now a canonical static topic, 90/10 split same
+    as every other one), falling back to mcq_pool.fallback_live_verify (the
+    3-stage pipeline) for the live remainder/shortfall only -- and never to
+    the old raw call_json(pseudocode_prompt) path.
 
-    def test_generate_section_questions_pseudocode_uses_pipeline(self, monkeypatch):
+    mcq_static_bank.sample_mixed_static_part is monkeypatched to a known
+    (static_items, live_n) split rather than hitting the real bank, so this
+    stays a deterministic unit test instead of depending on live Mongo
+    content or whether mcq_static_bank.init(db) happened to run yet in this
+    process."""
+
+    def test_generate_section_questions_pseudocode_uses_static_bank_then_pipeline(self, monkeypatch):
         import asyncio as _a
         import server
         from banks import mcq_pool as _pool
+        from banks import mcq_static_bank as _static
 
         raw_called = {"n": 0}
-        pipeline_called = {"n": 0}
+        pipeline_called = {"n": 0, "count": None}
+        static_called = {"n": 0, "count": None}
 
         async def fake_call_json(*args, **kwargs):
             raw_called["n"] += 1
             return []
 
+        async def fake_sample_mixed_static_part(user_id, topic, count):
+            static_called["n"] += 1
+            static_called["count"] = count
+            # 2 static hits, remainder goes live -- mirrors the real 90/10
+            # split's shape without depending on live bank content.
+            live_n = max(0, count - 2)
+            return [{"id": f"static-{i}", "prompt": "p", "options": ["a", "b", "c", "d"],
+                     "correct_index": 0, "explanation": "e", "difficulty": "Easy"}
+                    for i in range(min(2, count))], live_n
+
         async def fake_fallback(*args, **kwargs):
             pipeline_called["n"] += 1
+            pipeline_called["count"] = args[3]
             return [{"id": "q1", "prompt": "p", "options": ["a", "b", "c", "d"],
                      "correct_index": 0, "explanation": "e", "difficulty": "Easy"}]
 
         monkeypatch.setattr(server, "call_json", fake_call_json)
         monkeypatch.setattr(_pool, "fallback_live_verify", fake_fallback)
+        monkeypatch.setattr(_static, "sample_mixed_static_part", fake_sample_mixed_static_part)
 
         section = {"type": "pseudocode", "name": "Programming Concepts",
                    "key": "pseudocode", "count": 3, "difficulty_target": None}
@@ -499,20 +522,25 @@ class TestPseudocodeSectionRouting:
         finally:
             loop.close()
 
-        # The whole point: pseudocode sections must NOT fall through the raw
-        # call_json(pseudocode_prompt) path — they must go through the
-        # 3-stage pipeline (fallback_live_verify).
-        assert pipeline_called["n"] >= 1, (
-            "pseudocode section did not invoke mcq_pool.fallback_live_verify — "
-            "the routing change appears to be dead code (there's an earlier "
-            "`elif stype == 'pseudocode':` branch at line ~743 that catches it "
-            "first and still calls the raw pseudocode_prompt path)."
+        # Static bank is checked first, for the section's own pseudo_count.
+        assert static_called["n"] == 1 and static_called["count"] == 3, (
+            "pseudocode section did not check mcq_static_bank.sample_mixed_static_part "
+            "first (Phase 0 migration) -- got "
+            f"{static_called['n']} call(s) with count={static_called['count']}"
         )
+        # The live pipeline covers only the remainder (3 - 2 static = 1), not
+        # the full original count -- the core Phase 0 win over the old
+        # always-100%-live behavior.
+        assert pipeline_called["n"] == 1 and pipeline_called["count"] == 1, (
+            "pseudocode section should route only the static bank's shortfall "
+            f"(expected count=1) through fallback_live_verify, got {pipeline_called}"
+        )
+        # Must NOT fall through the old raw call_json(pseudocode_prompt) path.
         assert raw_called["n"] == 0, (
             f"pseudocode section still called the raw call_json path "
-            f"({raw_called['n']}x) instead of the 3-stage pipeline."
+            f"({raw_called['n']}x) instead of static-bank-then-pipeline."
         )
-        assert isinstance(out, list) and len(out) >= 1
+        assert isinstance(out, list) and len(out) == 3
 
 
 # ---------- (l) admin/mcq-stats surfaces source_transpile_execution ---------

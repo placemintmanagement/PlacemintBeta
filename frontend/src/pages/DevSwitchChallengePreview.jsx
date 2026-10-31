@@ -58,7 +58,7 @@ export default function DevSwitchChallengePreview() {
       <Header />
       <div className="max-w-3xl mx-auto px-6 py-10">
         <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-1">dev preview · not a real route</div>
-        <h1 className="font-display text-2xl font-bold mb-6">Switch Challenge — full flow preview</h1>
+        <h1 className="font-display text-2xl font-bold mb-6">Switch Challenge: full flow preview</h1>
 
         {completedAnswers ? (
           <div className="pm-card p-6">

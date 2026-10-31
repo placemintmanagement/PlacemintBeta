@@ -1,0 +1,240 @@
+{
+  "final_closing_message": "Thank you, Priya, for attending the interview. We will update you soon.",
+  "final_report": {
+    "attempt_id": "att1",
+    "company_name": "Capgemini",
+    "created_at": "2027-01-15T08:00:00+00:00",
+    "interview_id": "<NORMALIZED>",
+    "interview_summary": {
+      "avg_score": 100.0,
+      "completed": true,
+      "skipped": false,
+      "verdicts": [
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Clear project answer.",
+        "Solid approach."
+      ]
+    },
+    "oa_summary": {
+      "composite_score": 0.5,
+      "section_results": {},
+      "verdict": "borderline",
+      "weakest_section": ""
+    },
+    "report": {
+      "narrative": "n",
+      "next_steps": [],
+      "overall_score": 50,
+      "overall_verdict": "borderline",
+      "strongest_dimension": "",
+      "weakest_dimension": ""
+    },
+    "report_id": "<NORMALIZED>",
+    "resume_analysis": {
+      "extracted_projects": [
+        {
+          "name": "Inventory tracker",
+          "one_line_summary": "Tracks stock levels for a shop.",
+          "tech_stack": "Python, SQLite"
+        },
+        {
+          "name": "Chat app",
+          "one_line_summary": "Realtime chat.",
+          "tech_stack": "Node"
+        }
+      ]
+    },
+    "tier": "spark",
+    "tier_source": "oa_designated",
+    "user_id": "u1"
+  },
+  "final_score": {
+    "dsa": 1.0,
+    "interview": 1.0,
+    "not_reached": [],
+    "project_followups": 1.0
+  },
+  "final_status": "completed",
+  "questions": [
+    {
+      "id": "spark-intro",
+      "prompt": "Please introduce yourself in a few sentences: your background and what you are working on now.",
+      "stage": "intro"
+    },
+    {
+      "id": "spark-project",
+      "prompt": "Your resume lists the project \"Inventory tracker\". Walk me through what it does and which parts you built yourself.",
+      "stage": "project"
+    },
+    {
+      "id": "spark-f1",
+      "prompt": "Follow-up 1: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "spark-f2",
+      "prompt": "Follow-up 2: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "spark-f3",
+      "prompt": "Follow-up 3: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "spark-f4",
+      "prompt": "Follow-up 4: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "spark-f5",
+      "prompt": "Follow-up 5: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "spark-f6",
+      "prompt": "Follow-up 6: what did you change, and why?",
+      "stage": "followups"
+    },
+    {
+      "id": "spark-dsa",
+      "prompt": "Coding question: Word Pattern\n\nGiven a pattern string and a sentence of space-separated words, print 'YES' if there is a one-to-one (bijective) mapping between each pattern character and the word at that position, else 'NO'.\n\nInput: Line 1: pattern. Line 2: space-separated words.\nOutput: YES or NO.\nConstraints: 1 <= |pattern| <= 300\n\nYou may answer with the algorithm or with full code.",
+      "stage": "dsa"
+    }
+  ],
+  "stage_transitions": [
+    "intro",
+    "project",
+    "followups",
+    "dsa",
+    "done"
+  ],
+  "stored_turns": [
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": null,
+      "question": "Please introduce yourself in a few sentences: your background and what you are working on now.",
+      "question_id": "spark-intro",
+      "stage": "intro",
+      "verdict": null
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Your resume lists the project \"Inventory tracker\". Walk me through what it does and which parts you built yourself.",
+      "question_id": "spark-project",
+      "rejections": [],
+      "stage": "project",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 1: what did you change, and why?",
+      "question_id": "spark-f1",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 2: what did you change, and why?",
+      "question_id": "spark-f2",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 3: what did you change, and why?",
+      "question_id": "spark-f3",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 4: what did you change, and why?",
+      "question_id": "spark-f4",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 5: what did you change, and why?",
+      "question_id": "spark-f5",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": {
+        "concrete_detail": true,
+        "own_contribution": true,
+        "tech_choice_reason": true,
+        "tradeoff_or_challenge": true
+      },
+      "question": "Follow-up 6: what did you change, and why?",
+      "question_id": "spark-f6",
+      "rejections": [],
+      "stage": "followups",
+      "verdict": "Clear project answer."
+    },
+    {
+      "answer": "A clear answer about my own part and the trade-off.",
+      "flags": {
+        "approach_0": true,
+        "approach_1": true,
+        "complexity_stated": true,
+        "edge_cases_named": true
+      },
+      "question": "Coding question: Word Pattern\n\nGiven a pattern string and a sentence of space-separated words, print 'YES' if there is a one-to-one (bijective) mapping between each pattern character and the word at that position, else 'NO'.\n\nInput: Line 1: pattern. Line 2: space-separated words.\nOutput: YES or NO.\nConstraints: 1 <= |pattern| <= 300\n\nYou may answer with the algorithm or with full code.",
+      "question_id": "spark-dsa",
+      "rejections": [],
+      "stage": "dsa",
+      "verdict": "Solid approach."
+    }
+  ],
+  "tier": "spark"
+}

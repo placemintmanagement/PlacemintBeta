@@ -10,6 +10,7 @@ import Signup from "@/pages/Signup";
 import AuthCallback from "@/pages/AuthCallback";
 import Dashboard from "@/pages/Dashboard";
 import CompanyDetail from "@/pages/CompanyDetail";
+import Hub from "@/pages/Hub";
 import DepartmentCompanies from "@/pages/DepartmentCompanies";
 import OARunner from "@/pages/OARunner";
 import OAReview from "@/pages/OAReview";
@@ -28,6 +29,10 @@ import DevGridChallengePreview from "@/pages/DevGridChallengePreview";
 import DevInductiveChallengePreview from "@/pages/DevInductiveChallengePreview";
 import DevMotionChallengePreview from "@/pages/DevMotionChallengePreview";
 import DevAuth0Preview from "@/pages/DevAuth0Preview";
+import DevDebuggingPreview from "@/pages/DevDebuggingPreview";
+import DevAiAssistedPreview from "@/pages/DevAiAssistedPreview";
+import NotFound from "@/pages/NotFound";
+import { useAuth0 } from "@auth0/auth0-react";
 import Auth0ProviderWithNavigate from "@/auth/Auth0ProviderWithNavigate";
 import Auth0TokenSync from "@/auth/Auth0TokenSync";
 
@@ -40,10 +45,38 @@ import Auth0TokenSync from "@/auth/Auth0TokenSync";
 // branch below dead code in any real deployment.
 const _TEST_AUTH_BYPASS_ACTIVE = Boolean(process.env.REACT_APP_TEST_AUTH_TOKEN);
 
-function Protected({ children }) {
+// "No login required yet" switch (2026-10, temporary, owner-requested) --
+// mirrors backend/server.py's DISABLE_AUTH exactly (see that file's own
+// comment for why: Auth0 isn't configured correctly yet, and the app is
+// still under active development). Separate from the Playwright bypass
+// above -- no token involved at all. Re-enabling real auth later is simply
+// removing REACT_APP_DISABLE_AUTH from frontend/.env (and DISABLE_AUTH
+// from backend/.env) -- no code change needed on either side.
+const _AUTH_DISABLED = ["1", "true"].includes(
+  (process.env.REACT_APP_DISABLE_AUTH || "").trim().toLowerCase(),
+);
+
+// /dev/* preview routes: available in development and in the TEST-ONLY
+// Playwright build (the bypass flag above). A real production build has
+// neither, so these paths fall through to the 404 page.
+const DEV_ROUTES_ENABLED = process.env.NODE_ENV !== "production" || _TEST_AUTH_BYPASS_ACTIVE;
+
+// Exported (not just module-local) so it's unit-testable in isolation --
+// see App.test.jsx -- without needing to render the whole route tree.
+export function Protected({ children }) {
   const { user, loading } = useAuth();
-  if (_TEST_AUTH_BYPASS_ACTIVE) return children;
-  if (loading) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
+  // Real sign-in is now Auth0 (2026-10, "wire /login to Auth0" pass) --
+  // server.py's require_user only accepts an Auth0 token, so the app's own
+  // useAuth()/`user` is downstream of it: Auth0TokenSync re-runs
+  // useAuth()'s refresh() once Auth0 resolves isAuthenticated, which races
+  // this component's own render on first page load. Gating on BOTH
+  // signals, not just the legacy one, avoids bouncing a genuinely
+  // authenticated visitor to /login during that brief resolution window --
+  // auth0Authenticated-but-no-`user`-yet shows Loading, not a redirect.
+  const { isLoading: auth0Loading, isAuthenticated: auth0Authenticated } = useAuth0();
+  if (_TEST_AUTH_BYPASS_ACTIVE || _AUTH_DISABLED) return children;
+  if (loading || auth0Loading) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
+  if (!user && auth0Authenticated) return <div className="min-h-screen grid place-items-center text-sm text-pm-text2">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
@@ -70,23 +103,29 @@ function AppRouter() {
       <Route path="/legal/cookies" element={<CookiePolicy />} />
       <Route path="/legal/about" element={<About />} />
       <Route path="/company/:companyId" element={<CompanyDetail />} />
+      <Route path="/company/:companyId/hub" element={<Protected><Hub /></Protected>} />
       <Route path="/departments/:departmentId" element={<DepartmentCompanies />} />
       <Route path="/oa/:attemptId" element={<Protected><OARunner /></Protected>} />
       <Route path="/attempt/:attemptId/review" element={<Protected><OAReview /></Protected>} />
       <Route path="/deck" element={<Protected><ReviewDeck /></Protected>} />
       <Route path="/interview/:interviewId" element={<Protected><Interview /></Protected>} />
       <Route path="/attempt/:attemptId/report" element={<Protected><FinalReport /></Protected>} />
+      <Route path="/interview/:interviewId/report" element={<Protected><FinalReport /></Protected>} />
       {/* Standing dev tool — DI chart question visual check, not gated behind auth */}
-      <Route path="/dev/chart-preview" element={<DevChartPreview />} />
+      {DEV_ROUTES_ENABLED && <Route path="/dev/chart-preview" element={<DevChartPreview />} />}
       {/* Standing dev tool — gamified-round component visual check, not gated behind auth */}
-      <Route path="/dev/game-preview" element={<DevGamePreview />} />
-      <Route path="/dev/switch-preview" element={<DevSwitchChallengePreview />} />
-      <Route path="/dev/grid-challenge-preview" element={<DevGridChallengePreview />} />
-      <Route path="/dev/inductive-preview" element={<DevInductiveChallengePreview />} />
-      <Route path="/dev/motion-challenge-preview" element={<DevMotionChallengePreview />} />
+      {DEV_ROUTES_ENABLED && <Route path="/dev/game-preview" element={<DevGamePreview />} />}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/switch-preview" element={<DevSwitchChallengePreview />} />}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/grid-challenge-preview" element={<DevGridChallengePreview />} />}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/inductive-preview" element={<DevInductiveChallengePreview />} />}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/motion-challenge-preview" element={<DevMotionChallengePreview />} />}
       {/* Standing dev tool — Auth0 login/logout/ProtectedRoute preview, not wired into any live route yet */}
-      <Route path="/dev/auth0-preview" element={<DevAuth0Preview />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {DEV_ROUTES_ENABLED && <Route path="/dev/auth0-preview" element={<DevAuth0Preview />} />}
+      {/* Standing dev tool — Debugging Assessment (Round 3) interface preview, not wired into companies.py or the live OA flow yet */}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/debugging-preview" element={<DevDebuggingPreview />} />}
+      {/* Standing dev tool — AI-Assisted Coding (Round 4) interface preview, not wired into companies.py or the live OA flow yet */}
+      {DEV_ROUTES_ENABLED && <Route path="/dev/ai-assisted-preview" element={<DevAiAssistedPreview />} />}
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }

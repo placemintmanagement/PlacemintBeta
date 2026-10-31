@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Two speech bubbles with a follow-up arrow">
+  <rect width="640" height="360" fill="#E8F3FB"/>
+  <!-- large teal bubble -->
+  <polygon points="200,226 188,282 252,236" fill="#0F6F7A"/>
+  <rect x="160" y="82" width="270" height="152" rx="40" fill="#0F6F7A"/>
+  <g fill="#FFFFFF">
+    <circle cx="238" cy="158" r="13"/>
+    <circle cx="295" cy="158" r="13"/>
+    <circle cx="352" cy="158" r="13" opacity=".55"/>
+  </g>
+  <!-- small lime bubble -->
+  <polygon points="470,246 500,296 440,258" fill="#C6F24E" stroke="#073B43" stroke-width="3" stroke-linejoin="round"/>
+  <rect x="352" y="176" width="190" height="100" rx="34" fill="#C6F24E" stroke="#073B43" stroke-width="3"/>
+  <polygon points="458,274 484,274 494,288" fill="#C6F24E"/>
+  <g fill="#073B43">
+    <circle cx="418" cy="226" r="10"/>
+    <circle cx="456" cy="226" r="10"/>
+    <circle cx="494" cy="226" r="10" opacity=".45"/>
+  </g>
+  <!-- follow-up arrow -->
+  <path d="M228 296 Q300 340 380 300" fill="none" stroke="#073B43" stroke-width="7" stroke-linecap="round"/>
+  <polygon points="392,292 366,284 372,314" fill="#073B43" stroke="#073B43" stroke-width="4" stroke-linejoin="round"/>
+  <!-- soundwave -->
+  <g fill="#0F6F7A">
+    <rect x="474" y="58" width="12" height="28" rx="6" opacity=".5"/>
+    <rect x="494" y="44" width="12" height="56" rx="6"/>
+    <rect x="514" y="52" width="12" height="40" rx="6" opacity=".75"/>
+    <rect x="534" y="62" width="12" height="20" rx="6" opacity=".5"/>
+  </g>
+  <circle cx="112" cy="100" r="8" fill="#C6F24E" stroke="#073B43" stroke-width="3"/>
+</svg>

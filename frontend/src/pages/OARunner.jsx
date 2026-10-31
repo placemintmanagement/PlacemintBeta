@@ -11,16 +11,50 @@ import GridChallengeSection from "../components/games/GridChallengeSection";
 import InductiveChallengeSection from "../components/games/InductiveChallengeSection";
 import MotionChallengeSection from "../components/games/MotionChallengeSection";
 import Round1CommunicationSection from "../components/capgemini/Round1CommunicationSection";
+import DebuggingSection from "../components/DebuggingSection";
+import AiAssistedSection from "../components/AiAssistedSection";
 import { useMicRecorder } from "../hooks/useMicRecorder";
 import { TID } from "../testIds";
 import { Clock, Play, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
+import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } from "../components/shared";
+
+// Shared presentation values for the runner (2026-10 rollout). Body font
+// everywhere; monospace is kept only for code (test I/O, constraints, the
+// editor itself). Eyebrows use .pm-eyebrow; inputs use .pm-input.
+const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
+const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
+const TIMER_OK = { background: "var(--pm-success-bg)", color: "var(--pm-ink)" };
+const TIMER_LOW = { background: "var(--pm-error-bg)", color: "var(--pm-error-text)" };
 
 // SafeMarkdown: falls back to plain text if react-markdown isn't present in the pipeline.
 function MD({ children }) {
   const text = String(children || "");
-  return <div className="prose prose-sm max-w-none whitespace-pre-wrap font-sans text-pm-text">
+  return <div className="prose prose-sm max-w-none whitespace-pre-wrap font-sans" style={{ color: "var(--pm-ink)" }}>
     {text.split("\n").map((line, i) => <p key={i} className="my-1">{line}</p>)}
   </div>;
+}
+
+// Empty-section notice, shared by the question-type sections below.
+function EmptyNotice({ children }) {
+  return <Card><div style={BODY}>{children}</div></Card>;
+}
+
+// Letter badge for option lists: selected = teal-deep, otherwise sky.
+function LetterBadge({ letter, selected }) {
+  return (
+    <div className="w-7 h-7 rounded-full grid place-items-center shrink-0 font-display font-semibold"
+         style={{ fontSize: 14, background: selected ? "var(--pm-teal-deep)" : "var(--pm-sky)", color: selected ? "var(--pm-white)" : "var(--pm-ink)" }}>
+      {letter}
+    </div>
+  );
+}
+
+// Option button style: unselected uses the control border (it is an
+// interactive boundary); selected uses teal-deep and a sky wash.
+function optionStyle(selected) {
+  return selected
+    ? { border: "1.5px solid var(--pm-teal-deep)", background: "var(--pm-sky)", color: "var(--pm-ink)" }
+    : { border: "1.5px solid var(--pm-border-control)", background: "var(--pm-white)", color: "var(--pm-ink)" };
 }
 
 export default function OARunner() {
@@ -31,6 +65,15 @@ export default function OARunner() {
   const [submitting, setSubmitting] = useState(false);
   const [tick, setTick] = useState(0); // rerender for timer
   const startTimeRef = useRef({}); // per-section start times
+  // Optional-section gate (today: only TCS NQT's Part B -- see companies.py's
+  // "optional": True on the "advanced"/"coding" sections and
+  // tcs_recruitment_process.py's PART_B_OPTIONAL_NOTE). A Set, not a single
+  // flag, so a multi-section optional tail (not true for TCS's 2 sections
+  // today, but the backend endpoint is generic) only re-prompts for a
+  // section not yet decided. Deliberately keyed on section.key rather than
+  // persisted server-side: re-prompting on a refresh is the safer default
+  // for a choice this consequential (track estimate), not a bug.
+  const [dismissedGates, setDismissedGates] = useState(() => new Set());
 
   // Initial load
   useEffect(() => {
@@ -75,23 +118,71 @@ export default function OARunner() {
     }
   }, [currentSection]);
 
-  if (!attempt) return <div><Header /><div className="p-10 text-center">Loading…</div></div>;
+  if (!attempt) return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Loading…</div></PageShell></div>;
 
   if (attempt.generation_status === "failed") {
     return (
       <div>
-        <Header />
-        <div className="max-w-md mx-auto px-6 py-24 text-center">
-          <h1 className="font-display text-3xl font-bold text-red-600">Generation failed.</h1>
-          <p className="text-pm-text2 mt-3">Please try starting a new run. Your run quota was not consumed.</p>
-        </div>
+        <Header light />
+        <PageShell>
+          <div className="max-w-md mx-auto py-24 text-center">
+            <PageTitle>Generation failed.</PageTitle>
+            <p className="mt-3" style={BODY}>Please try starting a new run. Your run quota was not consumed.</p>
+          </div>
+        </PageShell>
       </div>
     );
   }
 
   if (attempt.status === "completed") {
     setTimeout(() => navigate(`/attempt/${attemptId}/review`, { replace: true }), 200);
-    return <div><Header /><div className="p-10 text-center">Redirecting to review…</div></div>;
+    return <div><Header light /><PageShell><div className="p-10 text-center" style={BODY}>Redirecting to review…</div></PageShell></div>;
+  }
+
+  // Optional-section gate (today: only TCS NQT's Part B). Checked BEFORE the
+  // "still generating" screen below on purpose -- a candidate choosing to
+  // finish here shouldn't have to wait for Part B's background generation
+  // first. Wording must stay in sync with
+  // tcs_recruitment_process.py's PART_B_OPTIONAL_NOTE (OFFICIAL-TCS source).
+  if (currentSection?.optional && !dismissedGates.has(currentSection.key)) {
+    const finishPartAEarly = async () => {
+      setSubmitting(true);
+      try {
+        const { data } = await api.post(`/oa/${attemptId}/finish-part-a`);
+        navigate(`/attempt/${attemptId}/review`, { state: data.tcs_tier ? { tcs_tier: data.tcs_tier } : null });
+      } catch (err) {
+        const detail = err.response?.data?.detail;
+        toast.error((detail && detail.message) || detail || "Could not finish early");
+      } finally { setSubmitting(false); }
+    };
+    return (
+      <div>
+        <Header light />
+        <PageShell>
+          <div className="max-w-2xl mx-auto py-24 text-center pm-in">
+            <SectionLabel>part b · optional</SectionLabel>
+            <PageTitle style={{ fontSize: "clamp(1.5rem, 3vw, 2rem)" }}>Foundation is done. Part B is optional.</PageTitle>
+            <p className="mt-3" style={BODY}>
+              Part B is optional. TCS's own guidance: it is "mandatory if you aspire for a Digital or
+              Prime offer." You can finish here with Foundation alone, or continue to Part B for a
+              chance at a higher track. Your estimated track will be shown on the results page.
+            </p>
+            <div className="mt-8 flex items-center justify-center gap-3 flex-wrap">
+              <Button data-testid={TID.oaContinuePartB}
+                      onClick={() => setDismissedGates(s => new Set(s).add(currentSection.key))}
+                      className="!py-2.5 !px-5">
+                Continue to Part B <ChevronRight size={14} aria-hidden="true" />
+              </Button>
+              <Button data-testid={TID.oaFinishPartA} onClick={finishPartAEarly} disabled={submitting}
+                      style={{ background: "transparent", color: "var(--pm-ink)", border: "1px solid rgba(7,59,67,0.2)" }}
+                      className="!py-2.5 !px-5">
+                {submitting ? "Finishing…" : "Finish here (Foundation only)"}
+              </Button>
+            </div>
+          </div>
+        </PageShell>
+      </div>
+    );
   }
 
   // The CURRENT section has no questions yet — show a targeted waiting screen
@@ -103,41 +194,43 @@ export default function OARunner() {
     const ready = (attempt.sections || []).filter(s => (s.questions?.length ?? 0) > 0).length;
     return (
       <div>
-        <Header />
-        <div className="max-w-2xl mx-auto px-6 py-24 text-center pm-in">
-          <div className="w-14 h-14 mx-auto rounded-full bg-pm-primary/10 grid place-items-center mb-6">
-            <div className="w-6 h-6 border-2 border-pm-primary border-t-transparent rounded-full animate-spin" />
-          </div>
-          <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark mb-2">preparing your OA</div>
-          <h1 className="font-display text-3xl font-bold">
-            {ready === 0
-              ? <>Building {attempt.company_name}'s real OA for you.</>
-              : <>Loading section {(attempt.current_section_index ?? 0) + 1}: {currentSection?.name}…</>}
-          </h1>
-          <p className="text-pm-text2 mt-3">
-            {ready === 0
-              ? "Sections generate in parallel — the first one usually lands in under 20 seconds."
-              : "Almost there — you can start this section the moment it's ready."}
-          </p>
-          <div className="mt-8 pm-card p-5 text-left">
-            <div className="text-xs font-mono uppercase text-pm-text2 mb-3">progress</div>
-            <div className="space-y-2">
-              {(attempt.sections || []).map((s, i) => {
-                const done = (s.questions?.length ?? 0) > 0;
-                const isCurrent = i === (attempt.current_section_index ?? 0);
-                return (
-                  <div key={s.key} className={`flex items-center gap-3 text-sm ${isCurrent ? "font-semibold" : ""}`}>
-                    <span className={`w-2 h-2 rounded-full ${done ? "bg-pm-primary" : "bg-pm-text-muted animate-pulse"}`}></span>
-                    <span className={done ? "text-pm-text" : "text-pm-text2"}>{s.name}</span>
-                    {done && <span className="ml-auto text-xs font-mono text-pm-primary-dark">{s.questions.length} q ready</span>}
-                    {!done && isCurrent && <span className="ml-auto text-xs font-mono text-pm-secondary">generating…</span>}
-                  </div>
-                );
-              })}
+        <Header light />
+        <PageShell>
+          <div className="max-w-2xl mx-auto py-24 text-center pm-in">
+            <div className="w-14 h-14 mx-auto rounded-full grid place-items-center mb-6" style={{ background: "var(--pm-sky)" }}>
+              <div className="w-6 h-6 rounded-full animate-spin" style={{ border: "2px solid var(--pm-teal-deep)", borderTopColor: "transparent" }} />
             </div>
-            <div className="mt-4 text-xs font-mono text-pm-text2">{ready} / {total} sections ready</div>
+            <SectionLabel>preparing your OA</SectionLabel>
+            <PageTitle>
+              {ready === 0
+                ? <>Building {attempt.company_name}'s real OA for you.</>
+                : <>Loading section {(attempt.current_section_index ?? 0) + 1}: {currentSection?.name}…</>}
+            </PageTitle>
+            <p className="mt-3" style={BODY}>
+              {ready === 0
+                ? "Sections generate in parallel. The first one usually lands in under 20 seconds."
+                : "Almost there. You can start this section the moment it's ready."}
+            </p>
+            <Card className="mt-8 text-left" padding="20px 24px">
+              <div className="pm-eyebrow mb-3" style={{ color: "rgba(11,42,48,0.7)" }}>progress</div>
+              <div className="space-y-2">
+                {(attempt.sections || []).map((s, i) => {
+                  const done = (s.questions?.length ?? 0) > 0;
+                  const isCurrent = i === (attempt.current_section_index ?? 0);
+                  return (
+                    <div key={s.key} className={`flex items-center gap-3 ${isCurrent ? "font-semibold" : ""}`} style={{ fontSize: 15, color: done ? "var(--pm-ink)" : "rgba(11,42,48,0.7)" }}>
+                      <span className={`w-2.5 h-2.5 rounded-full ${done ? "" : "animate-pulse"}`} style={{ background: done ? "var(--pm-teal-deep)" : "rgba(11,42,48,0.35)" }}></span>
+                      <span>{s.name}</span>
+                      {done && <span className="ml-auto" style={{ ...META, color: "var(--pm-teal-deep)", fontWeight: 600 }}>{s.questions.length} q ready</span>}
+                      {!done && isCurrent && <span className="ml-auto" style={{ ...META, color: "var(--pm-teal-deep)", fontWeight: 600 }}>generating…</span>}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-4" style={META}>{ready} / {total} sections ready</div>
+            </Card>
           </div>
-        </div>
+        </PageShell>
       </div>
     );
   }
@@ -161,15 +254,22 @@ export default function OARunner() {
         section_key: sectionKey,
         answers: sectionAnswers,
       });
-      toast.success(`Section done — score ${(data.section_result.score * 100).toFixed(0)}%`);
+      toast.success(`Section done. Score ${(data.section_result.score * 100).toFixed(0)}%`);
+      if (data.status === "completed") {
+        // Navigate with the tier before refreshing the attempt. The refreshed
+        // attempt is completed, so the render-time redirect below would
+        // otherwise replace this entry and drop the tier from its state.
+        const tierState = data.capgemini_tier ? { capgemini_tier: data.capgemini_tier }
+          : data.tcs_tier ? { tcs_tier: data.tcs_tier }
+          : null;
+        navigate(`/attempt/${attemptId}/review`, { state: tierState });
+        return;
+      }
       // Refresh attempt to move forward
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
-      if (data.status === "completed") {
-        navigate(`/attempt/${attemptId}/review`);
-      }
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Submit failed");
+      await handleSectionSubmitError(err);
     } finally { setSubmitting(false); }
   };
 
@@ -187,73 +287,117 @@ export default function OARunner() {
         section_key: sectionKey,
         answers: answersMap,
       });
-      toast.success(`Section done — score ${(data.section_result.score * 100).toFixed(0)}%`);
+      toast.success(`Section done. Score ${(data.section_result.score * 100).toFixed(0)}%`);
+      if (data.status === "completed") {
+        // Same ordering as submitSection: navigate before the attempt refresh.
+        navigate(`/attempt/${attemptId}/review`, { state: data.capgemini_tier ? { capgemini_tier: data.capgemini_tier } : null });
+        return;
+      }
       const { data: fresh } = await api.get(`/oa/${attemptId}`);
       setAttempt(fresh);
-      if (data.status === "completed") {
-        navigate(`/attempt/${attemptId}/review`);
-      }
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Submit failed");
+      await handleSectionSubmitError(err);
     } finally { setSubmitting(false); }
   };
 
+  // Shared recovery for a submit_section 409 (wrong_section_order /
+  // section_already_submitted / attempt_not_in_progress) -- these mean our
+  // local view of the attempt is stale (another tab already advanced it, or
+  // a double-submit race lost to the first request), not a real failure the
+  // candidate caused. Resync silently from the server instead of showing an
+  // error: no error banner, and refetching restores current_section_index
+  // and section_results from server truth, so nothing already submitted is
+  // lost. Any other status (404/500/etc) is a real failure and still toasts.
+  const handleSectionSubmitError = async (err) => {
+    if (err.response?.status === 409) {
+      try {
+        const { data: fresh } = await api.get(`/oa/${attemptId}`);
+        setAttempt(fresh);
+      } catch { /* ignore -- next interaction will retry */ }
+      return;
+    }
+    const detail = err.response?.data?.detail;
+    // A 503 grading_infra_error (coding sections -- see server.py's
+    // _grade_coding_section) means a real problem on OUR side, never
+    // anything the candidate did: the backend guarantees nothing was
+    // scored and the attempt's own state (status, current_section_index,
+    // section_results, any timer) is completely untouched, so the exact
+    // same submission can just be sent again. Show our own clear wording
+    // rather than forwarding the backend's message, and deliberately
+    // touch nothing else here -- `answers` state (and so the editor's
+    // content) is untouched by this whole catch block, so it survives
+    // for free; no explicit "preserve the code" step is needed.
+    if (err.response?.status === 503 && detail?.code === "grading_infra_error") {
+      toast.error("We couldn't grade your code just now. Nothing was lost. Please submit again.");
+      return;
+    }
+    toast.error((detail && detail.message) || detail || "Submit failed");
+  };
+
+  const progressPct = (attempt.current_section_index / attempt.sections.length) * 100;
+
   return (
     <div>
-      <Header />
-      <div className="max-w-7xl mx-auto px-6 lg:px-10 py-8 pm-in">
-        {/* Section header */}
-        <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
-          <div>
-            <div className="font-mono text-xs uppercase tracking-widest text-pm-primary-dark">
-              {attempt.company_name} · section {attempt.current_section_index + 1}/{attempt.sections.length}
+      <Header light />
+      <PageShell section={false}>
+        <div className="py-8 pm-in">
+          {/* Section header */}
+          <div className="flex items-end justify-between flex-wrap gap-4 mb-5">
+            <div>
+              <SectionLabel className="!mb-1">
+                {attempt.company_name} · section {attempt.current_section_index + 1}/{attempt.sections.length}
+              </SectionLabel>
+              <PageTitle style={{ fontSize: "clamp(1.75rem, 3vw, 2.25rem)" }}>{currentSection.name}</PageTitle>
             </div>
-            <h1 className="font-display text-3xl font-bold mt-1">{currentSection.name}</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <div data-testid={TID.oaTimer} className={`pm-chip ${remaining < 60 ? "pm-chip-coral" : "pm-chip-primary"} text-base py-2 px-4`}>
-              <Clock size={14} /> <span className="font-mono">{mm}:{ss}</span>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div data-testid={TID.oaTimer} className="inline-flex items-center gap-2 rounded-full font-display font-semibold"
+                   style={{ fontSize: 18, padding: "8px 16px", fontVariantNumeric: "tabular-nums", ...(remaining < 60 ? TIMER_LOW : TIMER_OK) }}>
+                <Clock size={16} aria-hidden="true" /> <span>{mm}:{ss}</span>
+              </div>
+              {currentSection.type !== "gamified_round" && (
+                <Button data-testid={TID.oaFinishSection} onClick={submitSection} disabled={submitting} className="!py-2 !px-4" style={{ fontSize: 14 }}>
+                  {submitting ? "Grading…" : <>Submit section <ChevronRight size={14} aria-hidden="true"/></>}
+                </Button>
+              )}
             </div>
-            {currentSection.type !== "gamified_round" && (
-              <button data-testid={TID.oaFinishSection} onClick={submitSection} disabled={submitting}
-                      className="pm-btn pm-btn-primary text-sm py-2 px-4">
-                {submitting ? "Grading…" : <>Submit section <ChevronRight size={14}/></>}
-              </button>
-            )}
           </div>
-        </div>
 
-        {/* Progress bar */}
-        <div className="h-1 bg-[rgba(10,10,10,0.06)] rounded-full mb-8 overflow-hidden">
-          <div className="h-full bg-pm-primary" style={{ width: `${((attempt.current_section_index) / attempt.sections.length) * 100}%` }}></div>
-        </div>
+          {/* Progress bar */}
+          <div className="w-full rounded-full overflow-hidden mb-8" style={{ height: 6, background: "var(--pm-sky-deep)" }} role="progressbar" aria-valuenow={Math.round(progressPct)} aria-valuemin={0} aria-valuemax={100}>
+            <div className="h-full rounded-full" style={{ width: `${progressPct}%`, background: "var(--pm-teal-deep)" }}></div>
+          </div>
 
-        {/* Section body */}
-        {(currentSection.type === "coding") ? (
-          <CodingSection
-            attemptId={attemptId}
-            section={currentSection}
-            answers={sectionAnswers}
-            setAnswer={setAnswer}
-          />
-        ) : currentSection.type === "essay" ? (
-          <EssaySection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
-        ) : currentSection.type === "speaking" ? (
-          <SpeakingSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
-        ) : currentSection.type === "reading_listening" ? (
-          <ReadingListeningSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
-        ) : currentSection.type === "comm_mixed" ? (
-          <CommMixedSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
-        ) : currentSection.type === "voice_mixed" ? (
-          <VoiceMixedSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
-        ) : currentSection.type === "gamified_round" ? (
-          <GamifiedRoundSection attemptId={attemptId} section={currentSection} onComplete={submitGamifiedRoundAnswers} />
-        ) : currentSection.type === "capgemini_round1" ? (
-          <Round1CommunicationSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
-        ) : (
-          <MCQSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
-        )}
-      </div>
+          {/* Section body */}
+          {(currentSection.type === "coding") ? (
+            <CodingSection
+              attemptId={attemptId}
+              section={currentSection}
+              answers={sectionAnswers}
+              setAnswer={setAnswer}
+            />
+          ) : currentSection.type === "essay" ? (
+            <EssaySection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+          ) : currentSection.type === "speaking" ? (
+            <SpeakingSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+          ) : currentSection.type === "reading_listening" ? (
+            <ReadingListeningSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+          ) : currentSection.type === "comm_mixed" ? (
+            <CommMixedSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+          ) : currentSection.type === "voice_mixed" ? (
+            <VoiceMixedSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+          ) : currentSection.type === "gamified_round" ? (
+            <GamifiedRoundSection attemptId={attemptId} section={currentSection} onComplete={submitGamifiedRoundAnswers} />
+          ) : currentSection.type === "capgemini_round1" ? (
+            <Round1CommunicationSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+          ) : currentSection.type === "debugging" ? (
+            <DebuggingRoundSection attemptId={attemptId} section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+          ) : currentSection.type === "ai_assisted" ? (
+            <AiAssistedRoundSection attemptId={attemptId} section={currentSection} />
+          ) : (
+            <MCQSection section={currentSection} answers={sectionAnswers} setAnswer={setAnswer} />
+          )}
+        </div>
+      </PageShell>
     </div>
   );
 }
@@ -306,7 +450,7 @@ function GamifiedRoundSection({ attemptId, section, onComplete }) {
   const [combinedAnswers, setCombinedAnswers] = useState({});
 
   if (puzzles.length === 0) {
-    return <div className="pm-card p-6 text-pm-text2">Question generation returned empty. Try re-starting this run.</div>;
+    return <EmptyNotice>Question generation returned empty. Try re-starting this run.</EmptyNotice>;
   }
 
   const groups = [];
@@ -381,7 +525,7 @@ function MCQSection({ section, answers, setAnswer }) {
   const qs = section.questions || [];
   return (
     <div className="space-y-4">
-      {qs.length === 0 && <div className="pm-card p-6 text-pm-text2">Question generation returned empty. Try re-starting this run.</div>}
+      {qs.length === 0 && <EmptyNotice>Question generation returned empty. Try re-starting this run.</EmptyNotice>}
       {qs.map((q, i) => (
         q.chart ? (
           <ChartQuestion
@@ -393,12 +537,13 @@ function MCQSection({ section, answers, setAnswer }) {
             onSelect={setAnswer}
           />
         ) : (
-        <div key={q.id} className="pm-card p-6">
-          <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Q{i+1} of {qs.length}</div>
-          <div className="font-display text-lg font-semibold mb-4"><MD>{q.prompt}</MD></div>
+        <Card key={q.id}>
+          <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Q{i+1} of {qs.length}</div>
+          <div className="font-display font-semibold mb-4" style={{ fontSize: 19, color: "var(--pm-ink)", lineHeight: 1.4 }}><MD>{q.prompt}</MD></div>
           {q.svg_diagram && (
             <div
-              className="mb-4 rounded-lg border border-pm-border overflow-x-auto flex justify-center bg-white p-2"
+              className="mb-4 rounded-[14px] overflow-x-auto flex justify-center p-2"
+              style={{ border: "1px solid rgba(7,59,67,0.08)", background: "var(--pm-white)" }}
               dangerouslySetInnerHTML={{ __html: q.svg_diagram }}
             />
           )}
@@ -409,18 +554,18 @@ function MCQSection({ section, answers, setAnswer }) {
                 <button
                   key={ix}
                   data-testid={TID.oaQuestionOption(q.id, ix)}
+                  aria-pressed={selected}
                   onClick={() => setAnswer(q.id, ix)}
-                  className={`text-left border rounded-lg p-3 flex items-start gap-3 transition ${selected ? "border-pm-primary bg-pm-primary/5" : "border-pm-border hover:bg-[rgba(0,0,0,0.02)]"}`}
+                  className="text-left rounded-[14px] px-4 py-3 flex items-start gap-3 transition-colors hover:bg-[rgba(15,111,122,0.06)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                  style={optionStyle(selected)}
                 >
-                  <div className={`w-6 h-6 rounded-full grid place-items-center font-mono font-bold text-xs ${selected ? "bg-pm-primary text-white" : "bg-pm-muted"}`}>
-                    {String.fromCharCode(65 + ix)}
-                  </div>
-                  <div className="flex-1 text-sm">{opt}</div>
+                  <LetterBadge letter={String.fromCharCode(65 + ix)} selected={selected} />
+                  <div className="flex-1" style={{ fontSize: 15, lineHeight: 1.5, paddingTop: 2 }}>{opt}</div>
                 </button>
               );
             })}
           </div>
-        </div>
+        </Card>
         )
       ))}
     </div>
@@ -433,21 +578,21 @@ function EssaySection({ section, answers, setAnswer }) {
   return (
     <div className="space-y-4">
       {qs.map((q) => (
-        <div key={q.id} className="pm-card p-6">
-          <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Essay</div>
-          <div className="font-display text-xl font-bold mb-2">{q.topic}</div>
-          <div className="text-sm text-pm-text2 mb-4">{q.instructions}</div>
+        <Card key={q.id}>
+          <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Essay</div>
+          <div className="font-display font-semibold mb-2" style={{ fontSize: 22, color: "var(--pm-ink)" }}>{q.topic}</div>
+          <div className="mb-4" style={BODY}>{q.instructions}</div>
           <textarea
             data-testid={TID.oaEssayInput(q.id)}
-            className="pm-input min-h-[240px] font-sans"
+            className="pm-input min-h-[240px]"
             placeholder={`Write ${q.min_words || 150}-${q.max_words || 300} words…`}
             value={answers[q.id] || ""}
             onChange={e => setAnswer(q.id, e.target.value)}
           />
-          <div className="mt-2 text-xs font-mono text-pm-text2">
+          <div className="mt-2" style={META}>
             {(answers[q.id] || "").trim().split(/\s+/).filter(Boolean).length} words
           </div>
-        </div>
+        </Card>
       ))}
     </div>
   );
@@ -485,60 +630,62 @@ function SpeakingSection({ attemptId, section, answers, setAnswer }) {
     return () => clearTimeout(t);
   }, [phase, recordLeft]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!q) return <div className="pm-card p-6">No speaking prompt generated.</div>;
+  if (!q) return <EmptyNotice>No speaking prompt generated.</EmptyNotice>;
 
   const restart = () => { mic.reset(); setPrepLeft(30); setRecordLeft(60); setPhase("intro"); };
 
   return (
-    <div className="pm-card p-6 space-y-4">
-      <div className="text-xs font-mono uppercase text-pm-text2">Speaking</div>
-      <div className="font-display text-xl font-bold">{q.topic}</div>
-      <div className="text-sm text-pm-text2">{q.instructions}</div>
+    <Card>
+      <div className="space-y-4">
+        <div className="pm-eyebrow" style={{ color: "rgba(11,42,48,0.7)" }}>Speaking</div>
+        <div className="font-display font-semibold" style={{ fontSize: 22, color: "var(--pm-ink)" }}>{q.topic}</div>
+        <div style={BODY}>{q.instructions}</div>
 
-      {typedMode ? (
-        <>
-          <div className="text-xs text-pm-text2">Mic unavailable — type your response instead.</div>
-          <textarea
-            data-testid={TID.oaMicFallbackInput(q.id)}
-            className="pm-input min-h-[160px] font-sans"
-            placeholder={`Write ${q.min_words || 70}-${q.max_words || 170} words…`}
-            value={answers[q.id] || ""}
-            onChange={e => setAnswer(q.id, e.target.value)}
-          />
-        </>
-      ) : phase === "intro" ? (
-        <button data-testid={TID.oaMicRecordBtn(q.id)} onClick={() => setPhase("prep")} className="pm-btn pm-btn-primary text-sm py-2 px-4">
-          Start (30s prep, then 60s to speak)
-        </button>
-      ) : phase === "prep" ? (
-        <div className="text-center py-8">
-          <div className="font-mono text-4xl font-bold">{prepLeft}s</div>
-          <div className="text-sm text-pm-text2 mt-2">Get ready to speak…</div>
-        </div>
-      ) : phase === "recording" ? (
-        <div className="text-center py-8">
-          <div className="font-mono text-4xl font-bold text-pm-secondary">{recordLeft}s</div>
-          <div className="text-sm text-pm-text2 mt-2">Recording… speak now</div>
-          <button data-testid={TID.oaMicStopBtn(q.id)} onClick={mic.stop} className="pm-btn pm-btn-secondary text-sm py-2 px-4 mt-4">Stop early</button>
-        </div>
-      ) : mic.status === "uploading" ? (
-        <div className="text-center py-8 text-pm-text2">Transcribing…</div>
-      ) : (
-        <>
-          <div className="text-xs text-pm-text2">Transcript (edit if needed):</div>
-          <textarea
-            data-testid={TID.oaTranscriptInput(q.id)}
-            className="pm-input min-h-[160px] font-sans"
-            value={answers[q.id] || ""}
-            onChange={e => setAnswer(q.id, e.target.value)}
-          />
-          <div className="flex gap-4">
-            <button onClick={restart} className="text-xs text-pm-text2 underline">Re-record</button>
-            <button onClick={() => setTypedMode(true)} className="text-xs text-pm-text2 underline">Type instead</button>
+        {typedMode ? (
+          <>
+            <div style={META}>Mic unavailable. Type your response instead.</div>
+            <textarea
+              data-testid={TID.oaMicFallbackInput(q.id)}
+              className="pm-input min-h-[160px]"
+              placeholder={`Write ${q.min_words || 70}-${q.max_words || 170} words…`}
+              value={answers[q.id] || ""}
+              onChange={e => setAnswer(q.id, e.target.value)}
+            />
+          </>
+        ) : phase === "intro" ? (
+          <Button data-testid={TID.oaMicRecordBtn(q.id)} onClick={() => setPhase("prep")} className="!py-2 !px-4" style={{ fontSize: 14 }}>
+            Start (30s prep, then 60s to speak)
+          </Button>
+        ) : phase === "prep" ? (
+          <div className="text-center py-8">
+            <div className="font-display font-semibold" style={{ fontSize: 48, color: "var(--pm-ink)", fontVariantNumeric: "tabular-nums" }}>{prepLeft}s</div>
+            <div className="mt-2" style={BODY}>Get ready to speak…</div>
           </div>
-        </>
-      )}
-    </div>
+        ) : phase === "recording" ? (
+          <div className="text-center py-8">
+            <div className="font-display font-semibold" style={{ fontSize: 48, color: "var(--pm-teal-deep)", fontVariantNumeric: "tabular-nums" }}>{recordLeft}s</div>
+            <div className="mt-2" style={BODY}>Recording… speak now</div>
+            <Button variant="secondary" data-testid={TID.oaMicStopBtn(q.id)} onClick={mic.stop} className="mt-4 !py-2 !px-4" style={{ fontSize: 14 }}>Stop early</Button>
+          </div>
+        ) : mic.status === "uploading" ? (
+          <div className="text-center py-8" style={BODY}>Transcribing…</div>
+        ) : (
+          <>
+            <div style={META}>Transcript (edit if needed):</div>
+            <textarea
+              data-testid={TID.oaTranscriptInput(q.id)}
+              className="pm-input min-h-[160px]"
+              value={answers[q.id] || ""}
+              onChange={e => setAnswer(q.id, e.target.value)}
+            />
+            <div className="flex gap-4" style={{ fontSize: 14 }}>
+              <button onClick={restart} className="underline underline-offset-2" style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>Re-record</button>
+              <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>Type instead</button>
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -547,7 +694,7 @@ function ReadingListeningSection({ attemptId, section, answers, setAnswer }) {
   const qs = section.questions || [];
   return (
     <div className="space-y-4">
-      {qs.length === 0 && <div className="pm-card p-6 text-pm-text2">Question generation returned empty. Try re-starting this run.</div>}
+      {qs.length === 0 && <EmptyNotice>Question generation returned empty. Try re-starting this run.</EmptyNotice>}
       {qs.map((q, i) => (
         <ReadAloudCard
           key={q.id}
@@ -571,9 +718,9 @@ function ReadAloudCard({ attemptId, sectionKey, q, idx, total, value, onChange }
   useEffect(() => { if (mic.status === "unavailable") setTypedMode(true); }, [mic.status]);
 
   return (
-    <div className="pm-card p-6">
-      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Sentence {idx + 1} of {total} — read aloud</div>
-      <div className="font-display text-lg font-semibold mb-4">{q.text}</div>
+    <Card>
+      <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Sentence {idx + 1} of {total}: read aloud</div>
+      <div className="font-display font-semibold mb-4" style={{ fontSize: 19, color: "var(--pm-ink)", lineHeight: 1.4 }}>{q.text}</div>
       {typedMode ? (
         <input
           data-testid={TID.oaMicFallbackInput(q.id)}
@@ -583,20 +730,20 @@ function ReadAloudCard({ attemptId, sectionKey, q, idx, total, value, onChange }
           onChange={e => onChange(e.target.value)}
         />
       ) : mic.status === "recording" ? (
-        <button data-testid={TID.oaMicStopBtn(q.id)} onClick={mic.stop} className="pm-btn pm-btn-secondary text-sm py-2 px-4">Stop</button>
+        <Button variant="secondary" data-testid={TID.oaMicStopBtn(q.id)} onClick={mic.stop} className="!py-2 !px-4" style={{ fontSize: 14 }}>Stop</Button>
       ) : mic.status === "uploading" ? (
-        <div className="text-sm text-pm-text2">Transcribing…</div>
+        <div style={BODY}>Transcribing…</div>
       ) : (
-        <div className="flex items-center gap-3">
-          <button data-testid={TID.oaMicRecordBtn(q.id)} onClick={mic.start} className="pm-btn pm-btn-primary text-sm py-2 px-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button data-testid={TID.oaMicRecordBtn(q.id)} onClick={mic.start} className="!py-2 !px-4" style={{ fontSize: 14 }}>
             {value ? "Re-record" : "Record"}
-          </button>
-          <button onClick={() => setTypedMode(true)} className="text-xs text-pm-text2 underline">Type instead</button>
+          </Button>
+          <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ fontSize: 14, color: "var(--pm-teal-deep)", fontWeight: 600 }}>Type instead</button>
         </div>
       )}
       {value && !typedMode && (
         <div className="mt-3">
-          <div className="text-xs text-pm-text2 mb-1">Transcript (edit if needed):</div>
+          <div className="mb-1" style={META}>Transcript (edit if needed):</div>
           <input
             data-testid={TID.oaTranscriptInput(q.id)}
             className="pm-input"
@@ -605,7 +752,7 @@ function ReadAloudCard({ attemptId, sectionKey, q, idx, total, value, onChange }
           />
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -621,45 +768,45 @@ function SpeakingAnswerCard({ attemptId, sectionKey, q, idx, total, value, onCha
   useEffect(() => { if (mic.status === "unavailable") setTypedMode(true); }, [mic.status]);
 
   return (
-    <div className="pm-card p-6">
-      <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Q{idx + 1} of {total} — spoken response</div>
-      <div className="font-display text-lg font-semibold mb-1">{q.topic}</div>
-      <div className="text-sm text-pm-text2 mb-4">{q.instructions}</div>
+    <Card>
+      <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Q{idx + 1} of {total}: spoken response</div>
+      <div className="font-display font-semibold mb-1" style={{ fontSize: 20, color: "var(--pm-ink)" }}>{q.topic}</div>
+      <div className="mb-4" style={BODY}>{q.instructions}</div>
       {typedMode ? (
         <>
-          <div className="text-xs text-pm-text2 mb-2">Mic unavailable — type your response instead.</div>
+          <div className="mb-2" style={META}>Mic unavailable. Type your response instead.</div>
           <textarea
             data-testid={TID.oaMicFallbackInput(q.id)}
-            className="pm-input min-h-[120px] font-sans"
+            className="pm-input min-h-[120px]"
             placeholder={`Write ${q.min_words || 70}-${q.max_words || 170} words…`}
             value={value}
             onChange={e => onChange(e.target.value)}
           />
         </>
       ) : mic.status === "recording" ? (
-        <button data-testid={TID.oaMicStopBtn(q.id)} onClick={mic.stop} className="pm-btn pm-btn-secondary text-sm py-2 px-4">Stop</button>
+        <Button variant="secondary" data-testid={TID.oaMicStopBtn(q.id)} onClick={mic.stop} className="!py-2 !px-4" style={{ fontSize: 14 }}>Stop</Button>
       ) : mic.status === "uploading" ? (
-        <div className="text-sm text-pm-text2">Transcribing…</div>
+        <div style={BODY}>Transcribing…</div>
       ) : (
-        <div className="flex items-center gap-3">
-          <button data-testid={TID.oaMicRecordBtn(q.id)} onClick={mic.start} className="pm-btn pm-btn-primary text-sm py-2 px-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button data-testid={TID.oaMicRecordBtn(q.id)} onClick={mic.start} className="!py-2 !px-4" style={{ fontSize: 14 }}>
             {value ? "Re-record" : "Record"}
-          </button>
-          <button onClick={() => setTypedMode(true)} className="text-xs text-pm-text2 underline">Type instead</button>
+          </Button>
+          <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ fontSize: 14, color: "var(--pm-teal-deep)", fontWeight: 600 }}>Type instead</button>
         </div>
       )}
       {value && !typedMode && (
         <div className="mt-3">
-          <div className="text-xs text-pm-text2 mb-1">Transcript (edit if needed):</div>
+          <div className="mb-1" style={META}>Transcript (edit if needed):</div>
           <textarea
             data-testid={TID.oaTranscriptInput(q.id)}
-            className="pm-input min-h-[100px] font-sans"
+            className="pm-input min-h-[100px]"
             value={value}
             onChange={e => onChange(e.target.value)}
           />
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -667,7 +814,7 @@ function CommMixedSection({ attemptId, section, answers, setAnswer }) {
   const qs = section.questions || [];
   return (
     <div className="space-y-4">
-      {qs.length === 0 && <div className="pm-card p-6 text-pm-text2">Question generation returned empty. Try re-starting this run.</div>}
+      {qs.length === 0 && <EmptyNotice>Question generation returned empty. Try re-starting this run.</EmptyNotice>}
       {qs.map((q, i) => q.mode === "speaking" ? (
         <SpeakingAnswerCard
           key={q.id}
@@ -680,9 +827,9 @@ function CommMixedSection({ attemptId, section, answers, setAnswer }) {
           onChange={(v) => setAnswer(q.id, v)}
         />
       ) : (
-        <div key={q.id} className="pm-card p-6">
-          <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Q{i + 1} of {qs.length}</div>
-          <div className="font-display text-lg font-semibold mb-4"><MD>{q.prompt}</MD></div>
+        <Card key={q.id}>
+          <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Q{i + 1} of {qs.length}</div>
+          <div className="font-display font-semibold mb-4" style={{ fontSize: 19, color: "var(--pm-ink)", lineHeight: 1.4 }}><MD>{q.prompt}</MD></div>
           <div className="grid grid-cols-1 gap-2">
             {(q.options || []).map((opt, ix) => {
               const selected = answers[q.id] === ix;
@@ -690,18 +837,18 @@ function CommMixedSection({ attemptId, section, answers, setAnswer }) {
                 <button
                   key={ix}
                   data-testid={TID.oaQuestionOption(q.id, ix)}
+                  aria-pressed={selected}
                   onClick={() => setAnswer(q.id, ix)}
-                  className={`text-left border rounded-lg p-3 flex items-start gap-3 transition ${selected ? "border-pm-primary bg-pm-primary/5" : "border-pm-border hover:bg-[rgba(0,0,0,0.02)]"}`}
+                  className="text-left rounded-[14px] px-4 py-3 flex items-start gap-3 transition-colors hover:bg-[rgba(15,111,122,0.06)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                  style={optionStyle(selected)}
                 >
-                  <div className={`w-6 h-6 rounded-full grid place-items-center font-mono font-bold text-xs ${selected ? "bg-pm-primary text-white" : "bg-pm-muted"}`}>
-                    {String.fromCharCode(65 + ix)}
-                  </div>
-                  <div className="flex-1 text-sm">{opt}</div>
+                  <LetterBadge letter={String.fromCharCode(65 + ix)} selected={selected} />
+                  <div className="flex-1" style={{ fontSize: 15, lineHeight: 1.5, paddingTop: 2 }}>{opt}</div>
                 </button>
               );
             })}
           </div>
-        </div>
+        </Card>
       ))}
     </div>
   );
@@ -717,7 +864,7 @@ function VoiceMixedSection({ attemptId, section, answers, setAnswer }) {
   const qs = section.questions || [];
   return (
     <div className="space-y-4">
-      {qs.length === 0 && <div className="pm-card p-6 text-pm-text2">Question generation returned empty. Try re-starting this run.</div>}
+      {qs.length === 0 && <EmptyNotice>Question generation returned empty. Try re-starting this run.</EmptyNotice>}
       {qs.map((q, i) => q.mode === "speaking" ? (
         <SpeakingAnswerCard
           key={q.id}
@@ -754,7 +901,7 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
   const problem = qs[activeIdx];
   const penPaper = !!section.pen_paper;         // Zoho: no run button, textarea only
   const automataFix = !!section.automata_fix;   // Tech Mahindra: pre-fill buggy code
-  if (!problem) return <div className="pm-card p-6">No problems generated.</div>;
+  if (!problem) return <EmptyNotice>No problems generated.</EmptyNotice>;
 
   // Initial state: pre-fill buggy_code for Automata Fix problems.
   const initialCode = problem.buggy_code || "";
@@ -784,10 +931,14 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
   return (
     <div>
       {qs.length > 1 && (
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2 mb-4 flex-wrap">
           {qs.map((q, i) => (
             <button key={q.id} onClick={() => { setActiveIdx(i); setRunResults(null); }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-mono ${i === activeIdx ? "bg-pm-primary text-white" : "bg-pm-muted"}`}>
+              aria-pressed={i === activeIdx}
+              className="px-4 py-2 rounded-full font-display font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+              style={i === activeIdx
+                ? { fontSize: 14, background: "var(--pm-teal-deep)", color: "var(--pm-white)", border: "1.5px solid var(--pm-teal-deep)" }
+                : { fontSize: 14, background: "var(--pm-sky)", color: "var(--pm-ink)", border: "1.5px solid transparent" }}>
               Problem {i+1}
             </button>
           ))}
@@ -795,23 +946,23 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
       )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:h-[70vh]">
         {/* Left: problem */}
-        <div className="pm-card p-6 overflow-y-auto">
-          <div className="flex items-center justify-between mb-2">
-            <div className="font-display text-xl font-bold">{problem.title}</div>
-            <span className="pm-chip pm-chip-primary">{problem.difficulty}</span>
+        <Card className="overflow-y-auto" style={{ minHeight: 0 }}>
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <CardTitle style={{ fontSize: 22 }}>{problem.title}</CardTitle>
+            <Chip tone="status">{problem.difficulty}</Chip>
           </div>
-          <div className="text-sm text-pm-text2"><MD>{problem.statement}</MD></div>
-          {problem.input_format && <div className="mt-4"><div className="text-xs font-mono uppercase text-pm-text2 mb-1">Input</div><div className="text-sm">{problem.input_format}</div></div>}
-          {problem.output_format && <div className="mt-3"><div className="text-xs font-mono uppercase text-pm-text2 mb-1">Output</div><div className="text-sm">{problem.output_format}</div></div>}
-          {problem.constraints && <div className="mt-3"><div className="text-xs font-mono uppercase text-pm-text2 mb-1">Constraints</div><div className="text-sm font-mono">{problem.constraints}</div></div>}
+          <div style={BODY}><MD>{problem.statement}</MD></div>
+          {problem.input_format && <div className="mt-4"><div className="pm-eyebrow mb-1" style={{ color: "rgba(11,42,48,0.7)" }}>Input</div><div style={BODY}>{problem.input_format}</div></div>}
+          {problem.output_format && <div className="mt-3"><div className="pm-eyebrow mb-1" style={{ color: "rgba(11,42,48,0.7)" }}>Output</div><div style={BODY}>{problem.output_format}</div></div>}
+          {problem.constraints && <div className="mt-3"><div className="pm-eyebrow mb-1" style={{ color: "rgba(11,42,48,0.7)" }}>Constraints</div><div className="font-mono" style={{ fontSize: 14, color: "var(--pm-ink)" }}>{problem.constraints}</div></div>}
 
           <div className="mt-6">
-            <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Visible tests</div>
+            <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Visible tests</div>
             <div className="space-y-2">
               {(problem.visible_tests || []).map((t, i) => (
-                <div key={i} className="border rounded-lg p-3 text-xs font-mono bg-pm-muted/50">
-                  <div><span className="text-pm-text2">input:</span> {t.input}</div>
-                  <div><span className="text-pm-text2">expected:</span> {t.expected_output}</div>
+                <div key={i} className="rounded-[14px] p-3 font-mono" style={{ fontSize: 13, border: "1px solid rgba(7,59,67,0.12)", background: "var(--pm-grey)", color: "var(--pm-ink)" }}>
+                  <div><span style={{ color: "rgba(11,42,48,0.7)" }}>input:</span> {t.input}</div>
+                  <div><span style={{ color: "rgba(11,42,48,0.7)" }}>expected:</span> {t.expected_output}</div>
                 </div>
               ))}
             </div>
@@ -819,29 +970,29 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
 
           {runResults && (
             <div className="mt-6">
-              <div className="text-xs font-mono uppercase text-pm-text2 mb-2">Run results</div>
+              <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Run results</div>
               <div className="space-y-2">
                 {runResults.map((r, i) => (
-                  <div key={i} className={`border rounded-lg p-3 text-xs font-mono ${r.passed ? "border-pm-primary/40 bg-pm-primary/5" : "border-pm-secondary/40 bg-pm-secondary/5"}`}>
-                    <div className="flex items-center gap-2">
-                      {r.passed ? <CheckCircle2 size={14} className="text-pm-primary"/> : <XCircle size={14} className="text-pm-secondary"/>}
+                  <div key={i} className="rounded-[14px] p-3" style={{ fontSize: 13, background: r.passed ? "var(--pm-success-bg)" : "var(--pm-error-bg)", color: "var(--pm-ink)", border: `1px solid ${r.passed ? "rgba(15,111,122,0.35)" : "rgba(180,35,24,0.35)"}` }}>
+                    <div className="flex items-center gap-2 font-semibold">
+                      {r.passed ? <CheckCircle2 size={14} style={{ color: "var(--pm-teal-deep)" }}/> : <XCircle size={14} style={{ color: "var(--pm-error-text)" }}/>}
                       Test {i+1} · {r.passed ? "passed" : "failed"}
                     </div>
-                    <div className="mt-1 text-pm-text2">expected: {r.expected}</div>
-                    <div className="text-pm-text2">got: {r.got || (r.error ? `(error) ${r.error}` : "")}</div>
+                    <div className="mt-1 font-mono" style={{ color: "rgba(11,42,48,0.85)" }}>expected: {r.expected}</div>
+                    <div className="font-mono" style={{ color: "rgba(11,42,48,0.85)" }}>got: {r.got || (r.error ? `(error) ${r.error}` : "")}</div>
                   </div>
                 ))}
               </div>
             </div>
           )}
-        </div>
+        </Card>
 
         {/* Right: editor — dark Monaco for regular coding, plain textarea for pen-paper mode. */}
         {penPaper ? (
-          <div className="pm-card p-4 flex flex-col">
-            <div className="flex items-center justify-between mb-2">
-              <div className="pm-chip pm-chip-coral">pen-paper mode · no run button</div>
-              <div className="text-xs font-mono text-pm-text2">Zoho style</div>
+          <Card padding="16px" className="flex flex-col">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <Chip>pen-paper mode · no run button</Chip>
+              <div style={META}>Zoho style</div>
             </div>
             <textarea
               data-testid={TID.oaCodeArea}
@@ -849,20 +1000,21 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
               onChange={e => setForProblem({ code: e.target.value })}
               placeholder="Write your full program here. No autocomplete. No test runner. Just like paper."
               autoComplete="off" autoCorrect="off" spellCheck={false}
-              className="pm-input flex-1 min-h-[400px] font-mono text-sm"
-              style={{ background: "#F3F0E6", color: "#0A0A0A", lineHeight: 1.6, tabSize: 4 }}
+              className="pm-input flex-1 min-h-[400px] font-mono"
+              style={{ background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 14, lineHeight: 1.6, tabSize: 4 }}
             />
-            <div className="mt-2 text-xs font-mono text-pm-text2">{(current.code || "").split("\n").length} lines · {(current.code || "").length} chars</div>
-          </div>
+            <div className="mt-2" style={META}>{(current.code || "").split("\n").length} lines · {(current.code || "").length} chars</div>
+          </Card>
         ) : (
-        <div className="pm-editor-pane rounded-2xl overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-            <div className="flex items-center gap-2">
+        <div className="pm-editor-pane rounded-[24px] overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between gap-3 flex-wrap px-4 py-3 border-b border-white/5">
+            <div className="flex items-center gap-2 flex-wrap">
               <select
                 data-testid={TID.oaLangSelect}
                 value={current.language}
                 onChange={e => setForProblem({ language: e.target.value })}
-                className="bg-transparent border border-white/10 rounded-md text-xs px-2 py-1 font-mono"
+                className="bg-transparent rounded-[10px] px-2 py-1 font-mono"
+                style={{ fontSize: 13, border: "1px solid rgba(255,255,255,0.35)", color: "var(--pm-white)" }}
               >
                 <option value="python">Python 3</option>
                 <option value="javascript">JavaScript</option>
@@ -870,12 +1022,11 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
                 <option value="cpp">C++</option>
                 <option value="java">Java</option>
               </select>
-              {automataFix && <span className="pm-chip pm-chip-coral">automata fix · code pre-filled</span>}
+              {automataFix && <Chip>automata fix · code pre-filled</Chip>}
             </div>
-            <button data-testid={TID.oaRunBtn} onClick={runCode} disabled={running}
-              className="pm-btn text-xs py-1.5 px-3" style={{ background: "#0FAE73", color: "#fff" }}>
-              <Play size={12}/> {running ? "running…" : "Run visible tests"}
-            </button>
+            <Button data-testid={TID.oaRunBtn} onClick={runCode} disabled={running} className="!py-1.5 !px-3" style={{ fontSize: 13 }}>
+              <Play size={12} aria-hidden="true"/> {running ? "running…" : "Run visible tests"}
+            </Button>
           </div>
           <div className="flex-1 min-h-[400px]">
             <Editor
@@ -892,5 +1043,136 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
         )}
       </div>
     </div>
+  );
+}
+
+// -------- Debugging Assessment (Round 3) ------------------------------------
+// Thin wrapper around DebuggingSection (the same presentational component
+// /dev/debugging-preview uses, already click-through verified there) --
+// this wrapper owns only the Run button's running/runResults state and
+// posts to the existing, generic /oa/run route above (unchanged: it looks
+// up the problem by id inside the section's server-stored questions and
+// runs visible_tests, exactly like CodingSection's own runCode does, with
+// no section-type check of its own). "Submit section" needs nothing
+// debugging-specific here -- the top-level submitSection() already posts
+// sectionAnswers generically to /oa/{attemptId}/section, which server.py's
+// submit_section now dispatches to _grade_debugging_section() for this
+// section's type.
+function DebuggingRoundSection({ attemptId, section, answers, setAnswer }) {
+  const [running, setRunning] = useState(false);
+  const [runResults, setRunResults] = useState(null);
+
+  const onRun = async (problem, current) => {
+    setRunning(true);
+    try {
+      const { data } = await api.post("/oa/run", {
+        attempt_id: attemptId,
+        section_key: section.key,
+        problem_id: problem.id,
+        language: current.language,
+        code: current.code,
+      });
+      setRunResults(data.results);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Run failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <DebuggingSection
+      problems={section.questions || []}
+      answers={answers}
+      setAnswer={setAnswer}
+      onRun={onRun}
+      running={running}
+      runResults={runResults}
+    />
+  );
+}
+
+// -------- AI-Assisted Coding (Round 4) ---------------------------------
+// Thin wrapper around AiAssistedSection (the same presentational
+// component /dev/ai-assisted-preview uses, already click-through
+// verified there). UNLIKE every other section, Round 4's live state
+// lives entirely server-side in db.ai_assisted_sessions (created at
+// generation time, see server.py's "ai_assisted" _generate_section_
+// questions branch) -- section.questions here holds only an opaque
+// {session_id, problem_id} pointer, not the conversation itself, so this
+// wrapper fetches the live session on mount and re-fetches it (via each
+// action's response body) after every turn, rather than deriving
+// anything from `section` the way CodingSection/DebuggingRoundSection
+// do. Talks to the LIVE, attempt-scoped
+// /oa/{attemptId}/ai-assisted/{section.key}/... routes -- a separate
+// code path from /dev/ai-assisted/*, not a wrapper around it (see
+// server.py's own comment on that same separation). "Submit section"
+// needs nothing special here either: the top-level submitSection()
+// posts sectionAnswers (whatever they are, even {}) to
+// /oa/{attemptId}/section, and server.py's submit_section dispatches to
+// _finalize_ai_assisted_section() for this type, which ignores the
+// answers payload entirely and re-derives the score from the stored
+// session -- covering both natural completion AND "candidate clicked
+// Submit / timer expired mid-conversation" the same way.
+function AiAssistedRoundSection({ attemptId, section }) {
+  const [session, setSession] = useState(null);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/oa/${attemptId}/ai-assisted/${section.key}`).then(r => {
+      if (!cancelled) setSession(r.data);
+    }).catch(err => {
+      if (!cancelled) toast.error(err.response?.data?.detail || "Failed to load session");
+    });
+    return () => { cancelled = true; };
+  }, [attemptId, section.key]);
+
+  const onSendMessage = async (text) => {
+    setSending(true);
+    try {
+      const { data } = await api.post(`/oa/${attemptId}/ai-assisted/${section.key}/message`, { text });
+      setSession(data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to send message");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const onConsent = async (value) => {
+    setSending(true);
+    try {
+      const { data } = await api.post(`/oa/${attemptId}/ai-assisted/${section.key}/consent`, { value });
+      setSession(data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to submit consent");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const onSelfReview = async (value) => {
+    setSending(true);
+    try {
+      const { data } = await api.post(`/oa/${attemptId}/ai-assisted/${section.key}/self_review`, { value });
+      setSession(data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to submit self-review");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!session) return <EmptyNotice>Loading your problem…</EmptyNotice>;
+
+  return (
+    <AiAssistedSection
+      session={session}
+      onSendMessage={onSendMessage}
+      onConsent={onConsent}
+      onSelfReview={onSelfReview}
+      sending={sending}
+    />
   );
 }

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 180" role="img" aria-label="A countdown stopwatch leading to a locked next round">
+  <rect width="480" height="180" fill="#DCF887"/>
+  <!-- stopwatch -->
+  <rect x="136" y="14" width="28" height="12" rx="4" fill="#073B43"/>
+  <rect x="146" y="24" width="8" height="10" fill="#073B43"/>
+  <g transform="rotate(40 150 96)"><rect x="143" y="30" width="14" height="9" rx="3" fill="#073B43"/></g>
+  <circle cx="150" cy="96" r="58" fill="#FFFFFF" stroke="#073B43" stroke-width="3.5"/>
+  <circle cx="150" cy="96" r="42" fill="none" stroke="#D3E8F6" stroke-width="9"/>
+  <circle cx="150" cy="96" r="42" fill="none" stroke="#0F6F7A" stroke-width="9" stroke-linecap="round" stroke-dasharray="180 400" transform="rotate(-90 150 96)"/>
+  <!-- ticks -->
+  <g stroke="#073B43" stroke-width="3" stroke-linecap="round">
+    <path d="M150 46 v6"/><path d="M200 96 h-6"/><path d="M150 146 v-6"/><path d="M100 96 h6"/>
+  </g>
+  <!-- hand -->
+  <path d="M150 96 L124 108" stroke="#073B43" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="150" cy="96" r="7" fill="#C6F24E" stroke="#073B43" stroke-width="3"/>
+  <!-- arrow to the gate -->
+  <g fill="none" stroke="#073B43" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M222 96 H258" stroke-dasharray="1 9"/><path d="M252 87 l10 9 l-10 9"/>
+  </g>
+  <!-- locked next round -->
+  <rect x="282" y="44" width="150" height="104" rx="20" fill="#FFFFFF" stroke="#073B43" stroke-width="3"/>
+  <path d="M338 82 V74 a19 19 0 0 1 38 0 V82" fill="none" stroke="#073B43" stroke-width="6" stroke-linecap="round"/>
+  <rect x="328" y="80" width="58" height="40" rx="10" fill="#0F6F7A" stroke="#073B43" stroke-width="3"/>
+  <circle cx="357" cy="98" r="5.5" fill="#C6F24E"/>
+  <rect x="354.5" y="100" width="5" height="10" rx="2.5" fill="#C6F24E"/>
+  <rect x="306" y="130" width="102" height="8" rx="4" fill="#0F6F7A" opacity=".25"/>
+  <!-- sparkles -->
+  <path d="M440 26 l4 11 l11 4 l-11 4 l-4 11 l-4 -11 l-11 -4 l11 -4 z" fill="#0F6F7A" opacity=".85"/>
+  <circle cx="40" cy="150" r="6" fill="#0F6F7A" opacity=".35"/>
+</svg>
