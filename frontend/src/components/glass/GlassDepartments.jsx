@@ -59,7 +59,19 @@ export default function GlassDepartments() {
   const [departments, setDepartments] = useState([]);
 
   useEffect(() => {
-    api.get("/departments").then((r) => setDepartments(r.data.departments)).catch(() => {});
+    let cancelled = false;
+    // One retry on failure -- a cold backend or a transient network blip
+    // otherwise makes this whole section vanish permanently with no way
+    // to recover short of a full page reload.
+    function load(attempt) {
+      api.get("/departments").then((r) => {
+        if (!cancelled) setDepartments(r.data.departments);
+      }).catch(() => {
+        if (!cancelled && attempt < 1) setTimeout(() => load(attempt + 1), 1500);
+      });
+    }
+    load(0);
+    return () => { cancelled = true; };
   }, []);
 
   if (!departments.length) return null;
