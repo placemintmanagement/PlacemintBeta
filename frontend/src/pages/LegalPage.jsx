@@ -17,9 +17,17 @@ export default function LegalPage({ title, updatedOn, children }) {
           <SectionLabel>legal</SectionLabel>
           <PageTitle>{title}</PageTitle>
           {updatedOn && (
-            <div className="mt-2" style={{ fontSize: 13, color: "rgba(11,42,48,0.7)" }}>Last updated: {updatedOn}</div>
+            <div className="mt-2" style={{ fontSize: 13, color: "var(--gl-muted)" }}>Last updated: {updatedOn}</div>
           )}
-          <div className="mt-8 space-y-6 leading-relaxed [&_h2]:font-display [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:mt-8 [&_h2]:mb-2 [&_h2]:text-[var(--pm-ink)] [&_h3]:font-display [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:mt-5 [&_h3]:mb-1 [&_h3]:text-[var(--pm-ink)] [&_p]:text-[rgba(11,42,48,0.85)] [&_ul]:list-disc [&_ul]:ml-6 [&_ul_li]:text-[rgba(11,42,48,0.85)] [&_ul_li]:mb-1 [&_a]:text-[var(--pm-teal-deep)] [&_a]:underline [&_a]:underline-offset-2" style={{ color: "var(--pm-ink)" }}>
+          {/* [&_a]: uses Tailwind's `!` (!important) modifier -- `.glass-landing
+              a { color: inherit; text-decoration: none }` (glass.css) is the
+              same specificity (one class + one type selector) as this
+              arbitrary-variant utility, and wins the source-order tie since
+              glass.css loads after Tailwind's generated output. Same bug
+              Footer.jsx hit; !important is the simpler fix here since this
+              rule targets every <a> in arbitrary markdown-like children,
+              not one element's own className. */}
+          <div className="mt-8 space-y-6 leading-relaxed [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:mt-8 [&_h2]:mb-2 [&_h2]:text-[var(--gl-text)] [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:mt-5 [&_h3]:mb-1 [&_h3]:text-[var(--gl-text)] [&_p]:text-[var(--gl-muted)] [&_ul]:list-disc [&_ul]:ml-6 [&_ul_li]:text-[var(--gl-muted)] [&_ul_li]:mb-1 [&_a]:!text-[var(--gl-accent)] [&_a]:!underline [&_a]:underline-offset-2" style={{ color: "var(--gl-text)" }}>
             {children}
           </div>
         </article>
