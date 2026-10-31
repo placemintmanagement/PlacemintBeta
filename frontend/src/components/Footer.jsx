@@ -2,23 +2,38 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { Twitter, Linkedin, Github, Mail } from "lucide-react";
 import { SHOW_PRICING } from "../featureFlags";
+import GlassLogoMark from "./glass/GlassLogoMark";
 
 /**
- * Dark, multi-column marketing footer. Rendered on the landing page and
- * legal pages. Keep this static — don't add live status widgets or newsletter
- * signups without asking, this is the "trust anchor" of the site.
+ * Dark, multi-column marketing footer. Rendered on DepartmentCompanies and
+ * the legal pages (via LegalPage.jsx). Keeps its own richer multi-column
+ * content -- GlassFooter.jsx (landing-only) is a minimal one-line footer
+ * with landing-specific copy (an "illustrative layout" disclaimer, a
+ * trademark notice for the company logos shown there) that doesn't apply
+ * to this component's actual pages, so this reuses glass's dark-footer
+ * color palette rather than that component's copy/structure. Keep this
+ * static — don't add live status widgets or newsletter signups without
+ * asking, this is the "trust anchor" of the site.
  */
 // className: the landing page keeps the default top margin; pages that sit
 // on a cream background pass mt-0 so no teal body gradient shows in the gap.
 export default function Footer({ className = "mt-24" } = {}) {
+  // color set via inline style, not a Tailwind text-white/* class --
+  // `.glass-landing`'s base reset sets `color: var(--gl-text)` (near-
+  // black) on this same element with equal Tailwind-utility specificity,
+  // so a plain class loses that tie unpredictably by source order;
+  // inline style always wins regardless, and every
+  // `.glass-landing a { color: inherit }` link below correctly inherits
+  // this corrected value. Caught live: links were rendering nearly
+  // invisible against the dark background before this fix.
   return (
-    <footer className={`text-white/80 ${className} relative z-10`} style={{ background: "var(--pm-teal-night)" }}>
+    <footer className={`glass-landing ${className} relative z-10`} style={{ background: "#0c0c0c", color: "rgba(255,255,255,0.8)" }}>
       <div className="max-w-7xl mx-auto px-6 lg:px-10 py-16 grid grid-cols-1 md:grid-cols-6 gap-10">
         {/* Brand + tagline */}
         <div className="md:col-span-2">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg grid place-items-center text-[#0B2A30] font-display font-extrabold" style={{ background: "var(--pm-lime)" }}>P</div>
-            <span className="font-display text-2xl font-bold text-white">Placemint</span>
+            <GlassLogoMark size={32} />
+            <span className="text-2xl font-bold text-white" style={{ fontFamily: "Outfit, system-ui, sans-serif" }}>HireTric</span>
           </Link>
           <p className="text-sm text-white/60 leading-relaxed mt-5 max-w-xs">
             Placement prep the way companies actually test you. Real OA structure, real cutoffs, real interview rounds, across 14 top Indian tech recruiters.
@@ -73,8 +88,8 @@ export default function Footer({ className = "mt-24" } = {}) {
           <FooterLink to="/legal/about">About</FooterLink>
           <FooterLink href="mailto:hello@placemint.app">Contact</FooterLink>
           <span className="text-sm text-white/70 py-1">Made in India</span>
-          <a href="mailto:hello@placemint.app" className="text-sm text-white/60 hover:text-white transition inline-flex items-center gap-1.5 py-1">
-            <Mail size={12} /> hello@placemint.app
+          <a href="mailto:hello@hiretric.app" className="text-sm text-white/60 hover:text-white transition inline-flex items-center gap-1.5 py-1">
+            <Mail size={12} /> hello@hiretric.app
           </a>
         </FooterColumn>
       </div>
@@ -82,12 +97,12 @@ export default function Footer({ className = "mt-24" } = {}) {
       {/* Bottom bar */}
       <div className="border-t border-white/10">
         <div className="max-w-7xl mx-auto px-6 lg:px-10 py-6 flex flex-wrap items-center justify-between gap-3 text-xs text-white/70">
-          <div>&copy; {new Date().getFullYear()} Placemint. Built for the fresher who’s tired of “one mock test fits all”.</div>
+          <div>&copy; {new Date().getFullYear()} HireTric. Built for the fresher who’s tired of “one mock test fits all”.</div>
           <div className="flex items-center gap-4">
-            <Link to="/legal/privacy" className="hover:text-[var(--pm-lime)] transition">Privacy</Link>
-            <Link to="/legal/terms" className="hover:text-[var(--pm-lime)] transition">Terms</Link>
+            <Link to="/legal/privacy" className="hover:text-[var(--gl-y)] transition">Privacy</Link>
+            <Link to="/legal/terms" className="hover:text-[var(--gl-y)] transition">Terms</Link>
             <span className="inline-flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--pm-lime)" }}></span>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--gl-y)" }}></span>
               beta
             </span>
           </div>
@@ -100,14 +115,14 @@ export default function Footer({ className = "mt-24" } = {}) {
 function FooterColumn({ title, children }) {
   return (
     <div>
-      <div className="pm-eyebrow mb-4" style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>{title}</div>
+      <div className="mb-4" style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "rgba(255,255,255,0.7)" }}>{title}</div>
       <div className="flex flex-col gap-2">{children}</div>
     </div>
   );
 }
 
 function FooterLink({ to, href, children }) {
-  const cls = "text-sm text-white/70 transition py-1 hover:text-[var(--pm-lime)]";
+  const cls = "text-sm text-white/70 transition py-1 hover:text-[var(--gl-y)]";
   if (to) return <Link to={to} className={cls}>{children}</Link>;
   return <a href={href} className={cls}>{children}</a>;
 }
