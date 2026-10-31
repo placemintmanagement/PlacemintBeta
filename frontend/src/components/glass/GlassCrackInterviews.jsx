@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { COMPANIES } from "../../data/companies";
+import CompanyLogo from "./CompanyLogo";
 
 /**
  * "Crack interviews at" -- dashed-border chip grid (reference section
@@ -22,10 +23,12 @@ export default function GlassCrackInterviews() {
         {COMPANIES.map((c) =>
           c.live ? (
             <Link key={c.id} className="gl-chip" to={`/company/${c.id}`}>
+              <CompanyLogo id={c.id} name={c.name} size={18} />
               {c.name}
             </Link>
           ) : (
             <div key={c.id} className="gl-chip" aria-disabled="true">
+              <CompanyLogo id={c.id} name={c.name} size={18} />
               {c.name}
               <span className="gl-chip-sub">Rolling out next</span>
             </div>

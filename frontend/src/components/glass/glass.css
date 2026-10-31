@@ -531,10 +531,16 @@
   padding: 22px 10px; border-radius: 24px; font-size: 16px; font-weight: 500; position: relative;
   transition: border-color 0.15s, box-shadow 0.15s; background: var(--gl-card); color: var(--gl-text);
   border: 1px dashed var(--gl-line); text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
 .gl-chip:hover { border-color: var(--gl-text); }
 .gl-chip[aria-disabled="true"] { opacity: 0.55; cursor: default; }
-.gl-chip .gl-chip-sub { display: block; margin-top: 4px; font-size: 11px; opacity: 0.65; }
+.gl-chip .gl-chip-sub { display: block; margin-top: -4px; font-size: 11px; opacity: 0.65; }
+.gl-cl { border-radius: 6px; object-fit: contain; }
+.gl-cl-fallback {
+  border-radius: 50%; background: var(--gl-sand); display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; color: var(--gl-text); flex: none;
+}
 
 /* "Pick your starting point" cards */
 .gl-sp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
