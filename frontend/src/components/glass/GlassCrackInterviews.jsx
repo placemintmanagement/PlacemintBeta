@@ -22,15 +22,14 @@ export default function GlassCrackInterviews() {
       <div className="gl-chips">
         {COMPANIES.map((c) =>
           c.live ? (
-            <Link key={c.id} className="gl-chip" to={`/company/${c.id}`}>
-              <CompanyLogo id={c.id} name={c.name} size={18} />
-              {c.name}
+            <Link key={c.id} className="gl-chip" to={`/company/${c.id}`} title={c.name}>
+              <CompanyLogo id={c.id} name={c.name} size={32} />
+              <span className="sr-only">{c.name}</span>
             </Link>
           ) : (
-            <div key={c.id} className="gl-chip" aria-disabled="true">
-              <CompanyLogo id={c.id} name={c.name} size={18} />
-              {c.name}
-              <span className="gl-chip-sub">Rolling out next</span>
+            <div key={c.id} className="gl-chip" aria-disabled="true" title={`${c.name} — Rolling out next`}>
+              <CompanyLogo id={c.id} name={c.name} size={32} />
+              <span className="sr-only">{`${c.name} — Rolling out next`}</span>
             </div>
           )
         )}
