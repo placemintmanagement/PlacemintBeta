@@ -1,5 +1,10 @@
 import React from "react";
 import "@/App.css";
+// Loaded here (not just in Landing.jsx) so `.glass-app`'s rules apply on a
+// direct page load of any route, not only after Landing.jsx has mounted
+// once -- Landing.jsx keeps its own import too (redundant but harmless;
+// CSS imports dedupe by webpack's module cache either way).
+import "@/components/glass/glass.css";
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/auth";
@@ -130,15 +135,32 @@ function AppRouter() {
   );
 }
 
+// Glass restyle, full-app rollout, Stage 0 (2026-10-31): the `.glass-app`
+// wrapper itself is intentionally inert right now -- glass.css has NO
+// selector targeting `.glass-app` yet (only `.glass-landing`), so this
+// change alone has zero visual effect on any page, including the other
+// pages still in the old teal design. Verified live: broadening
+// glass.css's base rules (background/color/button-reset) to `.glass-app`
+// at the same time as adding this wrapper would have immediately painted
+// white over every teal page's background and stripped teal button
+// styling -- caught before committing, not assumed safe. Later stages
+// restyle one shared component at a time (Header/Footer first) and
+// broaden only the glass.css selectors each stage actually needs, so the
+// rollout stays bisectable. Wraps Landing too (harmless redundancy with
+// its own nested `.glass-landing` wrapper) so OnboardingModal/Toaster --
+// siblings outside <Routes>, present on every page -- are ready to pick
+// up glass styling once later stages give them something to match.
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Auth0ProviderWithNavigate>
           <Auth0TokenSync />
-          <AppRouter />
-          <OnboardingModal />
-          <Toaster position="top-right" richColors closeButton />
+          <div className="glass-app">
+            <AppRouter />
+            <OnboardingModal />
+            <Toaster position="top-right" richColors closeButton />
+          </div>
         </Auth0ProviderWithNavigate>
       </BrowserRouter>
     </AuthProvider>
