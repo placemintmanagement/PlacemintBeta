@@ -7,10 +7,11 @@ import { CheckCircle2, XCircle, Trash2, RotateCw, Sparkles, ArrowRight, Filter }
 import { PageShell, SectionLabel, PageTitle, Card, Chip, Button } from "../components/shared";
 
 // Body-size meta text (never monospace).
-const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
-const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
-const FILTER_ON = { border: "1.5px solid var(--pm-teal-deep)", background: "rgba(15,111,122,0.08)", color: "var(--pm-teal-deep)" };
-const FILTER_OFF = { border: "1.5px solid var(--pm-border-control)", background: "var(--pm-white)", color: "rgba(11,42,48,0.85)" };
+const META = { fontSize: 13, color: "var(--gl-muted)" };
+const BODY = { fontSize: 15, color: "var(--gl-text)", lineHeight: 1.6 };
+const OUTFIT = { fontFamily: "Outfit, system-ui, sans-serif", fontWeight: 600 };
+const FILTER_ON = { border: "1.5px solid var(--gl-accent)", background: "color-mix(in srgb, var(--gl-accent) 8%, transparent)", color: "var(--gl-accent)" };
+const FILTER_OFF = { border: "1.5px solid var(--gl-line)", background: "var(--gl-card)", color: "var(--gl-text)" };
 
 // Local shuffle so users don't just memorize option position.
 function useShuffled(options, correctIndex, seed) {
@@ -133,18 +134,18 @@ export default function ReviewDeck() {
             </div>
             {cards.length > 0 && (
               <div className="flex items-center gap-2 flex-wrap">
-                <Filter size={14} style={{ color: "rgba(11,42,48,0.7)" }} aria-hidden="true"/>
+                <Filter size={14} style={{ color: "var(--gl-muted)" }} aria-hidden="true"/>
                 <button
                   onClick={() => setFilter("unmastered")}
                   data-testid="deck-filter-unmastered"
                   aria-pressed={filter === "unmastered"}
-                  className="px-3 py-1.5 rounded-full font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                  className="px-3 py-1.5 rounded-full font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)]"
                   style={{ fontSize: 14, ...(filter === "unmastered" ? FILTER_ON : FILTER_OFF) }}>Unmastered</button>
                 <button
                   onClick={() => setFilter("all")}
                   data-testid="deck-filter-all"
                   aria-pressed={filter === "all"}
-                  className="px-3 py-1.5 rounded-full font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                  className="px-3 py-1.5 rounded-full font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)]"
                   style={{ fontSize: 14, ...(filter === "all" ? FILTER_ON : FILTER_OFF) }}>All</button>
               </div>
             )}
@@ -153,8 +154,8 @@ export default function ReviewDeck() {
           {cards.length === 0 ? (
             <Card className="mt-10" style={{ textAlign: "center" }}>
               <div className="flex flex-col items-center">
-                <Sparkles style={{ color: "var(--pm-teal-deep)" }} size={28} aria-hidden="true"/>
-                <div className="mt-3 font-display font-semibold" style={{ fontSize: 22, color: "var(--pm-ink)" }}>Your review deck is empty.</div>
+                <Sparkles style={{ color: "var(--gl-accent)" }} size={28} aria-hidden="true"/>
+                <div className="mt-3" style={{ ...OUTFIT, fontSize: 22, color: "var(--gl-text)" }}>Your review deck is empty.</div>
                 <div className="mt-5">
                   <Button as={Link} to="/dashboard" className="!py-2 !px-4" style={{ fontSize: 14 }}>Back to dashboard <ArrowRight size={14} aria-hidden="true"/></Button>
                 </div>
@@ -177,17 +178,17 @@ export default function ReviewDeck() {
                     <span>{(card.attempts || []).filter(a => a.correct).length}/{(card.attempts || []).length} correct so far</span>
                   )}
                 </div>
-                <div className="whitespace-pre-wrap" style={{ fontSize: 17, color: "var(--pm-ink)", lineHeight: 1.5 }}>{card?.prompt}</div>
+                <div className="whitespace-pre-wrap" style={{ fontSize: 17, color: "var(--gl-text)", lineHeight: 1.5 }}>{card?.prompt}</div>
 
                 <div className="mt-5 space-y-2">
                   {shuffled.opts.map((opt, i) => {
                     const isChosen = chosen === i;
                     const isCorrect = revealed && i === shuffled.correct;
                     const isWrongPick = revealed && isChosen && i !== shuffled.correct;
-                    let style = { border: "1px solid rgba(7,59,67,0.12)", background: "var(--pm-white)" };
-                    if (isChosen && !revealed) style = { border: "1.5px solid var(--pm-teal-deep)", background: "rgba(15,111,122,0.08)" };
-                    if (isCorrect) style = { border: "1.5px solid var(--pm-teal-deep)", background: "var(--pm-success-bg)" };
-                    if (isWrongPick) style = { border: "1.5px solid rgba(11,42,48,0.55)", background: "var(--pm-grey)" };
+                    let style = { border: "1px solid var(--gl-line)", background: "var(--gl-card)" };
+                    if (isChosen && !revealed) style = { border: "1.5px solid var(--gl-accent)", background: "color-mix(in srgb, var(--gl-accent) 8%, transparent)" };
+                    if (isCorrect) style = { border: "1.5px solid var(--gl-accent)", background: "color-mix(in srgb, var(--gl-mint) 35%, transparent)" };
+                    if (isWrongPick) style = { border: "1.5px solid color-mix(in srgb, var(--gl-text) 55%, transparent)", background: "color-mix(in srgb, var(--gl-text) 6%, transparent)" };
                     return (
                       <button
                         key={i}
@@ -195,20 +196,20 @@ export default function ReviewDeck() {
                         disabled={revealed}
                         aria-pressed={isChosen}
                         data-testid={`deck-option-${i}`}
-                        className="w-full text-left px-4 py-3 rounded-[14px] flex items-start gap-3 transition-colors hover:bg-[rgba(15,111,122,0.06)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
-                        style={{ fontSize: 15, color: "var(--pm-ink)", ...style }}>
-                        <span className="shrink-0 mt-0.5 font-semibold" style={{ fontSize: 13, color: "rgba(11,42,48,0.7)" }}>{String.fromCharCode(65 + i)}</span>
+                        className="w-full text-left px-4 py-3 rounded-[14px] flex items-start gap-3 transition-colors hover:bg-[color-mix(in_srgb,var(--gl-accent)_6%,transparent)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)]"
+                        style={{ fontSize: 15, color: "var(--gl-text)", ...style }}>
+                        <span className="shrink-0 mt-0.5 font-semibold" style={{ fontSize: 13, color: "var(--gl-muted)" }}>{String.fromCharCode(65 + i)}</span>
                         <span className="flex-1 min-w-0 whitespace-pre-wrap">{opt}</span>
-                        {isCorrect && <CheckCircle2 size={16} className="shrink-0 mt-0.5" style={{ color: "var(--pm-teal-deep)" }} aria-hidden="true"/>}
-                        {isWrongPick && <XCircle size={16} className="shrink-0 mt-0.5" style={{ color: "var(--pm-ink)" }} aria-hidden="true"/>}
+                        {isCorrect && <CheckCircle2 size={16} className="shrink-0 mt-0.5" style={{ color: "var(--gl-accent)" }} aria-hidden="true"/>}
+                        {isWrongPick && <XCircle size={16} className="shrink-0 mt-0.5" style={{ color: "var(--gl-text)" }} aria-hidden="true"/>}
                       </button>
                     );
                   })}
                 </div>
 
                 {revealed && card?.explanation && (
-                  <div className="mt-4 pl-3" style={{ fontSize: 14, color: "rgba(11,42,48,0.85)", borderLeft: "2px solid var(--pm-teal-deep)" }}>
-                    <span className="pm-eyebrow" style={{ fontSize: 11, color: "var(--pm-teal-deep)" }}>Why</span>
+                  <div className="mt-4 pl-3" style={{ fontSize: 14, color: "var(--gl-text)", borderLeft: "2px solid var(--gl-accent)" }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gl-accent)" }}>Why</span>
                     <div className="mt-0.5 whitespace-pre-wrap">{card.explanation}</div>
                   </div>
                 )}
@@ -230,7 +231,7 @@ export default function ReviewDeck() {
               </Card>
 
               {lastResult && (
-                <div className="mt-3" style={{ fontSize: 14, color: lastResult.correct ? "var(--pm-teal-deep)" : "var(--pm-ink)", fontWeight: 600 }}>
+                <div className="mt-3" style={{ fontSize: 14, color: lastResult.correct ? "var(--gl-accent)" : "var(--gl-text)", fontWeight: 600 }}>
                   {lastResult.correct
                     ? (lastResult.mastered ? "Mastered. It'll drop out of your queue." : "Correct. One more in a row to master it.")
                     : "Wrong pick. Streak reset. Try it again next time."}

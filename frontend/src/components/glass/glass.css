@@ -851,3 +851,13 @@
 
 .gl-modal-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.5); }
 .gl-modal-panel { width: 100%; max-width: 520px; background: var(--gl-card); border: 1px solid var(--gl-line); border-radius: 24px; box-shadow: 0 14px 28px -18px rgba(0, 0, 0, 0.28); padding: 28px; }
+
+/* CompanyCard.jsx "Section order" step connector -- a 2px line joining
+   consecutive numbered circles, painted behind them via ::before (see
+   that file's own comment for the full layout reasoning; this is just
+   the glass-token recolor of what was `.pm-dc-step`/`-connected`). */
+.gl-dc-step { position: relative; }
+.gl-dc-step-connected::before {
+  content: ""; position: absolute; left: 50%; top: -10px; width: 2px; height: 10px; margin-left: -1px;
+  background: color-mix(in srgb, var(--gl-accent) 20%, transparent);
+}

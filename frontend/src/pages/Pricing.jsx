@@ -7,8 +7,9 @@ import { TID } from "../testIds";
 import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } from "../components/shared";
 
 // Body-size meta text (never monospace).
-const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
-const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
+const META = { fontSize: 13, color: "var(--gl-muted)" };
+const BODY = { fontSize: 15, color: "var(--gl-text)", lineHeight: 1.6 };
+const OUTFIT = { fontFamily: "Outfit, system-ui, sans-serif", fontWeight: 600 };
 
 export default function Pricing() {
   const [pricing, setPricing] = useState(null);
@@ -37,7 +38,7 @@ export default function Pricing() {
         description,
         order_id: data.order.razorpay_order_id,
         prefill: { name: user.name, email: user.email },
-        theme: { color: "#0F6F7A" }, // Razorpay widget config: needs a literal colour, not a CSS variable
+        theme: { color: "#be185d" }, // Razorpay widget config: needs a literal colour, not a CSS variable
         handler: async (resp) => {
           try {
             await api.post("/payments/verify", {
@@ -110,11 +111,11 @@ export default function Pricing() {
           </Card>
 
           {isFounder && (
-            <Card className="mt-6" padding="20px 24px" style={{ background: "var(--pm-success-bg)" }}>
+            <Card className="mt-6" padding="20px 24px" style={{ background: "color-mix(in srgb, var(--gl-mint) 35%, transparent)" }}>
               <div className="flex items-start gap-3">
                 <span className="text-2xl" aria-hidden="true">⚡</span>
                 <div>
-                  <CardTitle style={{ fontSize: 18, color: "var(--pm-teal-deep)" }}>You have Founder access.</CardTitle>
+                  <CardTitle style={{ fontSize: 18, color: "var(--gl-accent)" }}>You have Founder access.</CardTitle>
                   <div style={BODY}>Payment isn't required. Every track and every run is unlocked on your account.</div>
                 </div>
               </div>
@@ -122,8 +123,8 @@ export default function Pricing() {
           )}
 
           {!pricing.razorpay_enabled && !isFounder && (
-            <Card className="mt-6" padding="16px 20px" style={{ background: "var(--pm-warning-bg)" }}>
-              <div className="flex items-start gap-2" style={{ fontSize: 14, color: "var(--pm-ink)", lineHeight: 1.6 }}>
+            <Card className="mt-6" padding="16px 20px" style={{ background: "rgba(255,196,40,0.18)" }}>
+              <div className="flex items-start gap-2" style={{ fontSize: 14, color: "var(--gl-text)", lineHeight: 1.6 }}>
                 <span aria-hidden="true">⚠️</span>
                 <span>Razorpay keys are placeholders, so checkouts run in <strong>mock mode</strong> and auto-verify. Drop real <code className="font-mono">rzp_test_…</code> keys in <code className="font-mono">backend/.env</code> to enable real Razorpay.</span>
               </div>
@@ -137,17 +138,17 @@ export default function Pricing() {
               return (
                 <Card key={p.id} data-testid={TID.pricingPlan(p.id)}
                       className="flex flex-col"
-                      style={p.highlight ? { border: "1.5px solid var(--pm-teal-deep)", boxShadow: "0 20px 44px -26px rgba(15,111,122,0.55)" } : undefined}>
+                      style={p.highlight ? { border: "1.5px solid var(--gl-accent)", boxShadow: "0 20px 44px -26px rgba(190,24,93,0.55)" } : undefined}>
                   {p.tag && <Chip tone={p.highlight ? "status" : "neutral"} className="self-start mb-3">{p.tag}</Chip>}
                   <CardTitle>{p.name}</CardTitle>
-                  <div className="mt-2 font-display font-semibold" style={{ fontSize: 32, color: "var(--pm-ink)", fontVariantNumeric: "tabular-nums" }}>
+                  <div className="mt-2" style={{ ...OUTFIT, fontSize: 32, color: "var(--gl-text)", fontVariantNumeric: "tabular-nums" }}>
                     {p.price === 0 ? "₹0" : <>₹{p.price.toLocaleString("en-IN")}</>}
-                    <span style={{ fontSize: 14, fontWeight: 400, color: "rgba(11,42,48,0.7)", marginLeft: 4 }}>{perPeriod}</span>
+                    <span style={{ fontSize: 14, fontWeight: 400, color: "var(--gl-muted)", marginLeft: 4 }}>{perPeriod}</span>
                   </div>
                   <div className="mt-1" style={META}>{companies} • {p.runs} runs</div>
-                  {p.card_copy && <div className="mt-3 font-medium" style={{ fontSize: 15, color: "var(--pm-ink)" }}>{p.card_copy}</div>}
-                  <ul className="mt-3 space-y-1.5" style={{ fontSize: 14, color: "rgba(11,42,48,0.85)" }}>
-                    {p.features.map((f, i) => <li key={i} className="flex gap-2"><span style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }} aria-hidden="true">✓</span>{f}</li>)}
+                  {p.card_copy && <div className="mt-3 font-medium" style={{ fontSize: 15, color: "var(--gl-text)" }}>{p.card_copy}</div>}
+                  <ul className="mt-3 space-y-1.5" style={{ fontSize: 14, color: "var(--gl-text)" }}>
+                    {p.features.map((f, i) => <li key={i} className="flex gap-2"><span style={{ color: "var(--gl-accent)", fontWeight: 600 }} aria-hidden="true">✓</span>{f}</li>)}
                   </ul>
                   <div className="mt-auto pt-6">
                     <Button
@@ -177,8 +178,8 @@ export default function Pricing() {
                 {pricing.credit_packs.map(pack => (
                   <Card key={pack.id} data-testid={`credit-pack-${pack.id}`} className="flex flex-col">
                     <CardTitle>{pack.label}</CardTitle>
-                    <div className="mt-1 font-display font-semibold" style={{ fontSize: 28, color: "var(--pm-ink)", fontVariantNumeric: "tabular-nums" }}>₹{pack.price}
-                      <span style={{ fontSize: 13, fontWeight: 400, color: "rgba(11,42,48,0.7)", marginLeft: 4 }}>one-time</span>
+                    <div className="mt-1" style={{ ...OUTFIT, fontSize: 28, color: "var(--gl-text)", fontVariantNumeric: "tabular-nums" }}>₹{pack.price}
+                      <span style={{ fontSize: 13, fontWeight: 400, color: "var(--gl-muted)", marginLeft: 4 }}>one-time</span>
                     </div>
                     <div className="mt-1" style={META}>{pack.credits} run{pack.credits > 1 ? "s" : ""} · never expires</div>
                     <div className="mt-auto pt-4">
