@@ -31,15 +31,15 @@ export default function VerifyEmail() {
         <div className="max-w-md mx-auto text-center py-16">
           {status === "pending" && (
             <>
-              <div className="w-9 h-9 mx-auto rounded-full animate-spin" style={{ border: "2px solid var(--pm-teal-deep)", borderTopColor: "transparent" }}></div>
-              <div className="mt-4" style={{ fontSize: 15, color: "rgba(11,42,48,0.7)" }}>Verifying your email…</div>
+              <div className="w-9 h-9 mx-auto rounded-full animate-spin" style={{ border: "2px solid var(--gl-accent)", borderTopColor: "transparent" }}></div>
+              <div className="mt-4" style={{ fontSize: 15, color: "var(--gl-muted)" }}>Verifying your email…</div>
             </>
           )}
           {status === "ok" && (
             <>
-              <CheckCircle2 className="mx-auto" size={48} style={{ color: "var(--pm-teal-deep)" }} aria-hidden="true" />
+              <CheckCircle2 className="mx-auto" size={48} style={{ color: "var(--gl-accent)" }} aria-hidden="true" />
               <PageTitle as="h2" className="mt-4">Email verified.</PageTitle>
-              <p className="mt-2" style={{ fontSize: 16, color: "rgba(11,42,48,0.85)" }}>You're all set. Head back to your dashboard.</p>
+              <p className="mt-2" style={{ fontSize: 16, color: "var(--gl-muted)" }}>You're all set. Head back to your dashboard.</p>
               <div className="mt-6 flex justify-center">
                 <Button as={Link} to="/dashboard" data-testid="verify-back-dashboard">Back to dashboard</Button>
               </div>
@@ -47,9 +47,9 @@ export default function VerifyEmail() {
           )}
           {status === "error" && (
             <>
-              <XCircle className="mx-auto" size={48} style={{ color: "var(--pm-ink)" }} aria-hidden="true" />
+              <XCircle className="mx-auto" size={48} style={{ color: "var(--gl-text)" }} aria-hidden="true" />
               <PageTitle as="h2" className="mt-4">Couldn't verify.</PageTitle>
-              <p className="mt-2" style={{ fontSize: 16, color: "rgba(11,42,48,0.85)" }}>{message}. Links expire after 30 minutes. Request a new one from your dashboard.</p>
+              <p className="mt-2" style={{ fontSize: 16, color: "var(--gl-muted)" }}>{message}. Links expire after 30 minutes. Request a new one from your dashboard.</p>
               <div className="mt-6 flex justify-center">
                 <Button as={Link} to="/dashboard" variant="secondary">Go to dashboard</Button>
               </div>

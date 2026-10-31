@@ -38,7 +38,7 @@ export default function ResetPassword() {
       <PageShell>
         <div className="max-w-md mx-auto py-16">
           <PageTitle as="h1" style={{ fontSize: "clamp(2rem, 4vw, 2.75rem)" }}>Set a new password</PageTitle>
-          <p className="mt-3 mb-8" style={{ fontSize: 16, color: "rgba(11,42,48,0.85)" }}>Choose something you'll actually remember.</p>
+          <p className="mt-3 mb-8" style={{ fontSize: 16, color: "var(--gl-muted)" }}>Choose something you'll actually remember.</p>
 
           <form onSubmit={submit} className="space-y-4">
             {!params.get("token") && (
@@ -47,7 +47,7 @@ export default function ResetPassword() {
                 required placeholder="paste reset token"
                 aria-label="Reset token"
                 value={token} onChange={e => setToken(e.target.value)}
-                className="pm-input"
+                className="gl-field-input"
                 style={{ fontSize: 13 }}
               />
             )}
@@ -56,7 +56,7 @@ export default function ResetPassword() {
               type="password" required minLength={6} placeholder="new password (min 6 chars)"
               aria-label="New password"
               value={password} onChange={e => setPassword(e.target.value)}
-              className="pm-input"
+              className="gl-field-input"
               style={{ fontSize: 15 }}
             />
             <input
@@ -64,7 +64,7 @@ export default function ResetPassword() {
               type="password" required placeholder="confirm new password"
               aria-label="Confirm new password"
               value={confirm} onChange={e => setConfirm(e.target.value)}
-              className="pm-input"
+              className="gl-field-input"
               style={{ fontSize: 15 }}
             />
             <Button type="submit" data-testid="reset-submit" disabled={loading} className="w-full">
@@ -72,8 +72,8 @@ export default function ResetPassword() {
             </Button>
           </form>
 
-          <div className="mt-6 text-center" style={{ fontSize: 15, color: "rgba(11,42,48,0.85)" }}>
-            <Link to="/login" className="font-semibold underline underline-offset-2" style={{ color: "var(--pm-teal-deep)" }}>Back to sign in</Link>
+          <div className="mt-6 text-center" style={{ fontSize: 15, color: "var(--gl-muted)" }}>
+            <Link to="/login" className="font-semibold underline underline-offset-2" style={{ color: "var(--gl-accent)" }}>Back to sign in</Link>
           </div>
         </div>
       </PageShell>

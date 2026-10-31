@@ -26,7 +26,7 @@ export function PrivacyPolicy() {
       </p>
       <h2>Data deletion</h2>
       <p>
-        Email <a href="mailto:hello@placemint.app" className="text-pm-primary-dark underline">hello@placemint.app</a> to delete your account. We'll wipe your profile, attempts, and resume text within 7 days.
+        Email <a href="mailto:hello@placemint.app" className="underline">hello@placemint.app</a> to delete your account. We'll wipe your profile, attempts, and resume text within 7 days.
       </p>
     </LegalPage>
   );
@@ -84,7 +84,7 @@ export function RefundPolicy() {
       </ul>
       <h2>Refund process</h2>
       <p>
-        Email <a href="mailto:hello@placemint.app" className="text-pm-primary-dark underline">hello@placemint.app</a> from the address on your account with your order ID. Refunds are processed via Razorpay back to the original payment method within 5–7 business days.
+        Email <a href="mailto:hello@placemint.app" className="underline">hello@placemint.app</a> from the address on your account with your order ID. Refunds are processed via Razorpay back to the original payment method within 5–7 business days.
       </p>
       <h2>Not refundable</h2>
       <ul>
@@ -99,7 +99,7 @@ export function CookiePolicy() {
   return (
     <LegalPage title="Cookie Policy" updatedOn="Jan 2026">
       <p>
-        Placemint uses one cookie: <code className="font-mono bg-pm-muted px-1 rounded">session_token</code>. It stores your login session so you don't have to sign in on every page. It's <strong>HttpOnly</strong>, <strong>Secure</strong>, and <strong>SameSite=None</strong>.
+        Placemint uses one cookie: <code className="font-mono px-1 rounded" style={{ background: "color-mix(in srgb, var(--gl-text) 8%, transparent)" }}>session_token</code>. It stores your login session so you don't have to sign in on every page. It's <strong>HttpOnly</strong>, <strong>Secure</strong>, and <strong>SameSite=None</strong>.
       </p>
       <p>
         We do not use analytics cookies, advertising cookies, or third-party tracking pixels.
@@ -127,7 +127,7 @@ export function About() {
         Made in India, for the fresher who's tired of “one mock test fits all”.
       </p>
       <p>
-        <a href="mailto:hello@placemint.app" className="text-pm-primary-dark underline">hello@placemint.app</a>
+        <a href="mailto:hello@placemint.app" className="underline">hello@placemint.app</a>
       </p>
     </LegalPage>
   );
