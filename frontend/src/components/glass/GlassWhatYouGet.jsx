@@ -37,33 +37,35 @@ export default function GlassWhatYouGet() {
         </div>
 
         <div className="gl-wc">
-          <div className="gl-wh">
-            <h3>Where do you want to start?</h3>
-            <div className="gl-pg">
-              <small>Feature {k + 1} of {FEATURES.length}</small>
-              <span className="gl-pgp">
-                {FEATURES.map((_, i) => <i key={i} className={i === k ? "on" : ""} />)}
-              </span>
+          <div className="gl-wc-in">
+            <div className="gl-wh">
+              <h3>Where do you want to start?</h3>
+              <div className="gl-pg">
+                <small>Feature {k + 1} of {FEATURES.length}</small>
+                <span className="gl-pgp">
+                  {FEATURES.map((_, i) => <i key={i} className={i === k ? "on" : ""} />)}
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div className="gl-opts" role="tablist" aria-label="Feature picker">
-            {FEATURES.map((o, i) => {
-              const OIcon = o.icon;
-              return (
-                <button
-                  key={o.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={i === k}
-                  className={`gl-opt${i === k ? " on" : ""}`}
-                  onClick={() => setK(i)}
-                >
-                  <b style={{ "--oc": o.ic }}><OIcon size={19} /></b>
-                  {o.name}
-                </button>
-              );
-            })}
+            <div className="gl-opts" role="tablist" aria-label="Feature picker">
+              {FEATURES.map((o, i) => {
+                const OIcon = o.icon;
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={i === k}
+                    className={`gl-opt${i === k ? " on" : ""}`}
+                    onClick={() => setK(i)}
+                  >
+                    <b style={{ "--oc": o.ic }}><OIcon size={19} /></b>
+                    {o.name}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>

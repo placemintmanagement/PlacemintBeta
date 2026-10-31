@@ -11,7 +11,7 @@ import { COMPANIES } from "../../data/companies";
  */
 export default function GlassCrackInterviews() {
   return (
-    <section className="gl-sec" id="companies">
+    <section className="gl-sec gl-sec-tight-bottom" id="companies">
       <h2 className="gl-h2" style={{ textAlign: "center" }}>
         Crack <b>interviews</b> at
       </h2>
