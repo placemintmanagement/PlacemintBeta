@@ -5,28 +5,32 @@ import { useAuth } from "../auth";
 import { TID } from "../testIds";
 import { SHOW_PRICING } from "../featureFlags";
 import { Sparkles, Crown } from "lucide-react";
+import GlassLogoMark from "./glass/GlassLogoMark";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "./ui/alert-dialog";
 
-// Human-readable label + accent color per plan. Chip classes are the
-// "on teal" variants (index.css) since the header sits directly on the
-// page's teal background now, not a white card.
+// Human-readable label + accent color per plan. `.gl-tag` (glass.css) is
+// a plain pastel-yellow pill by default; founder/paid plans get a vivid
+// accent color via inline style, same "pastel token reads dull as an
+// icon/badge foreground, use a dedicated vivid hex" pattern used
+// throughout the rest of the glass system.
 const PLAN_META = {
-  free:     { label: "Free",     chipClass: "pm-chip pm-chip-light", icon: null },
-  basic:    { label: "Basic",    chipClass: "pm-chip pm-chip-lime",  icon: <Sparkles size={11} /> },
-  pro:      { label: "Pro",      chipClass: "pm-chip pm-chip-lime",  icon: <Sparkles size={11} /> },
-  max:      { label: "MAX",      chipClass: "pm-chip pm-chip-lime",  icon: <Sparkles size={11} /> },
-  supermax: { label: "SuperMAX", chipClass: "pm-chip pm-chip-lime",  icon: <Sparkles size={11} /> },
-  founder:  { label: "Founder",  chipClass: "pm-chip pm-chip-light", icon: <Crown size={11} /> },
+  free:     { label: "Free",     accent: null,      icon: null },
+  basic:    { label: "Basic",    accent: "#ca8a04",  icon: <Sparkles size={11} /> },
+  pro:      { label: "Pro",      accent: "#ca8a04",  icon: <Sparkles size={11} /> },
+  max:      { label: "MAX",      accent: "#ca8a04",  icon: <Sparkles size={11} /> },
+  supermax: { label: "SuperMAX", accent: "#ca8a04",  icon: <Sparkles size={11} /> },
+  founder:  { label: "Founder",  accent: "#7c3aed",  icon: <Crown size={11} /> },
 };
 
-// light: renders the header for a light-background page (2026-10,
-// DepartmentCompanies.jsx) -- white/ink instead of the default
-// translucent-teal/white chrome every other app page still uses.
-// Defaults to false so every existing <Header /> call keeps its current
-// look untouched.
+// `light` is accepted but no longer changes anything visually -- every
+// real page already passed `light` (confirmed: only the /dev/* preview
+// routes, out of scope for the glass rollout, ever used the old default
+// translucent-teal variant), and the glass nav is a single light/white
+// design regardless. Kept as a no-op prop rather than removed so no
+// caller needs a code change for this component alone.
 export default function Header({ light = false } = {}) {
   const { user, logout } = useAuth();
   const { isAuthenticated: auth0Authenticated, logout: auth0Logout } = useAuth0();
@@ -54,69 +58,59 @@ export default function Header({ light = false } = {}) {
     navigate("/");
   };
 
-  const navLinkClass = light
-    ? "transition-colors hover:text-[#0B2A30]"
-    : "hover:text-white transition-colors";
-  const ghostBtnClass = light ? "pm-btn pm-btn-ghost" : "pm-btn pm-btn-ghost-light";
-
   return (
-    <header
-      className={`sticky top-0 z-40 backdrop-blur-xl ${light ? "" : "border-b border-white/10"}`}
-      style={light
-        ? { background: "#FFFFFF", borderBottom: "1px solid rgba(7,59,67,0.08)" }
-        : { background: "rgba(10,60,66,0.82)" }
-      }
-    >
-      <div className={`max-w-7xl mx-auto flex items-center justify-between ${light ? "px-4 sm:px-6 lg:px-10" : "px-6 lg:px-10"} py-4`}>
-        <Link to="/" data-testid={TID.navLogo} className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg grid place-items-center font-display font-extrabold" style={{ background: "var(--pm-lime)", color: "var(--pm-ink)" }}>P</div>
-          <span className={`font-display ${light ? "text-lg sm:text-xl" : "text-xl"} font-bold tracking-tight`} style={{ color: light ? "#0B2A30" : "#FFFFFF" }}>Placemint</span>
-          {light ? (
-            <span className="hidden sm:inline-flex ml-2 rounded-full" style={{ background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 13, padding: "4px 10px" }}>Beta</span>
-          ) : (
-            <span className="pm-chip pm-chip-light hidden sm:inline-flex ml-2">Beta</span>
-          )}
+    // `glass-landing` reused here as the general "this subtree uses the
+    // glass design system" scope marker, not landing-specific -- it's
+    // just a CSS class name, and all its token/reset rules are written
+    // as `.glass-landing`/`.glass-landing <descendant>`, so applying it
+    // directly to this component's own root scopes everything to just
+    // the header, without touching the rest of a still-teal page below
+    // it (verified live: broadening these rules to the app-wide
+    // `.glass-app` wrapper instead painted white over every teal page).
+    // `data-theme="light"` pins it away from auto OS-dark-mode reactivity
+    // for now, since no other page supports dark mode yet.
+    <header className="glass-landing gl-nav" data-theme="light">
+      <div>
+        <Link to="/" data-testid={TID.navLogo} className="gl-logo">
+          <GlassLogoMark size={28} />
+          HireTric
+          <span className="gl-tag" style={{ fontSize: 12, marginLeft: 4 }}>Beta</span>
         </Link>
 
-        <nav className="hidden md:flex items-center gap-8 text-sm" style={{ color: light ? "rgba(11,42,48,0.70)" : "rgba(255,255,255,0.75)" }}>
-          <a href="/#companies" className={navLinkClass}>Companies</a>
-          <a href="/#pipeline" className={navLinkClass}>How it works</a>
-          {SHOW_PRICING && <a href="/#pricing" className={navLinkClass}>Pricing</a>}
-          <a href="/#faq" className={navLinkClass}>FAQ</a>
-        </nav>
+        <div className="gl-links">
+          <a href="/#companies">Companies</a>
+          <a href="/#pipeline">How it works</a>
+          {SHOW_PRICING && <a href="/#pricing">Pricing</a>}
+          <a href="/#faq">FAQ</a>
+        </div>
 
-        <div className="flex items-center gap-3">
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
           {user ? (
             <>
               {plan && (
                 <div className="hidden sm:flex items-center gap-2" data-testid="header-plan-badge">
-                  <span className={plan.chipClass} title={`Plan: ${plan.label}`}>
+                  <span className="gl-tag" style={plan.accent ? { background: "none", border: `1px solid ${plan.accent}`, color: plan.accent } : undefined} title={`Plan: ${plan.label}`}>
                     {plan.icon}{plan.label}
                   </span>
                   {user.plan !== "founder" && (
-                    <span className={`text-[11px] ${light ? "" : "font-mono"}`} style={{ color: light ? "rgba(11,42,48,0.60)" : "rgba(255,255,255,0.70)" }} title="Runs remaining">
+                    <span style={{ fontSize: 11, color: "var(--gl-muted)" }} title="Runs remaining">
                       {runsLeft}/{user.runs_quota} runs
                     </span>
                   )}
                 </div>
               )}
-              <Link to="/dashboard" data-testid={TID.navDashboard} className={light ? `${ghostBtnClass} text-sm pm-hdr-btn` : `${ghostBtnClass} text-sm py-2 px-4`}>Dashboard</Link>
-              {/* Wrapper, not the link: .pm-btn sets display itself and would win over a hidden class. */}
+              <Link to="/dashboard" data-testid={TID.navDashboard} className="gl-btn">Dashboard</Link>
               <div className="hidden sm:flex">
-                <Link to="/deck" data-testid="nav-deck" className={`${ghostBtnClass} text-sm py-2 px-4`}>Review deck</Link>
+                <Link to="/deck" data-testid="nav-deck" className="gl-btn">Review deck</Link>
               </div>
-              <button
-                data-testid={TID.navLogout}
-                onClick={() => setConfirmOpen(true)}
-                className={light ? `${ghostBtnClass} text-sm pm-hdr-btn` : `${ghostBtnClass} text-sm py-2 px-4`}
-              >
+              <button data-testid={TID.navLogout} onClick={() => setConfirmOpen(true)} className="gl-btn">
                 Sign out
               </button>
             </>
           ) : (
             <>
-              <Link to="/login" data-testid={TID.navLogin} className={light ? `${ghostBtnClass} text-sm pm-hdr-btn whitespace-nowrap` : `${ghostBtnClass} text-sm py-2 px-3 sm:px-4 whitespace-nowrap`}>Sign in</Link>
-              <Link to="/signup" data-testid={TID.navSignup} className={light ? "pm-btn pm-btn-primary text-sm pm-hdr-btn whitespace-nowrap" : "pm-btn pm-btn-primary text-sm py-2 px-3 sm:px-4 whitespace-nowrap"}>Start free</Link>
+              <Link to="/login" data-testid={TID.navLogin} className="gl-btn">Sign in</Link>
+              <Link to="/signup" data-testid={TID.navSignup} className="gl-btn y">Start free</Link>
             </>
           )}
         </div>
@@ -124,10 +118,10 @@ export default function Header({ light = false } = {}) {
 
       {/* Sign-out confirmation */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent data-testid="signout-confirm-modal" className="bg-pm-surface">
+        <AlertDialogContent data-testid="signout-confirm-modal">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-display text-2xl">Sign out of Placemint?</AlertDialogTitle>
-            <AlertDialogDescription className="text-pm-text2">
+            <AlertDialogTitle className="text-2xl" style={{ fontFamily: "Outfit, system-ui, sans-serif" }}>Sign out of HireTric?</AlertDialogTitle>
+            <AlertDialogDescription>
               Your progress is saved. You can sign back in any time and pick up where you left off.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -137,7 +131,6 @@ export default function Header({ light = false } = {}) {
               data-testid="signout-confirm"
               onClick={doSignOut}
               disabled={signingOut}
-              className="bg-pm-secondary text-white hover:bg-[#123A42]"
             >
               {signingOut ? "Signing out…" : "Yes, sign me out"}
             </AlertDialogAction>
