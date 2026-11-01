@@ -8,8 +8,9 @@ import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } fro
 import { TIER_NAMES, TCS_TRACK_NAMES } from "../lib/tierLabels";
 
 // Body-size meta text (never monospace).
-const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
-const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
+const META = { fontSize: 13, color: "var(--gl-muted)" };
+const BODY = { fontSize: 15, color: "var(--gl-text)", lineHeight: 1.6 };
+const OUTFIT = { fontFamily: "Outfit, system-ui, sans-serif", fontWeight: 600 };
 
 // Shown once, right after the final section of a Capgemini attempt. The tier
 // is computed by the server (services/capgemini_tiers.py) and passed here in
@@ -21,13 +22,13 @@ function TierUnlockCard({ tier, onDismiss }) {
         <>
           <SectionLabel>capgemini tier</SectionLabel>
           <CardTitle style={{ fontSize: 24 }}>Congratulations, you unlocked the {TIER_NAMES[tier.tier]} tier!</CardTitle>
-          <div className="mt-2" style={{ fontSize: 16, color: "rgba(11,42,48,0.75)" }}>{tier.lpa.toFixed(2)} LPA</div>
+          <div className="mt-2" style={{ fontSize: 16, color: "var(--gl-muted)" }}>{tier.lpa.toFixed(2)} LPA</div>
         </>
       ) : (
         <>
           <SectionLabel>attempt complete</SectionLabel>
           <CardTitle style={{ fontSize: 22 }}>Your attempt is complete.</CardTitle>
-          <div className="mt-2" style={{ fontSize: 15, color: "rgba(11,42,48,0.75)" }}>Your full review is below.</div>
+          <div className="mt-2" style={{ fontSize: 15, color: "var(--gl-muted)" }}>Your full review is below.</div>
         </>
       )}
       <Button variant="primary" className="mt-4" onClick={onDismiss}>View my review</Button>
@@ -50,7 +51,7 @@ function TCSTrackCard({ tier, onDismiss }) {
           <SectionLabel>estimated track (TCS does not publish cutoffs)</SectionLabel>
           <CardTitle style={{ fontSize: 24 }}>{TCS_TRACK_NAMES[tier.tier] || tier.tier}</CardTitle>
           {tier.lpa && (
-            <div className="mt-2" style={{ fontSize: 16, color: "rgba(11,42,48,0.75)" }}>
+            <div className="mt-2" style={{ fontSize: 16, color: "var(--gl-muted)" }}>
               UG {tier.lpa?.ug} · PG {tier.lpa?.pg}
             </div>
           )}
@@ -61,7 +62,7 @@ function TCSTrackCard({ tier, onDismiss }) {
         <>
           <SectionLabel>estimated track (TCS does not publish cutoffs)</SectionLabel>
           <CardTitle style={{ fontSize: 22 }}>Your attempt is complete.</CardTitle>
-          <div className="mt-2" style={{ fontSize: 15, color: "rgba(11,42,48,0.75)" }}>Your full review is below.</div>
+          <div className="mt-2" style={{ fontSize: 15, color: "var(--gl-muted)" }}>Your full review is below.</div>
         </>
       )}
       <Button variant="primary" className="mt-4" onClick={onDismiss}>View my review</Button>
@@ -103,9 +104,9 @@ export default function OAReview() {
     );
   }
 
-  // Three-tier verdict colour: teal for clear, ink 70% for borderline, full
-  // ink for not ready. No hue beyond the palette.
-  const verdictColor = review.verdict === "clear" ? "var(--pm-teal-deep)" : review.verdict === "borderline" ? "rgba(11,42,48,0.7)" : "var(--pm-ink)";
+  // Three-tier verdict colour: accent for clear, muted for borderline, full
+  // text for not ready. No hue beyond the palette.
+  const verdictColor = review.verdict === "clear" ? "var(--gl-accent)" : review.verdict === "borderline" ? "var(--gl-muted)" : "var(--gl-text)";
   const verdictText = review.verdict === "clear" ? "You'd likely clear this."
     : review.verdict === "borderline" ? "You're borderline, fixable."
     : "Not ready yet. Keep grinding.";
@@ -174,15 +175,15 @@ export default function OAReview() {
           <div className="mt-6 flex flex-wrap items-stretch gap-4">
             <Card padding="16px 20px" style={{ borderRadius: 20 }}>
               <div style={META}>Composite</div>
-              <div className="font-display font-semibold" style={{ fontSize: 26, color: "var(--pm-ink)" }}>{Math.round(review.composite_score * 100)}%</div>
+              <div style={{ ...OUTFIT, fontSize: 26, color: "var(--gl-text)" }}>{Math.round(review.composite_score * 100)}%</div>
             </Card>
             <Card padding="16px 20px" style={{ borderRadius: 20 }}>
               <div style={META}>Weakest section</div>
-              <div className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{nameByKey[review.weakest_section] || review.weakest_section || "N/A"}</div>
+              <div style={{ ...OUTFIT, fontSize: 18, color: "var(--gl-text)" }}>{nameByKey[review.weakest_section] || review.weakest_section || "N/A"}</div>
             </Card>
             <Card padding="16px 20px" style={{ borderRadius: 20 }}>
               <div style={META}>Scoring mode</div>
-              <div className="font-display font-semibold capitalize" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{review.scoring_mode}</div>
+              <div className="capitalize" style={{ ...OUTFIT, fontSize: 18, color: "var(--gl-text)" }}>{review.scoring_mode}</div>
             </Card>
           </div>
 
@@ -192,7 +193,7 @@ export default function OAReview() {
               <Card key={key} padding="20px 24px">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div>
-                    <div className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{nameByKey[key] || key}</div>
+                    <div style={{ ...OUTFIT, fontSize: 18, color: "var(--gl-text)" }}>{nameByKey[key] || key}</div>
                     <div className="mt-1" style={META}>score {(res.score * 100).toFixed(0)}%</div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -240,23 +241,23 @@ export default function OAReview() {
                         onClick={() => setOpenKeys(o => ({ ...o, [sec.section_key]: !o[sec.section_key] }))}
                         data-testid={`answer-key-toggle-${sec.section_key}`}
                         aria-expanded={isOpen}
-                        className="w-full flex items-center justify-between gap-4 p-5 text-left transition-colors hover:bg-[rgba(15,111,122,0.04)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--pm-teal-night)]"
+                        className="w-full flex items-center justify-between gap-4 p-5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--gl-accent)_4%,transparent)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--gl-focus)]"
                       >
                         <div>
-                          <div className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>{sec.section_name}</div>
+                          <div style={{ ...OUTFIT, fontSize: 18, color: "var(--gl-text)" }}>{sec.section_name}</div>
                           <div className="mt-1 flex flex-wrap gap-3" style={META}>
-                            <span style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>✓ {correctQ} correct</span>
-                            <span style={{ color: "var(--pm-ink)", fontWeight: 600 }}>✗ {wrongQ} wrong</span>
+                            <span style={{ color: "var(--gl-accent)", fontWeight: 600 }}>✓ {correctQ} correct</span>
+                            <span style={{ color: "var(--gl-text)", fontWeight: 600 }}>✗ {wrongQ} wrong</span>
                             {skippedQ > 0 && <span>– {skippedQ} skipped</span>}
                             <span>· {totalQ} total</span>
                           </div>
                         </div>
-                        <div style={{ color: "rgba(11,42,48,0.7)" }}>
+                        <div style={{ color: "var(--gl-muted)" }}>
                           {isOpen ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}
                         </div>
                       </button>
                       {isOpen && (
-                        <div style={{ borderTop: "1px solid rgba(7,59,67,0.08)" }} className="divide-y" >
+                        <div style={{ borderTop: "1px solid var(--gl-line)" }} className="divide-y" >
                           {sec.questions.map((q, i) => (
                             <QuestionRow
                               key={q.id || i}
@@ -275,14 +276,14 @@ export default function OAReview() {
             </>
           )}
 
-          <div className="mt-12 rounded-[24px] p-7 flex items-center justify-between flex-wrap gap-6" style={{ background: "var(--pm-teal-night)", color: "var(--pm-white)" }}>
+          <div className="mt-12 rounded-[24px] p-7 flex items-center justify-between flex-wrap gap-6" style={{ background: "#0c0c0c", color: "#fff" }}>
             <div>
-              <span className="inline-flex rounded-full" style={{ background: "rgba(255,255,255,0.12)", color: "var(--pm-white)", fontSize: 13, padding: "4px 10px" }}>next up</span>
-              <div className="font-display font-semibold mt-3" style={{ fontSize: 26, color: "var(--pm-white)" }}>Take the interview round.</div>
+              <span className="inline-flex rounded-full" style={{ background: "rgba(255,255,255,0.12)", color: "#fff", fontSize: 13, padding: "4px 10px" }}>next up</span>
+              <div className="mt-3" style={{ ...OUTFIT, fontSize: 26, color: "#fff" }}>Take the interview round.</div>
               <div className="mt-1" style={{ fontSize: 15, color: "rgba(255,255,255,0.8)" }}>2 DSA · 2 project questions · 3 CS fundamentals.</div>
             </div>
             <div className="flex gap-3 flex-wrap">
-              <Link to="/dashboard" className="pm-btn pm-btn-ghost-light !py-3 !px-5" style={{ fontSize: 15 }}>Back to dashboard</Link>
+              <Button as={Link} to="/dashboard" variant="outline-dark" className="!py-3 !px-5" style={{ fontSize: 15 }}>Back to dashboard</Button>
               <Button variant="lime" onClick={startInterview} disabled={starting}>
                 {starting ? "Preparing…" : <>Start interview <ArrowRight size={14} aria-hidden="true"/></>}
               </Button>
@@ -296,7 +297,8 @@ export default function OAReview() {
 
 function QuestionRow({ q, index, saved, onSave }) {
   // Multiline prompt preserved as-is; options rendered as a list with the
-  // correct answer highlighted in teal and the user's wrong pick outlined in ink.
+  // correct answer highlighted in the accent colour and the user's wrong
+  // pick outlined in a muted near-black.
   const correctIdx = q.correct_index;
   const userIdx = q.user_index;
   const state = q.answered ? (q.is_correct ? "correct" : "wrong") : "skipped";
@@ -310,32 +312,32 @@ function QuestionRow({ q, index, saved, onSave }) {
   return (
     <div className="p-5" data-testid={`ak-row-${index}`}>
       <div className="flex items-start gap-3">
-        <div className="shrink-0 mt-0.5 pm-eyebrow" style={{ color: "rgba(11,42,48,0.7)" }}>Q{index + 1}</div>
+        <div className="shrink-0 mt-0.5" style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gl-muted)" }}>Q{index + 1}</div>
         <div className="flex-1 min-w-0">
           <div className="whitespace-pre-wrap" style={BODY}>{q.prompt}</div>
           <div className="mt-3 space-y-1.5">
             {(q.options || []).map((opt, i) => {
               const isCorrect = i === correctIdx;
               const isUser = i === userIdx;
-              let style = { border: "1px solid rgba(7,59,67,0.12)", background: "var(--pm-white)" };
-              if (isCorrect) style = { border: "1.5px solid var(--pm-teal-deep)", background: "var(--pm-success-bg)" };
-              else if (isUser && !isCorrect) style = { border: "1.5px solid rgba(11,42,48,0.55)", background: "var(--pm-grey)" };
+              let style = { border: "1px solid var(--gl-line)", background: "var(--gl-card)" };
+              if (isCorrect) style = { border: "1.5px solid var(--gl-accent)", background: "color-mix(in srgb, var(--gl-mint) 35%, transparent)" };
+              else if (isUser && !isCorrect) style = { border: "1.5px solid color-mix(in srgb, var(--gl-text) 55%, transparent)", background: "color-mix(in srgb, var(--gl-text) 6%, transparent)" };
               return (
-                <div key={i} className="rounded-[12px] px-3 py-2 flex items-start gap-2" style={{ fontSize: 15, color: "var(--pm-ink)", ...style }}>
-                  <span className="shrink-0 mt-0.5 font-semibold" style={{ fontSize: 13, color: "rgba(11,42,48,0.7)" }}>{String.fromCharCode(65 + i)}</span>
+                <div key={i} className="rounded-[12px] px-3 py-2 flex items-start gap-2" style={{ fontSize: 15, color: "var(--gl-text)", ...style }}>
+                  <span className="shrink-0 mt-0.5 font-semibold" style={{ fontSize: 13, color: "var(--gl-muted)" }}>{String.fromCharCode(65 + i)}</span>
                   <span className="flex-1 min-w-0 whitespace-pre-wrap">{opt}</span>
                   <span className="shrink-0 flex items-center gap-1" style={{ fontSize: 13 }}>
-                    {isCorrect && <span style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>correct</span>}
-                    {isUser && !isCorrect && <span style={{ color: "var(--pm-ink)", fontWeight: 600 }}>your answer</span>}
-                    {isUser && isCorrect && <span style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>✓ you</span>}
+                    {isCorrect && <span style={{ color: "var(--gl-accent)", fontWeight: 600 }}>correct</span>}
+                    {isUser && !isCorrect && <span style={{ color: "var(--gl-text)", fontWeight: 600 }}>your answer</span>}
+                    {isUser && isCorrect && <span style={{ color: "var(--gl-accent)", fontWeight: 600 }}>✓ you</span>}
                   </span>
                 </div>
               );
             })}
           </div>
           {q.explanation && (
-            <div className="mt-3 pl-3" style={{ fontSize: 14, color: "rgba(11,42,48,0.85)", borderLeft: "2px solid var(--pm-teal-deep)" }}>
-              <span className="pm-eyebrow" style={{ fontSize: 11, color: "var(--pm-teal-deep)" }}>Why</span>
+            <div className="mt-3 pl-3" style={{ fontSize: 14, color: "var(--gl-text)", borderLeft: "2px solid var(--gl-accent)" }}>
+              <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gl-accent)" }}>Why</span>
               <div className="mt-0.5 whitespace-pre-wrap">{q.explanation}</div>
             </div>
           )}
@@ -345,10 +347,10 @@ function QuestionRow({ q, index, saved, onSave }) {
                 onClick={onSave}
                 disabled={saved}
                 data-testid={`deck-save-q-${index}`}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)] disabled:cursor-default"
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)] disabled:cursor-default"
                 style={saved
-                  ? { fontSize: 13, background: "var(--pm-success-bg)", color: "var(--pm-teal-deep)", border: "1px solid rgba(15,111,122,0.35)" }
-                  : { fontSize: 13, background: "var(--pm-white)", color: "var(--pm-teal-deep)", border: "1.5px solid var(--pm-border-control)" }}
+                  ? { fontSize: 13, background: "color-mix(in srgb, var(--gl-mint) 35%, transparent)", color: "var(--gl-accent)", border: "1px solid color-mix(in srgb, var(--gl-accent) 35%, transparent)" }
+                  : { fontSize: 13, background: "var(--gl-card)", color: "var(--gl-accent)", border: "1.5px solid var(--gl-line)" }}
               >
                 {saved ? <><BookmarkCheck size={13}/> Saved to deck</> : <><BookmarkPlus size={13}/> Save to review deck</>}
               </button>

@@ -12,8 +12,9 @@ import { parseErrorDetail } from "../lib/apiError";
 // the countdown survives a refresh and does not depend on this device's clock.
 // The browser never receives flags, scores, weights, thresholds or rubrics.
 
-const META = { fontSize: 14, color: "rgba(11,42,48,0.7)" };
-const BODY = { fontSize: 15, color: "var(--pm-ink)", lineHeight: 1.6 };
+const META = { fontSize: 14, color: "var(--gl-muted)" };
+const BODY = { fontSize: 15, color: "var(--gl-text)", lineHeight: 1.6 };
+const OUTFIT = { fontFamily: "Outfit, system-ui, sans-serif", fontWeight: 600 };
 
 const asText = (v) => (v == null ? "" : typeof v === "string" ? v : String(v));
 
@@ -176,13 +177,13 @@ export default function SparkInterview({ interviewId, initial }) {
               <PageTitle as="h2" style={{ fontSize: "clamp(1.75rem, 3vw, 2.25rem)" }}>Interview</PageTitle>
               {view.ai_interviewer && (
                 <span data-testid="spark-ai-tag" className="rounded-full px-3 py-1"
-                      style={{ fontSize: 11, fontWeight: 600, background: "rgba(7,59,67,0.08)", color: "var(--pm-ink)" }}>
+                      style={{ fontSize: 11, fontWeight: 600, background: "color-mix(in srgb, var(--gl-text) 8%, transparent)", color: "var(--gl-text)" }}>
                   {view.persona_label || "AI interviewer"}
                 </span>
               )}
             </div>
             {inProgress && (
-              <div data-testid="spark-countdown" className="font-display font-semibold" style={{ fontSize: 22, color: "var(--pm-ink)" }}>
+              <div data-testid="spark-countdown" style={{ ...OUTFIT, fontSize: 22, color: "var(--gl-text)" }}>
                 {formatRemaining(remaining)} left
               </div>
             )}
@@ -198,9 +199,9 @@ export default function SparkInterview({ interviewId, initial }) {
                     className="rounded-full px-3 py-1"
                     style={{
                       fontSize: 13, fontWeight: 600,
-                      background: current ? "var(--pm-teal-deep)" : done ? "rgba(7,59,67,0.08)" : "transparent",
-                      color: current ? "var(--pm-white)" : "var(--pm-ink)",
-                      border: "1px solid rgba(7,59,67,0.12)",
+                      background: current ? "var(--gl-accent)" : done ? "color-mix(in srgb, var(--gl-text) 8%, transparent)" : "transparent",
+                      color: current ? "#fff" : "var(--gl-text)",
+                      border: "1px solid var(--gl-line)",
                     }}>
                   {s.label}
                 </li>
@@ -212,29 +213,29 @@ export default function SparkInterview({ interviewId, initial }) {
           <Card className="mt-6 space-y-5 max-h-[60vh] overflow-y-auto" padding="24px">
             {view.turns.map((t, i) => (
               <div key={i} className="space-y-3">
-                <div className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "var(--pm-grey)" }}>{asText(t.question)}</div>
+                <div className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "color-mix(in srgb, var(--gl-text) 6%, transparent)" }}>{asText(t.question)}</div>
                 <div className="flex justify-end">
-                  <div className="max-w-[80%] p-4 rounded-[18px] rounded-tr-[4px] whitespace-pre-wrap" style={{ fontSize: 15, lineHeight: 1.6, background: "var(--pm-teal-deep)", color: "var(--pm-white)" }}>{asText(t.answer)}</div>
+                  <div className="max-w-[80%] p-4 rounded-[18px] rounded-tr-[4px] whitespace-pre-wrap" style={{ fontSize: 15, lineHeight: 1.6, background: "var(--gl-accent)", color: "#fff" }}>{asText(t.answer)}</div>
                 </div>
               </div>
             ))}
             {inProgress && view.current_question && !typing && (
-              <div data-testid="spark-problem-statement" className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "var(--pm-grey)", border: "1px solid rgba(7,59,67,0.08)" }}>
-                <div className="pm-eyebrow mb-1" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>{view.current_question.stage}</div>
+              <div data-testid="spark-problem-statement" className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "color-mix(in srgb, var(--gl-text) 6%, transparent)", border: "1px solid var(--gl-line)" }}>
+                <div className="mb-1" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gl-muted)" }}>{view.current_question.stage}</div>
                 {asText(view.current_question.prompt)}
               </div>
             )}
             {/* Hints shown so far for the DSA problem above -- persisted, so
                 these come back on a refresh, never replace the statement. */}
             {inProgress && (view.hints?.shown || []).map((h, i) => (
-              <div key={i} data-testid="spark-hint-shown" className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "rgba(7,59,67,0.05)", border: "1px solid rgba(7,59,67,0.08)" }}>
-                <div className="pm-eyebrow mb-1" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>Hint {h.level}</div>
-                <span className="italic" style={{ color: "rgba(11,42,48,0.7)" }}>{asText(h.lead_in)}</span>{" "}
+              <div key={i} data-testid="spark-hint-shown" className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "color-mix(in srgb, var(--gl-text) 4%, transparent)", border: "1px solid var(--gl-line)" }}>
+                <div className="mb-1" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gl-muted)" }}>Hint {h.level}</div>
+                <span className="italic" style={{ color: "var(--gl-muted)" }}>{asText(h.lead_in)}</span>{" "}
                 {asText(h.text)}
               </div>
             ))}
             {inProgress && typing && (
-              <div data-testid="spark-typing-indicator" className="rounded-[18px] p-4 italic" style={{ ...META, background: "var(--pm-grey)" }}>
+              <div data-testid="spark-typing-indicator" className="rounded-[18px] p-4 italic" style={{ ...META, background: "color-mix(in srgb, var(--gl-text) 6%, transparent)" }}>
                 {view.persona_label || "Interviewer"} is typing…
               </div>
             )}
@@ -250,12 +251,12 @@ export default function SparkInterview({ interviewId, initial }) {
                 onChange={e => setAnswer(e.target.value)}
                 rows={4}
                 placeholder="Type your answer."
-                className="pm-input flex-1"
+                className="gl-field-input flex-1"
                 style={{ fontSize: 15 }}
               />
               {view.hints?.available && (
                 <Button data-testid="spark-ask-hint" onClick={askForHint} disabled={submitting}
-                        className="h-[54px] !px-4" style={{ background: "transparent", color: "var(--pm-ink)", border: "1px solid rgba(7,59,67,0.2)" }}>
+                        variant="secondary" className="h-[54px] !px-4">
                   Ask for a hint
                 </Button>
               )}
@@ -273,7 +274,7 @@ export default function SparkInterview({ interviewId, initial }) {
           {/* After the interview the only text is the closing message (plain text; React escapes it). */}
           {!inProgress && view.closing_message && (
             <Card className="mt-6" padding="24px" data-testid="spark-closing">
-              <p className="font-display font-semibold" style={{ fontSize: 18, color: "var(--pm-ink)" }}>
+              <p style={{ ...OUTFIT, fontSize: 18, color: "var(--gl-text)" }}>
                 {view.closing_message}
               </p>
               {(view.attempt_id || view.interview_id) && (
