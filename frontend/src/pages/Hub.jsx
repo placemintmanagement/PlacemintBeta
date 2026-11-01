@@ -11,8 +11,9 @@ import { ChevronLeft, Clock, CheckCircle2, Lock, ArrowRight, FileText } from "lu
 import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button, Alert, EmptyState } from "../components/shared";
 
 // Body-size meta text (never monospace).
-const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
-const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
+const META = { fontSize: 13, color: "var(--gl-muted)" };
+const BODY = { fontSize: 15, color: "var(--gl-text)", lineHeight: 1.6 };
+const OUTFIT = { fontFamily: "Outfit, system-ui, sans-serif", fontWeight: 600 };
 
 const TIER_SOURCE_LABEL = { oa_designated: "based on OA", chosen: "chosen by you" };
 
@@ -169,7 +170,7 @@ export default function Hub() {
     <div>
       <Header light />
       <PageShell>
-        <Link to={`/company/${companyId}`} className="inline-flex items-center gap-1 mb-6 hover:text-[var(--pm-ink)]" style={{ fontSize: 14, color: "rgba(11,42,48,0.7)" }}>
+        <Link to={`/company/${companyId}`} className="inline-flex items-center gap-1 mb-6 hover:text-[var(--gl-text)]" style={{ fontSize: 14, color: "var(--gl-muted)" }}>
           <ChevronLeft size={16} /> back to {company.name}
         </Link>
         <SectionLabel>{company.name} · hub</SectionLabel>
@@ -192,11 +193,11 @@ export default function Hub() {
                   <div
                     key={s.key}
                     className="rounded-[16px] p-4 flex items-center gap-3"
-                    style={{ border: "1.5px solid var(--pm-border-control)", background: "var(--pm-white)" }}
+                    style={{ border: "1.5px solid var(--gl-line)", background: "var(--gl-card)" }}
                   >
-                    <div className="grid place-items-center shrink-0 font-display font-semibold" style={{ width: 32, height: 32, borderRadius: 10, background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 14 }}>{i + 1}</div>
+                    <div className="grid place-items-center shrink-0" style={{ ...OUTFIT, width: 32, height: 32, borderRadius: 10, background: "var(--gl-blue)", color: "var(--gl-text)", fontSize: 14 }}>{i + 1}</div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-display font-semibold" style={{ fontSize: 16, color: "var(--pm-ink)" }}>{s.name}</div>
+                      <div style={{ ...OUTFIT, fontSize: 16, color: "var(--gl-text)" }}>{s.name}</div>
                       <div className="mt-1" style={META}>
                         {s.type} • {s.count} q • {s.minutes} min • cutoff {Math.round(s.cutoff * 100)}%{s.negative ? " • negative marking" : ""}
                       </div>
@@ -207,9 +208,9 @@ export default function Hub() {
             )}
 
             {oaResultChip && (
-              <div data-testid={TID.hubOaResult} className="mb-5 p-4 rounded-[16px]" style={{ background: "var(--pm-sky)" }}>
-                <div className="pm-eyebrow" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>{oaResultChip.label}</div>
-                <div className="font-display font-semibold mt-1" style={{ fontSize: 20, color: "var(--pm-ink)" }}>{oaResultChip.title}</div>
+              <div data-testid={TID.hubOaResult} className="mb-5 p-4 rounded-[16px]" style={{ background: "var(--gl-blue)" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gl-muted)" }}>{oaResultChip.label}</div>
+                <div className="mt-1" style={{ ...OUTFIT, fontSize: 20, color: "var(--gl-text)" }}>{oaResultChip.title}</div>
               </div>
             )}
 
@@ -230,10 +231,10 @@ export default function Hub() {
                           data-testid={TID.clusterOption(opt)}
                           aria-pressed={cluster === opt}
                           onClick={() => setCluster(opt)}
-                          className="font-display font-semibold rounded-full px-4 py-2 transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                          className="rounded-full px-4 py-2 transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)]"
                           style={cluster === opt
-                            ? { fontSize: 15, background: "var(--pm-teal-deep)", color: "var(--pm-white)", border: "1.5px solid var(--pm-teal-deep)" }
-                            : { fontSize: 15, background: "transparent", color: "var(--pm-ink)", border: "1.5px solid var(--pm-border-control)" }}
+                            ? { ...OUTFIT, fontSize: 15, background: "var(--gl-accent)", color: "#fff", border: "1.5px solid var(--gl-accent)" }
+                            : { ...OUTFIT, fontSize: 15, background: "transparent", color: "var(--gl-text)", border: "1.5px solid var(--gl-line)" }}
                         >
                           {opt}
                         </button>
@@ -255,7 +256,7 @@ export default function Hub() {
 
             {!companyInterviewInfo.interview_available ? (
               <div data-testid={TID.hubInterviewUnavailable} className="mt-4">
-                <div className="flex items-center gap-2 mb-2" style={{ color: "rgba(11,42,48,0.6)" }}>
+                <div className="flex items-center gap-2 mb-2" style={{ color: "var(--gl-muted)" }}>
                   <Lock size={16} aria-hidden="true" />
                   <span style={{ fontSize: 15, fontWeight: 600 }}>Coming soon</span>
                 </div>
@@ -285,7 +286,7 @@ export default function Hub() {
                       data-testid={TID.hubInterviewChooseDifferent}
                       onClick={() => setShowChooser(true)}
                       className="mt-3 underline-offset-2 hover:underline"
-                      style={{ fontSize: 14, color: "var(--pm-teal-deep)" }}
+                      style={{ fontSize: 14, color: "var(--gl-accent)" }}
                     >
                       Choose a different tier
                     </button>
@@ -316,7 +317,7 @@ export default function Hub() {
                 <span data-testid={TID.hubInterviewError}>{interviewErrorCopy(intvError, companyId).body}</span>
                 {intvError.code === "resume_required" && (
                   <div className="mt-2">
-                    <Link to={`/company/${companyId}`} className="font-semibold underline-offset-2 hover:underline" style={{ color: "var(--pm-teal-deep)" }}>
+                    <Link to={`/company/${companyId}`} className="font-semibold underline-offset-2 hover:underline" style={{ color: "var(--gl-accent)" }}>
                       <FileText size={13} className="inline mr-1" aria-hidden="true" />
                       Submit a resume
                     </Link>
@@ -340,7 +341,7 @@ export default function Hub() {
                 <Card key={i.interview_id} padding="18px 22px" data-testid={TID.hubPastInterviewRow(i.interview_id)}>
                   <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div>
-                      <div className="font-display font-semibold" style={{ fontSize: 17, color: "var(--pm-ink)" }}>
+                      <div style={{ ...OUTFIT, fontSize: 17, color: "var(--gl-text)" }}>
                         {i.tier ? `${tierDisplayName(i.tier)} interview` : "Interview"}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-3" style={META}>
@@ -352,7 +353,7 @@ export default function Hub() {
                       <Chip tone={i.status === "completed" ? "status" : "neutral"}>
                         {i.status === "completed" ? <CheckCircle2 size={12} /> : <Clock size={12} />} {i.status}
                       </Chip>
-                      <Link to={`/interview/${i.interview_id}/report`} className="font-semibold underline-offset-2 hover:underline whitespace-nowrap" style={{ fontSize: 14, color: "var(--pm-teal-deep)" }}>
+                      <Link to={`/interview/${i.interview_id}/report`} className="font-semibold underline-offset-2 hover:underline whitespace-nowrap" style={{ fontSize: 14, color: "var(--gl-accent)" }}>
                         View report
                       </Link>
                     </div>
@@ -379,12 +380,12 @@ function TierChooser({ tiers, chosen, onChoose, onStart, starting }) {
             data-testid={TID.hubInterviewTierOption(t.id)}
             aria-pressed={chosen === t.id}
             onClick={() => onChoose(t.id)}
-            className="w-full text-left rounded-[16px] p-4 transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+            className="w-full text-left rounded-[16px] p-4 transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)]"
             style={chosen === t.id
-              ? { border: "1.5px solid var(--pm-teal-deep)", background: "var(--pm-sky)" }
-              : { border: "1.5px solid var(--pm-border-control)", background: "var(--pm-white)" }}
+              ? { border: "1.5px solid var(--gl-accent)", background: "var(--gl-blue)" }
+              : { border: "1.5px solid var(--gl-line)", background: "var(--gl-card)" }}
           >
-            <div className="font-display font-semibold" style={{ fontSize: 16, color: "var(--pm-ink)" }}>{t.name}</div>
+            <div style={{ ...OUTFIT, fontSize: 16, color: "var(--gl-text)" }}>{t.name}</div>
             <div className="mt-1" style={META}>{t.blurb}</div>
           </button>
         ))}

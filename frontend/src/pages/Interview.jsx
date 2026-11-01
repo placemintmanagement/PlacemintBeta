@@ -18,14 +18,14 @@ const asText = (v) => {
 };
 
 // Body-size meta text (never monospace).
-const META = { fontSize: 14, color: "rgba(11,42,48,0.7)" };
-const BODY = { fontSize: 15, color: "var(--pm-ink)", lineHeight: 1.6 };
+const META = { fontSize: 14, color: "var(--gl-muted)" };
+const BODY = { fontSize: 15, color: "var(--gl-text)", lineHeight: 1.6 };
 
-// Avatar disc: teal-deep for the interviewer, teal-night for the candidate.
+// Avatar disc: near-black for the interviewer, accent for the candidate.
 function Avatar({ tone, children }) {
   return (
-    <div className="w-9 h-9 rounded-full grid place-items-center font-display font-semibold shrink-0"
-         style={{ fontSize: 14, background: tone === "you" ? "var(--pm-teal-night)" : "var(--pm-teal-deep)", color: "var(--pm-white)" }}>
+    <div className="w-9 h-9 rounded-full grid place-items-center shrink-0"
+         style={{ fontFamily: "Outfit, system-ui, sans-serif", fontWeight: 600, fontSize: 14, background: tone === "you" ? "var(--gl-accent)" : "#0c0c0c", color: "#fff" }}>
       {children}
     </div>
   );
@@ -121,14 +121,14 @@ export default function Interview() {
                 <div key={i} className="flex gap-3">
                   <Avatar tone="interviewer">I</Avatar>
                   <div className="flex-1 min-w-0">
-                    {m.kind && <div className="pm-eyebrow mb-1" style={{ fontSize: 11, color: "rgba(11,42,48,0.7)" }}>{m.kind}</div>}
-                    <div className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "var(--pm-grey)", border: "1px solid rgba(7,59,67,0.08)" }}>{m.text}</div>
+                    {m.kind && <div className="mb-1" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gl-muted)" }}>{m.kind}</div>}
+                    <div className="rounded-[18px] p-4 whitespace-pre-wrap" style={{ ...BODY, background: "color-mix(in srgb, var(--gl-text) 6%, transparent)", border: "1px solid var(--gl-line)" }}>{m.text}</div>
                   </div>
                 </div>
               );
               if (m.role === "you") return (
                 <div key={i} className="flex gap-3 justify-end">
-                  <div className="max-w-[80%] p-4 rounded-[18px] rounded-tr-[4px] whitespace-pre-wrap" style={{ fontSize: 15, lineHeight: 1.6, background: "var(--pm-teal-deep)", color: "var(--pm-white)" }}>{m.text}</div>
+                  <div className="max-w-[80%] p-4 rounded-[18px] rounded-tr-[4px] whitespace-pre-wrap" style={{ fontSize: 15, lineHeight: 1.6, background: "var(--gl-accent)", color: "#fff" }}>{m.text}</div>
                   <Avatar tone="you">You</Avatar>
                 </div>
               );
@@ -151,7 +151,7 @@ export default function Interview() {
                 onChange={e => setAnswer(e.target.value)}
                 rows={3}
                 placeholder="Type your answer. Be specific. Real interviewers dislike vague answers."
-                className="pm-input flex-1"
+                className="gl-field-input flex-1"
                 style={{ fontSize: 15 }}
               />
               <Button
