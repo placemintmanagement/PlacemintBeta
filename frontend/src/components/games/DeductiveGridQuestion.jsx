@@ -66,7 +66,7 @@ function ShapeIcon({ shape, color, size = 32 }) {
 }
 
 // White rounded card, permanent soft shadow, no border -- deliberately NOT
-// .pm-card (that has a visible border and only shadows on hover; the grid
+// .gl-card (that has a visible border and only shadows on hover; the grid
 // spec calls for a resting soft shadow and zero border on every cell,
 // including empty/unrevealed ones, so a sparse grid still reads as "part
 // of the grid" not "missing/broken").
@@ -76,7 +76,7 @@ function GridCell({ cell, isTarget }) {
   return (
     <div className={`${CELL_BASE} aspect-square`}>
       {isTarget ? (
-        <HelpCircle size={28} strokeWidth={1.75} className="text-pm-text2/50" />
+        <HelpCircle size={28} strokeWidth={1.75} style={{ color: "var(--gl-muted)", opacity: 0.5 }} />
       ) : cell ? (
         <ShapeIcon shape={cell.shape} color={cell.color} />
       ) : null}
@@ -131,12 +131,12 @@ export default function DeductiveGridQuestion({
   };
 
   return (
-    <div className="pm-card p-6">
+    <div className="gl-card p-6">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-xs pm-eyebrow text-pm-text2">
+        <div className="text-xs pm-eyebrow" style={{ color: "var(--gl-muted)" }}>
           Q{index + 1} of {total} · Deductive Grid
         </div>
-        <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-pm-text2"}`}>
+        <div className="flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold" style={{ color: remaining <= 5 ? "var(--gl-text)" : "var(--gl-muted)" }}>
           <Clock size={14} />
           00:{String(remaining).padStart(2, "0")}
         </div>
@@ -146,7 +146,7 @@ export default function DeductiveGridQuestion({
       </div>
 
       <div className="max-w-sm">
-        <div className={`grid ${GRID_COLS_CLASS[n] || "grid-cols-3"} gap-3 sm:gap-4 pb-5 border-b border-pm-border`}>
+        <div className={`grid ${GRID_COLS_CLASS[n] || "grid-cols-3"} gap-3 sm:gap-4 pb-5`} style={{ borderBottom: "1px solid var(--gl-line)" }}>
           {q.grid.map((rowCells, r) =>
             rowCells.map((cell, c) => (
               <GridCell key={`${r}-${c}`} cell={cell} isTarget={r === tr && c === tc} />
@@ -154,7 +154,7 @@ export default function DeductiveGridQuestion({
           )}
         </div>
 
-        <div className="text-xs pm-eyebrow text-pm-text2 mt-5 mb-3">Pick the missing symbol</div>
+        <div className="text-xs pm-eyebrow mt-5 mb-3" style={{ color: "var(--gl-muted)" }}>Pick the missing symbol</div>
         <div className="flex flex-row gap-3">
           {(q.options || []).map((opt, ix) => (
             <button

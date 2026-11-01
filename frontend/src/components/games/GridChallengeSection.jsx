@@ -39,7 +39,7 @@ const CELL_BASE = "bg-white rounded-xl shadow-[0_6px_20px_-8px_rgba(0,0,0,0.12)]
 
 function CircleCluster({ circles, highlightId, clickable, clickedIds, onClickCircle }) {
   return (
-    <div className="relative w-full aspect-square bg-[var(--pm-cream-deep)] rounded-2xl overflow-hidden">
+    <div className="relative w-full aspect-square bg-[var(--gl-sand)] rounded-2xl overflow-hidden">
       {(circles || []).map((c) => {
         const isHighlighted = c.id === highlightId;
         const clickedIndex = (clickedIds || []).indexOf(c.id);
@@ -53,7 +53,7 @@ function CircleCluster({ circles, highlightId, clickable, clickedIds, onClickCir
             onClick={() => onClickCircle?.(c.id)}
             className={[
               "absolute rounded-full -translate-x-1/2 -translate-y-1/2 flex items-center justify-center transition-transform",
-              isHighlighted ? "bg-[var(--pm-teal-deep)]" : isClicked ? "bg-[var(--pm-teal-night)]" : "bg-[#B9B3A2]",
+              isHighlighted ? "bg-[var(--gl-accent)]" : isClicked ? "bg-[#0c0c0c]" : "bg-[#B9B3A2]",
               clickable && !isClicked ? "hover:scale-110 cursor-pointer" : "cursor-default",
             ].join(" ")}
             style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: "7%", height: "7%" }}
@@ -240,24 +240,24 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
   };
 
   if (error) {
-    return <div className="pm-card p-6 text-pm-text2">{error}</div>;
+    return <div className="gl-card p-6" style={{ color: "var(--gl-muted)" }}>{error}</div>;
   }
 
   if (screen === "instructions") {
     return (
-      <div className="pm-card p-8 max-w-lg mx-auto text-center">
-        <div className="text-xs pm-eyebrow tracking-widest text-pm-primary-dark mb-2">Gamified Round</div>
+      <div className="gl-card p-8 max-w-lg mx-auto text-center">
+        <div className="text-xs pm-eyebrow tracking-widest mb-2" style={{ color: "var(--gl-accent)" }}>Gamified Round</div>
         <h2 className="font-display text-2xl font-bold mb-4">{instructions.title}</h2>
-        <p className="text-pm-text2 mb-6">{instructions.rule}</p>
+        <p className="mb-6" style={{ color: "var(--gl-muted)" }}>{instructions.rule}</p>
         <div className="flex flex-col gap-3 text-left mb-8">
-          <div className="flex items-center gap-3 text-sm text-pm-text2">
-            <Zap size={16} className="text-pm-primary shrink-0" /> {instructions.scoringNote}
+          <div className="flex items-center gap-3 text-sm" style={{ color: "var(--gl-muted)" }}>
+            <Zap size={16} className="shrink-0" style={{ color: "var(--gl-accent)" }} /> {instructions.scoringNote}
           </div>
-          <div className="flex items-center gap-3 text-sm text-pm-text2">
-            <Clock size={16} className="text-pm-primary shrink-0" /> {instructions.timerNote}
+          <div className="flex items-center gap-3 text-sm" style={{ color: "var(--gl-muted)" }}>
+            <Clock size={16} className="shrink-0" style={{ color: "var(--gl-accent)" }} /> {instructions.timerNote}
           </div>
         </div>
-        <button onClick={handlePlay} className="pm-btn pm-btn-primary inline-flex items-center gap-2 px-6 py-3">
+        <button onClick={handlePlay} className="gl-btn y inline-flex items-center gap-2 px-6 py-3">
           <Play size={16} /> Play
         </button>
       </div>
@@ -266,8 +266,8 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
 
   const headerBar = (
     <div className="flex items-center justify-between mb-3 px-1">
-      <div className="pm-chip text-xs">BLOCK {blockIndex + 1} OF {NUM_BLOCKS}</div>
-      <div className="text-xs font-display tabular-nums text-pm-text2">{runningScore} pts</div>
+      <div className="gl-tag neutral text-xs">BLOCK {blockIndex + 1} OF {NUM_BLOCKS}</div>
+      <div className="text-xs font-display tabular-nums" style={{ color: "var(--gl-muted)" }}>{runningScore} pts</div>
     </div>
   );
 
@@ -275,9 +275,9 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
     return (
       <div>
         {headerBar}
-        <div className="pm-card p-6">
+        <div className="gl-card p-6">
           <div className="flex items-center gap-2 text-sm font-semibold mb-4 justify-center">
-            <Eye size={16} className="text-pm-primary" /> Memorize this position
+            <Eye size={16} style={{ color: "var(--gl-accent)" }} /> Memorize this position
           </div>
           <div className="max-w-sm mx-auto">
             <CircleCluster circles={circles} highlightId={highlightId} clickable={false} />
@@ -292,12 +292,12 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
     return (
       <div>
         {headerBar}
-        <div className="pm-card p-6">
+        <div className="gl-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <div className="text-xs pm-eyebrow text-pm-text2">
+            <div className="text-xs pm-eyebrow" style={{ color: "var(--gl-muted)" }}>
               Judgment {judgmentIndex + 1} of {judgments.length}
             </div>
-            <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${remaining <= 2 ? "text-pm-secondary" : "text-pm-text2"}`}>
+            <div className="flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold" style={{ color: remaining <= 2 ? "var(--gl-text)" : "var(--gl-muted)" }}>
               <Clock size={14} /> 00:{String(remaining).padStart(2, "0")}
             </div>
           </div>
@@ -335,14 +335,14 @@ export default function GridChallengeSection({ attemptId, sectionKey, puzzleId, 
     return (
       <div>
         <div className="flex items-center justify-between mb-3 px-1">
-          <div className="pm-chip text-xs">RECALL</div>
-          <div className="text-xs font-display tabular-nums text-pm-text2">{runningScore} pts</div>
+          <div className="gl-tag neutral text-xs">RECALL</div>
+          <div className="text-xs font-display tabular-nums" style={{ color: "var(--gl-muted)" }}>{runningScore} pts</div>
         </div>
-        <div className="pm-card p-6">
+        <div className="gl-card p-6">
           <div className="font-display text-base font-semibold mb-1 text-center">
             Click the 3 positions you memorized, in order
           </div>
-          <div className="text-xs text-pm-text2 text-center mb-5">{clickedIds.length} of 3 selected</div>
+          <div className="text-xs text-center mb-5" style={{ color: "var(--gl-muted)" }}>{clickedIds.length} of 3 selected</div>
           <div className="max-w-sm mx-auto">
             <CircleCluster
               circles={recallLayout}

@@ -61,25 +61,25 @@ export default function InductiveChallengeSection({ puzzles, config, onComplete,
 
   if (phase === "instructions") {
     return (
-      <div className="pm-card p-8 max-w-lg mx-auto text-center">
-        <div className="text-xs pm-eyebrow tracking-widest text-pm-primary-dark mb-2">
+      <div className="gl-card p-8 max-w-lg mx-auto text-center">
+        <div className="text-xs pm-eyebrow tracking-widest mb-2" style={{ color: "var(--gl-accent)" }}>
           Gamified Round
         </div>
         <h2 className="font-display text-2xl font-bold mb-4">{instructions.title}</h2>
-        <p className="text-pm-text2 mb-6">{instructions.rule}</p>
+        <p className="mb-6" style={{ color: "var(--gl-muted)" }}>{instructions.rule}</p>
         <div className="flex flex-col gap-3 text-left mb-8">
-          <div className="flex items-center gap-3 text-sm text-pm-text2">
-            <Lightbulb size={16} className="text-pm-primary shrink-0" />
+          <div className="flex items-center gap-3 text-sm" style={{ color: "var(--gl-muted)" }}>
+            <Lightbulb size={16} className="shrink-0" style={{ color: "var(--gl-accent)" }} />
             {instructions.scoringNote}
           </div>
-          <div className="flex items-center gap-3 text-sm text-pm-text2">
-            <Clock size={16} className="text-pm-primary shrink-0" />
+          <div className="flex items-center gap-3 text-sm" style={{ color: "var(--gl-muted)" }}>
+            <Clock size={16} className="shrink-0" style={{ color: "var(--gl-accent)" }} />
             {instructions.timerNote}
           </div>
         </div>
         <button
           onClick={() => setPhase("playing")}
-          className="pm-btn pm-btn-primary inline-flex items-center gap-2 px-6 py-3"
+          className="gl-btn y inline-flex items-center gap-2 px-6 py-3"
         >
           <Play size={16} /> Play
         </button>
@@ -98,14 +98,14 @@ export default function InductiveChallengeSection({ puzzles, config, onComplete,
     return (
       <div>
         <div className="flex items-center justify-between mb-3 px-1">
-          <div className="pm-chip text-xs">LEVEL {currentIndex + 1}</div>
+          <div className="gl-tag neutral text-xs">LEVEL {currentIndex + 1}</div>
           <div className="flex-1 mx-4 h-2 bg-[rgba(10,10,10,0.06)] rounded-full overflow-hidden">
             <div
-              className="h-full bg-[var(--pm-teal-deep)] transition-all"
+              className="h-full bg-[var(--gl-accent)] transition-all"
               style={{ width: `${fillPct}%` }}
             />
           </div>
-          <div className="text-xs font-display tabular-nums text-pm-text2">
+          <div className="text-xs font-display tabular-nums" style={{ color: "var(--gl-muted)" }}>
             {hasLiveScore ? `${runningScore} pts` : `${answeredCount}/${puzzles.length}`}
           </div>
         </div>

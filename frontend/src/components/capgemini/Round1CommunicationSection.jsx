@@ -30,8 +30,8 @@ import { useMicRecorder } from "../../hooks/useMicRecorder";
 function LetteredMCQCard({ id, prompt, options, selected, onSelect, qNum, qTotal, label }) {
   const letters = Object.keys(options).sort();
   return (
-    <div className="pm-card p-6">
-      <div className="text-xs pm-eyebrow text-pm-text2 mb-2">
+    <div className="gl-card p-6">
+      <div className="text-xs pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>
         {label} {qNum} of {qTotal}
       </div>
       <div className="font-display text-lg font-semibold mb-4">{prompt}</div>
@@ -44,13 +44,13 @@ function LetteredMCQCard({ id, prompt, options, selected, onSelect, qNum, qTotal
               type="button"
               data-testid={TID.oaQuestionOption(id, letter)}
               onClick={() => onSelect(id, letter)}
-              className={`text-left border rounded-lg p-3 flex items-start gap-3 transition ${
-                isSelected ? "border-pm-primary bg-pm-primary/5" : "border-pm-border hover:bg-[rgba(0,0,0,0.02)]"
-              }`}
+              className={`text-left border rounded-lg p-3 flex items-start gap-3 transition ${isSelected ? "" : "hover:bg-[rgba(0,0,0,0.02)]"}`}
+              style={isSelected
+                ? { borderColor: "var(--gl-accent)", background: "color-mix(in srgb, var(--gl-accent) 5%, transparent)" }
+                : { borderColor: "var(--gl-line)" }}
             >
-              <div className={`w-6 h-6 rounded-full grid place-items-center font-display tabular-nums font-bold text-xs ${
-                isSelected ? "bg-pm-primary text-white" : "bg-pm-muted"
-              }`}>
+              <div className="w-6 h-6 rounded-full grid place-items-center font-display tabular-nums font-bold text-xs"
+                   style={isSelected ? { background: "var(--gl-accent)", color: "#fff" } : { background: "var(--gl-blue)" }}>
                 {letter}
               </div>
               <div className="flex-1 text-sm">{options[letter]}</div>
@@ -66,7 +66,7 @@ function GrammarPart({ items, answers, setAnswer }) {
   if (!items.length) return null;
   return (
     <div className="space-y-4">
-      <div className="font-display text-sm font-bold text-pm-text2 uppercase tracking-wide">
+      <div className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: "var(--gl-muted)" }}>
         Part 1 · Grammar &amp; Sentence Correction
       </div>
       {items.map((q, i) => (
@@ -90,20 +90,20 @@ function BusinessWritingPart({ items, answers, setAnswer }) {
   if (!items.length) return null;
   return (
     <div className="space-y-4">
-      <div className="font-display text-sm font-bold text-pm-text2 uppercase tracking-wide">
+      <div className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: "var(--gl-muted)" }}>
         Part 2 · Business Communication Writing
       </div>
       {items.map((q, i) => (
-        <div key={q.id} className="pm-card p-6">
-          <div className="text-xs pm-eyebrow text-pm-text2 mb-2">Scenario {i + 1} of {items.length}</div>
-          <div className="text-sm text-pm-text2 mb-1">
-            Recipient: <span className="font-semibold text-pm-text">{q.recipient_type}</span>
-            {" · "}Tone: <span className="font-semibold text-pm-text">{q.tone_expected}</span>
+        <div key={q.id} className="gl-card p-6">
+          <div className="text-xs pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Scenario {i + 1} of {items.length}</div>
+          <div className="text-sm mb-1" style={{ color: "var(--gl-muted)" }}>
+            Recipient: <span className="font-semibold" style={{ color: "var(--gl-text)" }}>{q.recipient_type}</span>
+            {" · "}Tone: <span className="font-semibold" style={{ color: "var(--gl-text)" }}>{q.tone_expected}</span>
           </div>
           <div className="font-display text-lg font-semibold mb-4">{q.context}</div>
           <textarea
             data-testid={TID.oaEssayInput ? TID.oaEssayInput(q.id) : undefined}
-            className="w-full min-h-[220px] rounded-lg border border-pm-border p-3 text-sm font-sans"
+            className="gl-field-input w-full min-h-[220px] font-sans"
             placeholder="Write your email response…"
             value={answers[q.id] || ""}
             onChange={(e) => setAnswer(q.id, e.target.value)}
@@ -118,7 +118,7 @@ function SituationalPart({ items, answers, setAnswer }) {
   if (!items.length) return null;
   return (
     <div className="space-y-4">
-      <div className="font-display text-sm font-bold text-pm-text2 uppercase tracking-wide">
+      <div className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: "var(--gl-muted)" }}>
         Part 3 · Task Situational Awareness &amp; Response
       </div>
       {items.map((q, i) => (
@@ -144,13 +144,13 @@ function ReadingCompPart({ items, answers, setAnswer }) {
   let qCounter = 0;
   return (
     <div className="space-y-4">
-      <div className="font-display text-sm font-bold text-pm-text2 uppercase tracking-wide">
+      <div className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: "var(--gl-muted)" }}>
         Part 4 · Workplace Reading Comprehension
       </div>
       {items.map((passage) => (
-        <div key={passage.id} className="pm-card p-6">
-          <div className="text-xs pm-eyebrow text-pm-text2 mb-2">{passage.passage_type}</div>
-          <div className="whitespace-pre-wrap text-sm font-sans mb-5 pb-5 border-b border-pm-border">
+        <div key={passage.id} className="gl-card p-6">
+          <div className="text-xs pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>{passage.passage_type}</div>
+          <div className="whitespace-pre-wrap text-sm font-sans mb-5 pb-5" style={{ borderBottom: "1px solid var(--gl-line)" }}>
             {passage.passage_text}
           </div>
           <div className="space-y-4">
@@ -220,13 +220,13 @@ function ListeningAudioPlayer({ audioUrl }) {
           data-testid={TID.oaListeningPlayBtn ? TID.oaListeningPlayBtn(audioUrl) : undefined}
           onClick={handlePlay}
           disabled={playState !== "unplayed"}
-          className={`pm-btn text-sm py-2 px-4 ${
-            playState === "unplayed" ? "pm-btn-primary" : "pm-btn-secondary opacity-60 cursor-not-allowed"
+          className={`gl-btn text-sm py-2 px-4 ${
+            playState === "unplayed" ? "y" : "o opacity-60 cursor-not-allowed"
           }`}
         >
           {playState === "unplayed" ? "▶ Play clip" : playState === "playing" ? "Playing…" : "Already played"}
         </button>
-        <div className="text-xs text-pm-text2">
+        <div className="text-xs" style={{ color: "var(--gl-muted)" }}>
           {playState === "unplayed"
             ? "You can only play this clip once. Listen carefully."
             : "This clip cannot be replayed."}
@@ -242,17 +242,17 @@ function ListeningCompPart({ items, answers, setAnswer }) {
   let qCounter = 0;
   return (
     <div className="space-y-4">
-      <div className="font-display text-sm font-bold text-pm-text2 uppercase tracking-wide">
+      <div className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: "var(--gl-muted)" }}>
         Part 5 · Workplace Listening Comprehension
       </div>
       {items.map((clip) => (
-        <div key={clip.id} className="pm-card p-6">
-          <div className="text-xs pm-eyebrow text-pm-text2 mb-2">
+        <div key={clip.id} className="gl-card p-6">
+          <div className="text-xs pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>
             {clip.clip_type === "dialogue" ? "Dialogue" : "Monologue"}
             {clip.speaker_count ? ` · ${clip.speaker_count} speaker${clip.speaker_count > 1 ? "s" : ""}` : ""}
           </div>
           <ListeningAudioPlayer audioUrl={clip.audio_url} />
-          <div className="space-y-4 pt-4 border-t border-pm-border">
+          <div className="space-y-4 pt-4" style={{ borderTop: "1px solid var(--gl-line)" }}>
             {(clip.questions || []).map((subq) => {
               qCounter += 1;
               return (
@@ -292,42 +292,42 @@ function SpokenReadAloudCard({ attemptId, sectionKey, q, value, onChange }) {
   useEffect(() => { if (mic.status === "unavailable") setTypedMode(true); }, [mic.status]);
 
   return (
-    <div className="pm-card p-6">
-      <div className="text-xs pm-eyebrow text-pm-text2 mb-2">Read Aloud</div>
-      <div className="whitespace-pre-wrap text-sm font-sans mb-5 pb-5 border-b border-pm-border">
+    <div className="gl-card p-6">
+      <div className="text-xs pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Read Aloud</div>
+      <div className="whitespace-pre-wrap text-sm font-sans mb-5 pb-5" style={{ borderBottom: "1px solid var(--gl-line)" }}>
         {q.passage_text}
       </div>
       {typedMode ? (
         <>
-          <div className="text-xs text-pm-text2 mb-2">Mic unavailable. Type what you would say instead.</div>
+          <div className="text-xs mb-2" style={{ color: "var(--gl-muted)" }}>Mic unavailable. Type what you would say instead.</div>
           <textarea
             data-testid={TID.oaMicFallbackInput ? TID.oaMicFallbackInput(q.id) : undefined}
-            className="pm-input min-h-[120px] font-sans"
+            className="gl-field-input min-h-[120px] font-sans"
             placeholder="Type your response…"
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
         </>
       ) : mic.status === "recording" ? (
-        <button data-testid={TID.oaMicStopBtn ? TID.oaMicStopBtn(q.id) : undefined} onClick={mic.stop} className="pm-btn pm-btn-secondary text-sm py-2 px-4">
+        <button data-testid={TID.oaMicStopBtn ? TID.oaMicStopBtn(q.id) : undefined} onClick={mic.stop} className="gl-btn o text-sm py-2 px-4">
           Stop
         </button>
       ) : mic.status === "uploading" ? (
-        <div className="text-sm text-pm-text2">Transcribing…</div>
+        <div className="text-sm" style={{ color: "var(--gl-muted)" }}>Transcribing…</div>
       ) : (
         <div className="flex items-center gap-3">
-          <button data-testid={TID.oaMicRecordBtn ? TID.oaMicRecordBtn(q.id) : undefined} onClick={mic.start} className="pm-btn pm-btn-primary text-sm py-2 px-4">
+          <button data-testid={TID.oaMicRecordBtn ? TID.oaMicRecordBtn(q.id) : undefined} onClick={mic.start} className="gl-btn y text-sm py-2 px-4">
             {value ? "Re-record" : "Record"}
           </button>
-          <button onClick={() => setTypedMode(true)} className="text-xs text-pm-text2 underline">Type instead</button>
+          <button onClick={() => setTypedMode(true)} className="text-xs underline" style={{ color: "var(--gl-muted)" }}>Type instead</button>
         </div>
       )}
       {value && !typedMode && (
         <div className="mt-3">
-          <div className="text-xs text-pm-text2 mb-1">Transcript (edit if needed):</div>
+          <div className="text-xs mb-1" style={{ color: "var(--gl-muted)" }}>Transcript (edit if needed):</div>
           <textarea
             data-testid={TID.oaTranscriptInput ? TID.oaTranscriptInput(q.id) : undefined}
-            className="pm-input min-h-[100px] font-sans"
+            className="gl-field-input min-h-[100px] font-sans"
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -344,40 +344,40 @@ function SpokenRespondToPromptCard({ attemptId, sectionKey, q, value, onChange }
   useEffect(() => { if (mic.status === "unavailable") setTypedMode(true); }, [mic.status]);
 
   return (
-    <div className="pm-card p-6">
-      <div className="text-xs pm-eyebrow text-pm-text2 mb-2">Respond to Prompt</div>
+    <div className="gl-card p-6">
+      <div className="text-xs pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Respond to Prompt</div>
       <div className="font-display text-lg font-semibold mb-4">{q.scenario}</div>
       {typedMode ? (
         <>
-          <div className="text-xs text-pm-text2 mb-2">Mic unavailable. Type your response instead.</div>
+          <div className="text-xs mb-2" style={{ color: "var(--gl-muted)" }}>Mic unavailable. Type your response instead.</div>
           <textarea
             data-testid={TID.oaMicFallbackInput ? TID.oaMicFallbackInput(q.id) : undefined}
-            className="pm-input min-h-[120px] font-sans"
+            className="gl-field-input min-h-[120px] font-sans"
             placeholder="Type your response…"
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
         </>
       ) : mic.status === "recording" ? (
-        <button data-testid={TID.oaMicStopBtn ? TID.oaMicStopBtn(q.id) : undefined} onClick={mic.stop} className="pm-btn pm-btn-secondary text-sm py-2 px-4">
+        <button data-testid={TID.oaMicStopBtn ? TID.oaMicStopBtn(q.id) : undefined} onClick={mic.stop} className="gl-btn o text-sm py-2 px-4">
           Stop
         </button>
       ) : mic.status === "uploading" ? (
-        <div className="text-sm text-pm-text2">Transcribing…</div>
+        <div className="text-sm" style={{ color: "var(--gl-muted)" }}>Transcribing…</div>
       ) : (
         <div className="flex items-center gap-3">
-          <button data-testid={TID.oaMicRecordBtn ? TID.oaMicRecordBtn(q.id) : undefined} onClick={mic.start} className="pm-btn pm-btn-primary text-sm py-2 px-4">
+          <button data-testid={TID.oaMicRecordBtn ? TID.oaMicRecordBtn(q.id) : undefined} onClick={mic.start} className="gl-btn y text-sm py-2 px-4">
             {value ? "Re-record" : "Record"}
           </button>
-          <button onClick={() => setTypedMode(true)} className="text-xs text-pm-text2 underline">Type instead</button>
+          <button onClick={() => setTypedMode(true)} className="text-xs underline" style={{ color: "var(--gl-muted)" }}>Type instead</button>
         </div>
       )}
       {value && !typedMode && (
         <div className="mt-3">
-          <div className="text-xs text-pm-text2 mb-1">Transcript (edit if needed):</div>
+          <div className="text-xs mb-1" style={{ color: "var(--gl-muted)" }}>Transcript (edit if needed):</div>
           <textarea
             data-testid={TID.oaTranscriptInput ? TID.oaTranscriptInput(q.id) : undefined}
-            className="pm-input min-h-[100px] font-sans"
+            className="gl-field-input min-h-[100px] font-sans"
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -393,7 +393,7 @@ function SpokenSimPart({ attemptId, sectionKey, items, answers, setAnswer }) {
   const respondToPrompt = items.find((q) => q.item_type === "respond_to_prompt");
   return (
     <div className="space-y-4">
-      <div className="font-display text-sm font-bold text-pm-text2 uppercase tracking-wide">
+      <div className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: "var(--gl-muted)" }}>
         Part 6 · Spoken Communication Simulation
       </div>
       {readAloud && (
@@ -428,7 +428,7 @@ export default function Round1CommunicationSection({ attemptId, section, answers
   const spokenSim = qs.filter((q) => q.part === "spoken_sim");
 
   if (qs.length === 0) {
-    return <div className="pm-card p-6 text-pm-text2">Question generation returned empty. Try re-starting this run.</div>;
+    return <div className="gl-card p-6" style={{ color: "var(--gl-muted)" }}>Question generation returned empty. Try re-starting this run.</div>;
   }
 
   return (

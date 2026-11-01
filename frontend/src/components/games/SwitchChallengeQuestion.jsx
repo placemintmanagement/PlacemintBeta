@@ -101,33 +101,33 @@ export default function SwitchChallengeQuestion({
         <div className="text-xs pm-eyebrow text-[#2C3E56]/70">
           Q{index + 1} of {total} · Switch Challenge
         </div>
-        <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-[#2C3E56]"}`}>
+        <div className="flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold" style={{ color: remaining <= 5 ? "var(--gl-text)" : "#2C3E56" }}>
           <Clock size={14} />
           00:{String(remaining).padStart(2, "0")}
         </div>
       </div>
 
-      <div className="pm-card p-6">
+      <div className="gl-card p-6">
         <div className="font-display text-base font-semibold mb-5 text-center">
           Which digit sequence maps the input to the output?
         </div>
 
-        <div className="text-[11px] pm-eyebrow text-pm-text2 mb-2 text-center">Input</div>
+        <div className="text-[11px] pm-eyebrow mb-2 text-center" style={{ color: "var(--gl-muted)" }}>Input</div>
         <div className="flex justify-center gap-4 mb-6">
           {q.topRow.map((shape, i) => (
             <ShapeCellLight key={i} shape={shape} positionLabel={i + 1} />
           ))}
         </div>
 
-        <div className="text-[11px] pm-eyebrow text-pm-text2 mb-2 text-center">Output</div>
+        <div className="text-[11px] pm-eyebrow mb-2 text-center" style={{ color: "var(--gl-muted)" }}>Output</div>
         <div className="flex justify-center gap-4 mb-6">
           {q.bottomRow.map((shape, i) => (
             <ShapeCellLight key={i} shape={shape} />
           ))}
         </div>
 
-        <div className="border-t border-pm-border pt-5">
-          <div className="text-xs pm-eyebrow text-pm-text2 mb-3 text-center">Pick the matching sequence</div>
+        <div className="pt-5" style={{ borderTop: "1px solid var(--gl-line)" }}>
+          <div className="text-xs pm-eyebrow mb-3 text-center" style={{ color: "var(--gl-muted)" }}>Pick the matching sequence</div>
           <div className="flex justify-center gap-3">
             {(q.options || []).map((opt, ix) => (
               <button
@@ -147,7 +147,7 @@ export default function SwitchChallengeQuestion({
   );
 }
 
-// Position-label variant used on the light pm-card body (dark navy label
+// Position-label variant used on the light gl-card body (dark navy label
 // text reads fine on white, unlike the white-on-gradient variant above).
 function ShapeCellLight({ shape, positionLabel }) {
   return (
@@ -156,7 +156,7 @@ function ShapeCellLight({ shape, positionLabel }) {
         <ShapeIcon shape={shape} />
       </div>
       {positionLabel != null && (
-        <div className="font-display tabular-nums text-xs font-semibold text-pm-text2">{positionLabel}</div>
+        <div className="font-display tabular-nums text-xs font-semibold" style={{ color: "var(--gl-muted)" }}>{positionLabel}</div>
       )}
     </div>
   );

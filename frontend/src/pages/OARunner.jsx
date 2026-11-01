@@ -18,18 +18,20 @@ import { TID } from "../testIds";
 import { Clock, Play, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
 import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } from "../components/shared";
 
-// Shared presentation values for the runner (2026-10 rollout). Body font
-// everywhere; monospace is kept only for code (test I/O, constraints, the
-// editor itself). Eyebrows use .pm-eyebrow; inputs use .pm-input.
-const META = { fontSize: 13, color: "rgba(11,42,48,0.7)" };
-const BODY = { fontSize: 15, color: "rgba(11,42,48,0.85)", lineHeight: 1.6 };
-const TIMER_OK = { background: "var(--pm-success-bg)", color: "var(--pm-ink)" };
-const TIMER_LOW = { background: "var(--pm-error-bg)", color: "var(--pm-error-text)" };
+// Shared presentation values for the runner (2026-10 rollout, glass restyle
+// 2026-11). Body font everywhere; monospace is kept only for code (test I/O,
+// constraints, the editor itself). Eyebrows use .pm-eyebrow (color-neutral,
+// set per-instance below); inputs use .gl-field-input.
+const META = { fontSize: 13, color: "var(--gl-muted)" };
+const BODY = { fontSize: 15, color: "var(--gl-text)", lineHeight: 1.6 };
+const OUTFIT = { fontFamily: "Outfit, system-ui, sans-serif", fontWeight: 600 };
+const TIMER_OK = { background: "color-mix(in srgb, var(--gl-mint) 35%, transparent)", color: "var(--gl-text)" };
+const TIMER_LOW = { background: "rgba(229,72,77,0.12)", color: "#e5484d" };
 
 // SafeMarkdown: falls back to plain text if react-markdown isn't present in the pipeline.
 function MD({ children }) {
   const text = String(children || "");
-  return <div className="prose prose-sm max-w-none whitespace-pre-wrap font-sans" style={{ color: "var(--pm-ink)" }}>
+  return <div className="prose prose-sm max-w-none whitespace-pre-wrap font-sans" style={{ color: "var(--gl-text)" }}>
     {text.split("\n").map((line, i) => <p key={i} className="my-1">{line}</p>)}
   </div>;
 }
@@ -39,22 +41,22 @@ function EmptyNotice({ children }) {
   return <Card><div style={BODY}>{children}</div></Card>;
 }
 
-// Letter badge for option lists: selected = teal-deep, otherwise sky.
+// Letter badge for option lists: selected = accent, otherwise blue tint.
 function LetterBadge({ letter, selected }) {
   return (
-    <div className="w-7 h-7 rounded-full grid place-items-center shrink-0 font-display font-semibold"
-         style={{ fontSize: 14, background: selected ? "var(--pm-teal-deep)" : "var(--pm-sky)", color: selected ? "var(--pm-white)" : "var(--pm-ink)" }}>
+    <div className="w-7 h-7 rounded-full grid place-items-center shrink-0"
+         style={{ ...OUTFIT, fontSize: 14, background: selected ? "var(--gl-accent)" : "var(--gl-blue)", color: selected ? "#fff" : "var(--gl-text)" }}>
       {letter}
     </div>
   );
 }
 
 // Option button style: unselected uses the control border (it is an
-// interactive boundary); selected uses teal-deep and a sky wash.
+// interactive boundary); selected uses the accent colour and a blue wash.
 function optionStyle(selected) {
   return selected
-    ? { border: "1.5px solid var(--pm-teal-deep)", background: "var(--pm-sky)", color: "var(--pm-ink)" }
-    : { border: "1.5px solid var(--pm-border-control)", background: "var(--pm-white)", color: "var(--pm-ink)" };
+    ? { border: "1.5px solid var(--gl-accent)", background: "var(--gl-blue)", color: "var(--gl-text)" }
+    : { border: "1.5px solid var(--gl-line)", background: "var(--gl-card)", color: "var(--gl-text)" };
 }
 
 export default function OARunner() {
@@ -174,7 +176,7 @@ export default function OARunner() {
                 Continue to Part B <ChevronRight size={14} aria-hidden="true" />
               </Button>
               <Button data-testid={TID.oaFinishPartA} onClick={finishPartAEarly} disabled={submitting}
-                      style={{ background: "transparent", color: "var(--pm-ink)", border: "1px solid rgba(7,59,67,0.2)" }}
+                      variant="secondary"
                       className="!py-2.5 !px-5">
                 {submitting ? "Finishing…" : "Finish here (Foundation only)"}
               </Button>
@@ -197,8 +199,8 @@ export default function OARunner() {
         <Header light />
         <PageShell>
           <div className="max-w-2xl mx-auto py-24 text-center pm-in">
-            <div className="w-14 h-14 mx-auto rounded-full grid place-items-center mb-6" style={{ background: "var(--pm-sky)" }}>
-              <div className="w-6 h-6 rounded-full animate-spin" style={{ border: "2px solid var(--pm-teal-deep)", borderTopColor: "transparent" }} />
+            <div className="w-14 h-14 mx-auto rounded-full grid place-items-center mb-6" style={{ background: "var(--gl-blue)" }}>
+              <div className="w-6 h-6 rounded-full animate-spin" style={{ border: "2px solid var(--gl-accent)", borderTopColor: "transparent" }} />
             </div>
             <SectionLabel>preparing your OA</SectionLabel>
             <PageTitle>
@@ -212,17 +214,17 @@ export default function OARunner() {
                 : "Almost there. You can start this section the moment it's ready."}
             </p>
             <Card className="mt-8 text-left" padding="20px 24px">
-              <div className="pm-eyebrow mb-3" style={{ color: "rgba(11,42,48,0.7)" }}>progress</div>
+              <div className="pm-eyebrow mb-3" style={{ color: "var(--gl-muted)" }}>progress</div>
               <div className="space-y-2">
                 {(attempt.sections || []).map((s, i) => {
                   const done = (s.questions?.length ?? 0) > 0;
                   const isCurrent = i === (attempt.current_section_index ?? 0);
                   return (
-                    <div key={s.key} className={`flex items-center gap-3 ${isCurrent ? "font-semibold" : ""}`} style={{ fontSize: 15, color: done ? "var(--pm-ink)" : "rgba(11,42,48,0.7)" }}>
-                      <span className={`w-2.5 h-2.5 rounded-full ${done ? "" : "animate-pulse"}`} style={{ background: done ? "var(--pm-teal-deep)" : "rgba(11,42,48,0.35)" }}></span>
+                    <div key={s.key} className={`flex items-center gap-3 ${isCurrent ? "font-semibold" : ""}`} style={{ fontSize: 15, color: done ? "var(--gl-text)" : "var(--gl-muted)" }}>
+                      <span className={`w-2.5 h-2.5 rounded-full ${done ? "" : "animate-pulse"}`} style={{ background: done ? "var(--gl-accent)" : "color-mix(in srgb, var(--gl-text) 35%, transparent)" }}></span>
                       <span>{s.name}</span>
-                      {done && <span className="ml-auto" style={{ ...META, color: "var(--pm-teal-deep)", fontWeight: 600 }}>{s.questions.length} q ready</span>}
-                      {!done && isCurrent && <span className="ml-auto" style={{ ...META, color: "var(--pm-teal-deep)", fontWeight: 600 }}>generating…</span>}
+                      {done && <span className="ml-auto" style={{ ...META, color: "var(--gl-accent)", fontWeight: 600 }}>{s.questions.length} q ready</span>}
+                      {!done && isCurrent && <span className="ml-auto" style={{ ...META, color: "var(--gl-accent)", fontWeight: 600 }}>generating…</span>}
                     </div>
                   );
                 })}
@@ -350,8 +352,8 @@ export default function OARunner() {
               <PageTitle style={{ fontSize: "clamp(1.75rem, 3vw, 2.25rem)" }}>{currentSection.name}</PageTitle>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              <div data-testid={TID.oaTimer} className="inline-flex items-center gap-2 rounded-full font-display font-semibold"
-                   style={{ fontSize: 18, padding: "8px 16px", fontVariantNumeric: "tabular-nums", ...(remaining < 60 ? TIMER_LOW : TIMER_OK) }}>
+              <div data-testid={TID.oaTimer} className="inline-flex items-center gap-2 rounded-full"
+                   style={{ ...OUTFIT, fontSize: 18, padding: "8px 16px", fontVariantNumeric: "tabular-nums", ...(remaining < 60 ? TIMER_LOW : TIMER_OK) }}>
                 <Clock size={16} aria-hidden="true" /> <span>{mm}:{ss}</span>
               </div>
               {currentSection.type !== "gamified_round" && (
@@ -363,8 +365,8 @@ export default function OARunner() {
           </div>
 
           {/* Progress bar */}
-          <div className="w-full rounded-full overflow-hidden mb-8" style={{ height: 6, background: "var(--pm-sky-deep)" }} role="progressbar" aria-valuenow={Math.round(progressPct)} aria-valuemin={0} aria-valuemax={100}>
-            <div className="h-full rounded-full" style={{ width: `${progressPct}%`, background: "var(--pm-teal-deep)" }}></div>
+          <div className="w-full rounded-full overflow-hidden mb-8" style={{ height: 6, background: "color-mix(in srgb, var(--gl-text) 10%, transparent)" }} role="progressbar" aria-valuenow={Math.round(progressPct)} aria-valuemin={0} aria-valuemax={100}>
+            <div className="h-full rounded-full" style={{ width: `${progressPct}%`, background: "var(--gl-accent)" }}></div>
           </div>
 
           {/* Section body */}
@@ -538,12 +540,12 @@ function MCQSection({ section, answers, setAnswer }) {
           />
         ) : (
         <Card key={q.id}>
-          <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Q{i+1} of {qs.length}</div>
-          <div className="font-display font-semibold mb-4" style={{ fontSize: 19, color: "var(--pm-ink)", lineHeight: 1.4 }}><MD>{q.prompt}</MD></div>
+          <div className="pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Q{i+1} of {qs.length}</div>
+          <div className="mb-4" style={{ ...OUTFIT, fontSize: 19, color: "var(--gl-text)", lineHeight: 1.4 }}><MD>{q.prompt}</MD></div>
           {q.svg_diagram && (
             <div
               className="mb-4 rounded-[14px] overflow-x-auto flex justify-center p-2"
-              style={{ border: "1px solid rgba(7,59,67,0.08)", background: "var(--pm-white)" }}
+              style={{ border: "1px solid var(--gl-line)", background: "var(--gl-card)" }}
               dangerouslySetInnerHTML={{ __html: q.svg_diagram }}
             />
           )}
@@ -556,7 +558,7 @@ function MCQSection({ section, answers, setAnswer }) {
                   data-testid={TID.oaQuestionOption(q.id, ix)}
                   aria-pressed={selected}
                   onClick={() => setAnswer(q.id, ix)}
-                  className="text-left rounded-[14px] px-4 py-3 flex items-start gap-3 transition-colors hover:bg-[rgba(15,111,122,0.06)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                  className="text-left rounded-[14px] px-4 py-3 flex items-start gap-3 transition-colors hover:bg-[color-mix(in_srgb,var(--gl-accent)_6%,transparent)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)]"
                   style={optionStyle(selected)}
                 >
                   <LetterBadge letter={String.fromCharCode(65 + ix)} selected={selected} />
@@ -579,12 +581,12 @@ function EssaySection({ section, answers, setAnswer }) {
     <div className="space-y-4">
       {qs.map((q) => (
         <Card key={q.id}>
-          <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Essay</div>
-          <div className="font-display font-semibold mb-2" style={{ fontSize: 22, color: "var(--pm-ink)" }}>{q.topic}</div>
+          <div className="pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Essay</div>
+          <div className="mb-2" style={{ ...OUTFIT, fontSize: 22, color: "var(--gl-text)" }}>{q.topic}</div>
           <div className="mb-4" style={BODY}>{q.instructions}</div>
           <textarea
             data-testid={TID.oaEssayInput(q.id)}
-            className="pm-input min-h-[240px]"
+            className="gl-field-input min-h-[240px]"
             placeholder={`Write ${q.min_words || 150}-${q.max_words || 300} words…`}
             value={answers[q.id] || ""}
             onChange={e => setAnswer(q.id, e.target.value)}
@@ -637,8 +639,8 @@ function SpeakingSection({ attemptId, section, answers, setAnswer }) {
   return (
     <Card>
       <div className="space-y-4">
-        <div className="pm-eyebrow" style={{ color: "rgba(11,42,48,0.7)" }}>Speaking</div>
-        <div className="font-display font-semibold" style={{ fontSize: 22, color: "var(--pm-ink)" }}>{q.topic}</div>
+        <div className="pm-eyebrow" style={{ color: "var(--gl-muted)" }}>Speaking</div>
+        <div style={{ ...OUTFIT, fontSize: 22, color: "var(--gl-text)" }}>{q.topic}</div>
         <div style={BODY}>{q.instructions}</div>
 
         {typedMode ? (
@@ -646,7 +648,7 @@ function SpeakingSection({ attemptId, section, answers, setAnswer }) {
             <div style={META}>Mic unavailable. Type your response instead.</div>
             <textarea
               data-testid={TID.oaMicFallbackInput(q.id)}
-              className="pm-input min-h-[160px]"
+              className="gl-field-input min-h-[160px]"
               placeholder={`Write ${q.min_words || 70}-${q.max_words || 170} words…`}
               value={answers[q.id] || ""}
               onChange={e => setAnswer(q.id, e.target.value)}
@@ -658,12 +660,12 @@ function SpeakingSection({ attemptId, section, answers, setAnswer }) {
           </Button>
         ) : phase === "prep" ? (
           <div className="text-center py-8">
-            <div className="font-display font-semibold" style={{ fontSize: 48, color: "var(--pm-ink)", fontVariantNumeric: "tabular-nums" }}>{prepLeft}s</div>
+            <div style={{ ...OUTFIT, fontSize: 48, color: "var(--gl-text)", fontVariantNumeric: "tabular-nums" }}>{prepLeft}s</div>
             <div className="mt-2" style={BODY}>Get ready to speak…</div>
           </div>
         ) : phase === "recording" ? (
           <div className="text-center py-8">
-            <div className="font-display font-semibold" style={{ fontSize: 48, color: "var(--pm-teal-deep)", fontVariantNumeric: "tabular-nums" }}>{recordLeft}s</div>
+            <div style={{ ...OUTFIT, fontSize: 48, color: "var(--gl-accent)", fontVariantNumeric: "tabular-nums" }}>{recordLeft}s</div>
             <div className="mt-2" style={BODY}>Recording… speak now</div>
             <Button variant="secondary" data-testid={TID.oaMicStopBtn(q.id)} onClick={mic.stop} className="mt-4 !py-2 !px-4" style={{ fontSize: 14 }}>Stop early</Button>
           </div>
@@ -674,13 +676,13 @@ function SpeakingSection({ attemptId, section, answers, setAnswer }) {
             <div style={META}>Transcript (edit if needed):</div>
             <textarea
               data-testid={TID.oaTranscriptInput(q.id)}
-              className="pm-input min-h-[160px]"
+              className="gl-field-input min-h-[160px]"
               value={answers[q.id] || ""}
               onChange={e => setAnswer(q.id, e.target.value)}
             />
             <div className="flex gap-4" style={{ fontSize: 14 }}>
-              <button onClick={restart} className="underline underline-offset-2" style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>Re-record</button>
-              <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ color: "var(--pm-teal-deep)", fontWeight: 600 }}>Type instead</button>
+              <button onClick={restart} className="underline underline-offset-2" style={{ color: "var(--gl-accent)", fontWeight: 600 }}>Re-record</button>
+              <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ color: "var(--gl-accent)", fontWeight: 600 }}>Type instead</button>
             </div>
           </>
         )}
@@ -719,12 +721,12 @@ function ReadAloudCard({ attemptId, sectionKey, q, idx, total, value, onChange }
 
   return (
     <Card>
-      <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Sentence {idx + 1} of {total}: read aloud</div>
-      <div className="font-display font-semibold mb-4" style={{ fontSize: 19, color: "var(--pm-ink)", lineHeight: 1.4 }}>{q.text}</div>
+      <div className="pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Sentence {idx + 1} of {total}: read aloud</div>
+      <div className="mb-4" style={{ ...OUTFIT, fontSize: 19, color: "var(--gl-text)", lineHeight: 1.4 }}>{q.text}</div>
       {typedMode ? (
         <input
           data-testid={TID.oaMicFallbackInput(q.id)}
-          className="pm-input"
+          className="gl-field-input"
           placeholder="Type what you would say…"
           value={value}
           onChange={e => onChange(e.target.value)}
@@ -738,7 +740,7 @@ function ReadAloudCard({ attemptId, sectionKey, q, idx, total, value, onChange }
           <Button data-testid={TID.oaMicRecordBtn(q.id)} onClick={mic.start} className="!py-2 !px-4" style={{ fontSize: 14 }}>
             {value ? "Re-record" : "Record"}
           </Button>
-          <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ fontSize: 14, color: "var(--pm-teal-deep)", fontWeight: 600 }}>Type instead</button>
+          <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ fontSize: 14, color: "var(--gl-accent)", fontWeight: 600 }}>Type instead</button>
         </div>
       )}
       {value && !typedMode && (
@@ -746,7 +748,7 @@ function ReadAloudCard({ attemptId, sectionKey, q, idx, total, value, onChange }
           <div className="mb-1" style={META}>Transcript (edit if needed):</div>
           <input
             data-testid={TID.oaTranscriptInput(q.id)}
-            className="pm-input"
+            className="gl-field-input"
             value={value}
             onChange={e => onChange(e.target.value)}
           />
@@ -769,15 +771,15 @@ function SpeakingAnswerCard({ attemptId, sectionKey, q, idx, total, value, onCha
 
   return (
     <Card>
-      <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Q{idx + 1} of {total}: spoken response</div>
-      <div className="font-display font-semibold mb-1" style={{ fontSize: 20, color: "var(--pm-ink)" }}>{q.topic}</div>
+      <div className="pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Q{idx + 1} of {total}: spoken response</div>
+      <div className="mb-1" style={{ ...OUTFIT, fontSize: 20, color: "var(--gl-text)" }}>{q.topic}</div>
       <div className="mb-4" style={BODY}>{q.instructions}</div>
       {typedMode ? (
         <>
           <div className="mb-2" style={META}>Mic unavailable. Type your response instead.</div>
           <textarea
             data-testid={TID.oaMicFallbackInput(q.id)}
-            className="pm-input min-h-[120px]"
+            className="gl-field-input min-h-[120px]"
             placeholder={`Write ${q.min_words || 70}-${q.max_words || 170} words…`}
             value={value}
             onChange={e => onChange(e.target.value)}
@@ -792,7 +794,7 @@ function SpeakingAnswerCard({ attemptId, sectionKey, q, idx, total, value, onCha
           <Button data-testid={TID.oaMicRecordBtn(q.id)} onClick={mic.start} className="!py-2 !px-4" style={{ fontSize: 14 }}>
             {value ? "Re-record" : "Record"}
           </Button>
-          <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ fontSize: 14, color: "var(--pm-teal-deep)", fontWeight: 600 }}>Type instead</button>
+          <button onClick={() => setTypedMode(true)} className="underline underline-offset-2" style={{ fontSize: 14, color: "var(--gl-accent)", fontWeight: 600 }}>Type instead</button>
         </div>
       )}
       {value && !typedMode && (
@@ -800,7 +802,7 @@ function SpeakingAnswerCard({ attemptId, sectionKey, q, idx, total, value, onCha
           <div className="mb-1" style={META}>Transcript (edit if needed):</div>
           <textarea
             data-testid={TID.oaTranscriptInput(q.id)}
-            className="pm-input min-h-[100px]"
+            className="gl-field-input min-h-[100px]"
             value={value}
             onChange={e => onChange(e.target.value)}
           />
@@ -828,8 +830,8 @@ function CommMixedSection({ attemptId, section, answers, setAnswer }) {
         />
       ) : (
         <Card key={q.id}>
-          <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Q{i + 1} of {qs.length}</div>
-          <div className="font-display font-semibold mb-4" style={{ fontSize: 19, color: "var(--pm-ink)", lineHeight: 1.4 }}><MD>{q.prompt}</MD></div>
+          <div className="pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Q{i + 1} of {qs.length}</div>
+          <div className="mb-4" style={{ ...OUTFIT, fontSize: 19, color: "var(--gl-text)", lineHeight: 1.4 }}><MD>{q.prompt}</MD></div>
           <div className="grid grid-cols-1 gap-2">
             {(q.options || []).map((opt, ix) => {
               const selected = answers[q.id] === ix;
@@ -839,7 +841,7 @@ function CommMixedSection({ attemptId, section, answers, setAnswer }) {
                   data-testid={TID.oaQuestionOption(q.id, ix)}
                   aria-pressed={selected}
                   onClick={() => setAnswer(q.id, ix)}
-                  className="text-left rounded-[14px] px-4 py-3 flex items-start gap-3 transition-colors hover:bg-[rgba(15,111,122,0.06)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+                  className="text-left rounded-[14px] px-4 py-3 flex items-start gap-3 transition-colors hover:bg-[color-mix(in_srgb,var(--gl-accent)_6%,transparent)] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)]"
                   style={optionStyle(selected)}
                 >
                   <LetterBadge letter={String.fromCharCode(65 + ix)} selected={selected} />
@@ -935,10 +937,10 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
           {qs.map((q, i) => (
             <button key={q.id} onClick={() => { setActiveIdx(i); setRunResults(null); }}
               aria-pressed={i === activeIdx}
-              className="px-4 py-2 rounded-full font-display font-semibold transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--pm-teal-night)]"
+              className="px-4 py-2 rounded-full transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[var(--gl-focus)]"
               style={i === activeIdx
-                ? { fontSize: 14, background: "var(--pm-teal-deep)", color: "var(--pm-white)", border: "1.5px solid var(--pm-teal-deep)" }
-                : { fontSize: 14, background: "var(--pm-sky)", color: "var(--pm-ink)", border: "1.5px solid transparent" }}>
+                ? { ...OUTFIT, fontSize: 14, background: "var(--gl-accent)", color: "#fff", border: "1.5px solid var(--gl-accent)" }
+                : { ...OUTFIT, fontSize: 14, background: "var(--gl-blue)", color: "var(--gl-text)", border: "1.5px solid transparent" }}>
               Problem {i+1}
             </button>
           ))}
@@ -952,17 +954,17 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
             <Chip tone="status">{problem.difficulty}</Chip>
           </div>
           <div style={BODY}><MD>{problem.statement}</MD></div>
-          {problem.input_format && <div className="mt-4"><div className="pm-eyebrow mb-1" style={{ color: "rgba(11,42,48,0.7)" }}>Input</div><div style={BODY}>{problem.input_format}</div></div>}
-          {problem.output_format && <div className="mt-3"><div className="pm-eyebrow mb-1" style={{ color: "rgba(11,42,48,0.7)" }}>Output</div><div style={BODY}>{problem.output_format}</div></div>}
-          {problem.constraints && <div className="mt-3"><div className="pm-eyebrow mb-1" style={{ color: "rgba(11,42,48,0.7)" }}>Constraints</div><div className="font-mono" style={{ fontSize: 14, color: "var(--pm-ink)" }}>{problem.constraints}</div></div>}
+          {problem.input_format && <div className="mt-4"><div className="pm-eyebrow mb-1" style={{ color: "var(--gl-muted)" }}>Input</div><div style={BODY}>{problem.input_format}</div></div>}
+          {problem.output_format && <div className="mt-3"><div className="pm-eyebrow mb-1" style={{ color: "var(--gl-muted)" }}>Output</div><div style={BODY}>{problem.output_format}</div></div>}
+          {problem.constraints && <div className="mt-3"><div className="pm-eyebrow mb-1" style={{ color: "var(--gl-muted)" }}>Constraints</div><div className="font-mono" style={{ fontSize: 14, color: "var(--gl-text)" }}>{problem.constraints}</div></div>}
 
           <div className="mt-6">
-            <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Visible tests</div>
+            <div className="pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Visible tests</div>
             <div className="space-y-2">
               {(problem.visible_tests || []).map((t, i) => (
-                <div key={i} className="rounded-[14px] p-3 font-mono" style={{ fontSize: 13, border: "1px solid rgba(7,59,67,0.12)", background: "var(--pm-grey)", color: "var(--pm-ink)" }}>
-                  <div><span style={{ color: "rgba(11,42,48,0.7)" }}>input:</span> {t.input}</div>
-                  <div><span style={{ color: "rgba(11,42,48,0.7)" }}>expected:</span> {t.expected_output}</div>
+                <div key={i} className="rounded-[14px] p-3 font-mono" style={{ fontSize: 13, border: "1px solid var(--gl-line)", background: "color-mix(in srgb, var(--gl-text) 4%, transparent)", color: "var(--gl-text)" }}>
+                  <div><span style={{ color: "var(--gl-muted)" }}>input:</span> {t.input}</div>
+                  <div><span style={{ color: "var(--gl-muted)" }}>expected:</span> {t.expected_output}</div>
                 </div>
               ))}
             </div>
@@ -970,16 +972,16 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
 
           {runResults && (
             <div className="mt-6">
-              <div className="pm-eyebrow mb-2" style={{ color: "rgba(11,42,48,0.7)" }}>Run results</div>
+              <div className="pm-eyebrow mb-2" style={{ color: "var(--gl-muted)" }}>Run results</div>
               <div className="space-y-2">
                 {runResults.map((r, i) => (
-                  <div key={i} className="rounded-[14px] p-3" style={{ fontSize: 13, background: r.passed ? "var(--pm-success-bg)" : "var(--pm-error-bg)", color: "var(--pm-ink)", border: `1px solid ${r.passed ? "rgba(15,111,122,0.35)" : "rgba(180,35,24,0.35)"}` }}>
+                  <div key={i} className="rounded-[14px] p-3" style={{ fontSize: 13, background: r.passed ? "color-mix(in srgb, var(--gl-mint) 35%, transparent)" : "rgba(229,72,77,0.12)", color: "var(--gl-text)", border: `1px solid ${r.passed ? "color-mix(in srgb, var(--gl-accent) 35%, transparent)" : "rgba(229,72,77,0.35)"}` }}>
                     <div className="flex items-center gap-2 font-semibold">
-                      {r.passed ? <CheckCircle2 size={14} style={{ color: "var(--pm-teal-deep)" }}/> : <XCircle size={14} style={{ color: "var(--pm-error-text)" }}/>}
+                      {r.passed ? <CheckCircle2 size={14} style={{ color: "var(--gl-accent)" }}/> : <XCircle size={14} style={{ color: "#e5484d" }}/>}
                       Test {i+1} · {r.passed ? "passed" : "failed"}
                     </div>
-                    <div className="mt-1 font-mono" style={{ color: "rgba(11,42,48,0.85)" }}>expected: {r.expected}</div>
-                    <div className="font-mono" style={{ color: "rgba(11,42,48,0.85)" }}>got: {r.got || (r.error ? `(error) ${r.error}` : "")}</div>
+                    <div className="mt-1 font-mono" style={{ color: "var(--gl-text)" }}>expected: {r.expected}</div>
+                    <div className="font-mono" style={{ color: "var(--gl-text)" }}>got: {r.got || (r.error ? `(error) ${r.error}` : "")}</div>
                   </div>
                 ))}
               </div>
@@ -1000,8 +1002,8 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
               onChange={e => setForProblem({ code: e.target.value })}
               placeholder="Write your full program here. No autocomplete. No test runner. Just like paper."
               autoComplete="off" autoCorrect="off" spellCheck={false}
-              className="pm-input flex-1 min-h-[400px] font-mono"
-              style={{ background: "var(--pm-sky)", color: "var(--pm-ink)", fontSize: 14, lineHeight: 1.6, tabSize: 4 }}
+              className="gl-field-input flex-1 min-h-[400px] font-mono"
+              style={{ background: "var(--gl-blue)", color: "var(--gl-text)", fontSize: 14, lineHeight: 1.6, tabSize: 4 }}
             />
             <div className="mt-2" style={META}>{(current.code || "").split("\n").length} lines · {(current.code || "").length} chars</div>
           </Card>
@@ -1014,7 +1016,7 @@ function CodingSection({ attemptId, section, answers, setAnswer }) {
                 value={current.language}
                 onChange={e => setForProblem({ language: e.target.value })}
                 className="bg-transparent rounded-[10px] px-2 py-1 font-mono"
-                style={{ fontSize: 13, border: "1px solid rgba(255,255,255,0.35)", color: "var(--pm-white)" }}
+                style={{ fontSize: 13, border: "1px solid rgba(255,255,255,0.35)", color: "#fff" }}
               >
                 <option value="python">Python 3</option>
                 <option value="javascript">JavaScript</option>

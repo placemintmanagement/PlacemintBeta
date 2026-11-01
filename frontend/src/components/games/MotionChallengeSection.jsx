@@ -289,19 +289,19 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
 
   if (phase === "instructions") {
     return (
-      <div className="pm-card p-8 max-w-lg mx-auto text-center">
-        <div className="text-xs pm-eyebrow tracking-widest text-pm-primary-dark mb-2">Gamified Round</div>
+      <div className="gl-card p-8 max-w-lg mx-auto text-center">
+        <div className="text-xs pm-eyebrow tracking-widest mb-2" style={{ color: "var(--gl-accent)" }}>Gamified Round</div>
         <h2 className="font-display text-2xl font-bold mb-4">{instructions.title}</h2>
-        <p className="text-pm-text2 mb-6">{instructions.rule}</p>
+        <p className="mb-6" style={{ color: "var(--gl-muted)" }}>{instructions.rule}</p>
         <div className="flex flex-col gap-3 text-left mb-8">
-          <div className="flex items-center gap-3 text-sm text-pm-text2">
-            <Target size={16} className="text-pm-primary shrink-0" /> {instructions.scoringNote}
+          <div className="flex items-center gap-3 text-sm" style={{ color: "var(--gl-muted)" }}>
+            <Target size={16} className="shrink-0" style={{ color: "var(--gl-accent)" }} /> {instructions.scoringNote}
           </div>
-          <div className="flex items-center gap-3 text-sm text-pm-text2">
-            <Clock size={16} className="text-pm-primary shrink-0" /> {instructions.timerNote}
+          <div className="flex items-center gap-3 text-sm" style={{ color: "var(--gl-muted)" }}>
+            <Clock size={16} className="shrink-0" style={{ color: "var(--gl-accent)" }} /> {instructions.timerNote}
           </div>
         </div>
-        <button onClick={handlePlay} className="pm-btn pm-btn-primary inline-flex items-center gap-2 px-6 py-3">
+        <button onClick={handlePlay} className="gl-btn y inline-flex items-center gap-2 px-6 py-3">
           <Play size={16} /> Play
         </button>
       </div>
@@ -311,7 +311,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   if (phase === "done") {
     const solved = results.filter((r) => r.outcome === "won").length;
     return (
-      <div className="pm-card p-8 max-w-lg mx-auto text-center">
+      <div className="gl-card p-8 max-w-lg mx-auto text-center">
         <div className="font-display text-lg font-semibold mb-4">Motion Challenge complete</div>
         <div className="flex justify-center gap-3 mb-4">
           {puzzles.map((p, i) => {
@@ -319,16 +319,15 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
             return (
               <div
                 key={p.id ?? p.puzzle_id}
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${
-                  r?.outcome === "won" ? "bg-[var(--pm-teal-deep)]" : r ? "bg-pm-secondary" : "bg-[#D8D3C4]"
-                }`}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+                style={{ background: r?.outcome === "won" ? "var(--gl-accent)" : r ? "var(--gl-text)" : "#D8D3C4" }}
               >
                 {i + 1}
               </div>
             );
           })}
         </div>
-        <div className="text-sm text-pm-text2">{solved} of {puzzles.length} levels solved</div>
+        <div className="text-sm" style={{ color: "var(--gl-muted)" }}>{solved} of {puzzles.length} levels solved</div>
       </div>
     );
   }
@@ -379,22 +378,22 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
   return (
     <div>
       {loadError && (
-        <div className="mb-3 px-4 py-2.5 rounded-lg bg-[rgba(11,42,48,0.06)] border border-[rgba(11,42,48,0.15)] text-pm-text text-sm flex items-center justify-between gap-3">
+        <div className="mb-3 px-4 py-2.5 rounded-lg text-sm flex items-center justify-between gap-3" style={{ background: "color-mix(in srgb, var(--gl-text) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--gl-text) 15%, transparent)", color: "var(--gl-text)" }}>
           <span>{loadError}</span>
-          <button onClick={() => setLoadError(null)} className="text-pm-text2 hover:text-pm-text shrink-0">&times;</button>
+          <button onClick={() => setLoadError(null)} className="shrink-0" style={{ color: "var(--gl-muted)" }}>&times;</button>
         </div>
       )}
       <div className="flex items-center justify-between mb-3 px-1">
-        <div className="pm-chip text-xs">LEVEL {levelIndex + 1} OF {puzzles.length}</div>
+        <div className="gl-tag neutral text-xs">LEVEL {levelIndex + 1} OF {puzzles.length}</div>
         <div className="flex items-center gap-4">
-          <div className="text-xs font-display tabular-nums text-pm-text2">{movesUsed} / {current.moveBudget} moves</div>
-          <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${poolRemaining <= 30 ? "text-pm-secondary" : "text-pm-text2"}`}>
+          <div className="text-xs font-display tabular-nums" style={{ color: "var(--gl-muted)" }}>{movesUsed} / {current.moveBudget} moves</div>
+          <div className="flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold" style={{ color: poolRemaining <= 30 ? "var(--gl-text)" : "var(--gl-muted)" }}>
             <Clock size={14} /> {formatMMSS(poolRemaining)}
           </div>
         </div>
       </div>
 
-      <div className="pm-card p-6">
+      <div className="gl-card p-6">
         {levelOutcome ? (
           <div className="py-10 text-center">
             {levelOutcome === "won" ? (
@@ -404,7 +403,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
               </>
             ) : (
               <>
-                <XCircle className="mx-auto text-pm-secondary mb-2" size={32} />
+                <XCircle className="mx-auto mb-2" size={32} style={{ color: "var(--gl-text)" }} />
                 <div className="font-display text-lg font-semibold">Out of moves</div>
               </>
             )}
@@ -419,7 +418,7 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
                 data-testid={TID.motionUndo}
                 onClick={handleUndo}
                 disabled={movesUsed === 0 || movingRef.current}
-                className="pm-btn pm-btn-ghost text-xs py-1.5 px-3 inline-flex items-center gap-1.5 disabled:opacity-40"
+                className="gl-btn o text-xs py-1.5 px-3 inline-flex items-center gap-1.5 disabled:opacity-40"
               >
                 <Undo2 size={14} /> Undo
               </button>
@@ -494,11 +493,10 @@ export default function MotionChallengeSection({ puzzles, attemptId, sectionKey,
                     className={`flex items-center justify-center z-10 ${isInvalid ? "animate-shake" : ""}`}
                   >
                     <div
-                      className={`w-1/2 h-1/2 rounded-full border-2 ${
-                        isInvalid
-                          ? "bg-pm-secondary/50 border-pm-secondary"
-                          : "bg-pm-primary/40 border-pm-primary animate-pulse"
-                      }`}
+                      className={`w-1/2 h-1/2 rounded-full border-2 ${isInvalid ? "" : "animate-pulse"}`}
+                      style={isInvalid
+                        ? { background: "color-mix(in srgb, var(--gl-text) 50%, transparent)", borderColor: "var(--gl-text)" }
+                        : { background: "color-mix(in srgb, var(--gl-accent) 40%, transparent)", borderColor: "var(--gl-accent)" }}
                     />
                   </button>
                 );
