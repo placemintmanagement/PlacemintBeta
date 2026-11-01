@@ -30,9 +30,11 @@
      --gl-* palette above is deliberately pastel for large fills, which
      fails contrast as small text/links on a white card (same "pastel
      reads dull/illegible at small scale" issue GlassLogoMark.jsx and the
-     option-picker icons hit). Same pink family as the logo mark's right
-     leg, darkened for ~5.5:1 contrast on white. */
-  --gl-accent: #be185d;
+     option-picker icons hit). Teal/mint family -- a darkened version of
+     the logo mark's left leg -- chosen over an earlier magenta (#be185d,
+     user feedback: "the dark pink isn't looking good") for ~5:1 contrast
+     on white. */
+  --gl-accent: #0d9488;
   /* Same typography system as the main app (frontend/src/index.css):
      Inter for body text, Outfit for headings (h2/h3/h4 below), Poppins
      600 for eyebrow/badge labels, JetBrains Mono for code/technical UI
@@ -55,7 +57,7 @@
     --gl-text: #fff;
     --gl-muted: #a9a9a9;
     --gl-line: rgba(255, 255, 255, 0.14);
-    --gl-accent: #f472b6;
+    --gl-accent: #2dd4da;
     color-scheme: dark;
   }
 }
@@ -65,7 +67,7 @@
   --gl-text: #fff;
   --gl-muted: #a9a9a9;
   --gl-line: rgba(255, 255, 255, 0.14);
-  --gl-accent: #f472b6;
+  --gl-accent: #2dd4da;
   color-scheme: dark;
 }
 

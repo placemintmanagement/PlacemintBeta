@@ -80,7 +80,7 @@ export default function DepartmentCompanies() {
           <div key={g.label} className="mb-10 last:mb-0">
             <h2
               className="font-semibold"
-              style={{ color: "var(--gl-accent)", fontSize: 22, marginTop: 40, marginBottom: 20 }}
+              style={{ color: "var(--gl-text)", fontSize: 22, marginTop: 40, marginBottom: 20 }}
             >
               {g.label}
             </h2>

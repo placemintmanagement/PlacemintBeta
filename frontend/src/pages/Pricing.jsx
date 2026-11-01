@@ -38,7 +38,7 @@ export default function Pricing() {
         description,
         order_id: data.order.razorpay_order_id,
         prefill: { name: user.name, email: user.email },
-        theme: { color: "#be185d" }, // Razorpay widget config: needs a literal colour, not a CSS variable
+        theme: { color: "#0d9488" }, // Razorpay widget config: needs a literal colour, not a CSS variable
         handler: async (resp) => {
           try {
             await api.post("/payments/verify", {
@@ -138,7 +138,7 @@ export default function Pricing() {
               return (
                 <Card key={p.id} data-testid={TID.pricingPlan(p.id)}
                       className="flex flex-col"
-                      style={p.highlight ? { border: "1.5px solid var(--gl-accent)", boxShadow: "0 20px 44px -26px rgba(190,24,93,0.55)" } : undefined}>
+                      style={p.highlight ? { border: "1.5px solid var(--gl-accent)", boxShadow: "0 20px 44px -26px rgba(13,148,136,0.55)" } : undefined}>
                   {p.tag && <Chip tone={p.highlight ? "status" : "neutral"} className="self-start mb-3">{p.tag}</Chip>}
                   <CardTitle>{p.name}</CardTitle>
                   <div className="mt-2" style={{ ...OUTFIT, fontSize: 32, color: "var(--gl-text)", fontVariantNumeric: "tabular-nums" }}>

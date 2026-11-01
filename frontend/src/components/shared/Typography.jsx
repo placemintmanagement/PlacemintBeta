@@ -1,9 +1,11 @@
 import React from "react";
 
 // Small uppercase label above a heading (Poppins 600, 13px, .06em).
-// var(--gl-accent) on light surfaces; pass onDark for var(--gl-y) on dark
-// section panels (e.g. .gl-dk/.gl-rep), which stays legible regardless of
-// the global light/dark theme those live inside.
+// Plain var(--gl-text) on light surfaces (user feedback: reserve
+// var(--gl-accent) for interactive/emphasis elements -- links, icons,
+// active states -- not static labels); pass onDark for var(--gl-y) on
+// dark section panels (e.g. .gl-dk/.gl-rep), which stays legible
+// regardless of the global light/dark theme those live inside.
 export function SectionLabel({ children, onDark = false, className = "" }) {
   return (
     <div
@@ -15,7 +17,7 @@ export function SectionLabel({ children, onDark = false, className = "" }) {
         letterSpacing: "0.06em",
         textTransform: "uppercase",
         lineHeight: 1.2,
-        color: onDark ? "var(--gl-y)" : "var(--gl-accent)",
+        color: onDark ? "var(--gl-y)" : "var(--gl-text)",
       }}
     >
       {children}
