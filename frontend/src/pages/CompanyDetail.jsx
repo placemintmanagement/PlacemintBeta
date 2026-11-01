@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import api from "../api";
 import Header from "../components/Header";
 import { TID } from "../testIds";
-import { Clock, ArrowRight, ChevronLeft, TriangleAlert, FileText, CheckCircle2, XCircle, Sparkles, Check, X } from "lucide-react";
+import { Clock, ChevronLeft, TriangleAlert, FileText, CheckCircle2, XCircle, Sparkles, Check, X } from "lucide-react";
 import { PageShell, SectionLabel, PageTitle, CardTitle, Card, Chip, Button } from "../components/shared";
 
 // Body-size meta text (never monospace).
@@ -113,7 +113,7 @@ export default function CompanyDetail() {
               </div>
               <div>
                 <Button data-testid={TID.startOaBtn} variant="lime" onClick={() => navigate(`/company/${companyId}/hub`)} className="w-full">
-                  Continue to OA &amp; interview <ArrowRight size={14}/>
+                  Continue to OA &amp; interview
                 </Button>
                 <button data-testid={TID.resumeSkip} onClick={() => navigate(`/company/${companyId}/hub`)} className="mt-3 hover:text-white underline-offset-2 hover:underline" style={{ fontSize: 14, color: "rgba(255,255,255,0.75)" }}>skip resume for this run</button>
               </div>

@@ -120,7 +120,7 @@
 }
 .gl-btn { padding: 11px 22px; border-radius: 99px; font-weight: 500; font-size: 14px; display: inline-block; }
 .gl-btn.k { background: #000; color: #fff; }
-.gl-btn.y { background: linear-gradient(145deg, #ffe07a, #ffc428 60%, #f2a900); color: #000; box-shadow: 0 8px 24px rgba(255, 196, 40, 0.5); }
+.gl-btn.y { background: linear-gradient(145deg, #ffe07a, #ffc428 60%, #f2a900); color: #000; }
 
 /* nav search combobox */
 .gl-finder { position: relative; margin-left: auto; width: 270px; }
@@ -840,8 +840,16 @@
    plan tags, "Beta" tag); these two modifiers override its background for
    the shared Chip component's two tones, same colors the chip grid/report
    section already use elsewhere in this file for status vs. neutral info. */
-.gl-tag.neutral { background: color-mix(in srgb, var(--gl-blue) 45%, transparent); }
-.gl-tag.status { background: color-mix(in srgb, var(--gl-mint) 45%, transparent); }
+/* Vivid hexes, not the soft --gl-blue/--gl-mint pastel tokens -- user
+   feedback on live /company/tcs-nqt (tried bumping the pastel's opacity
+   first, still read as "washed out": the pastel tokens are inherently
+   low-saturation at full strength, same "dull at small scale" issue
+   GlassLogoMark/CompanyCard/the chart palette already hit and fixed the
+   same way -- swap to a dedicated saturated hex instead of the shared
+   token). Same mint/blue family as the chart palette (#2dd4da/#0ea5e9),
+   mixed lightly with white so near-black chip text stays readable. */
+.gl-tag.neutral { background: color-mix(in srgb, #0ea5e9 45%, white); }
+.gl-tag.status { background: color-mix(in srgb, #2dd4da 45%, white); }
 
 .gl-field-input {
   width: 100%; background: var(--gl-card); color: var(--gl-text);
