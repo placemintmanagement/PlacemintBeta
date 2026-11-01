@@ -8,10 +8,10 @@ import { TID } from "../testIds";
 // variant apply its own 70%-of-normal-alpha rule (spec) with one
 // multiplier instead of a second hardcoded colour per element. Glass
 // restyle (2026-11): INK matches --gl-text's own near-black (#0b0b0b);
-// ACCENT matches --gl-accent (#be185d), the glass system's one vivid
-// emphasis colour, standing in for the old TEAL_DEEP accent role.
+// ACCENT matches --gl-accent (#0d9488, teal/mint), the glass system's one
+// vivid emphasis colour, standing in for the old TEAL_DEEP accent role.
 const INK = "11,11,11";
-const ACCENT = "190,24,93";
+const ACCENT = "13,148,136";
 
 // Cycles through the four glass header tints in card order (spec item 3) --
 // index is this card's position across the WHOLE page (DepartmentCompanies
