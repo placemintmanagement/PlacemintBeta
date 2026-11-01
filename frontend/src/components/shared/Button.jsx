@@ -12,7 +12,15 @@ import React from "react";
 // Disabled: 50% opacity (native `disabled` attribute handles the rest).
 // Pill radius + focus ring come from `.gl-btn`/the global focus-visible
 // rule, not re-declared here.
-const BASE = "inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50";
+// `!inline-flex` (Tailwind's `!` = !important) -- `.gl-btn` sets its own
+// `display: inline-block` directly (glass.css), same specificity as this
+// utility class, and wins the cascade tie (glass.css loads after
+// Tailwind's generated output). Without the override, an icon child
+// (Tailwind preflight sets svg to `display: block`) drops to its own
+// line below the button text instead of sitting beside it -- same bug
+// class as Chip.jsx hit, caught live via a user screenshot (the arrow
+// icon floating at the bottom-left of a CTA button, text off-center).
+const BASE = "!inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50";
 
 const VARIANT_CLASS = {
   primary: "y",

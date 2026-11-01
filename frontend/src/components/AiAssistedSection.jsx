@@ -35,7 +35,7 @@ export default function AiAssistedSection({ session, onSendMessage, onConsent, o
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session?.transcript?.length]);
 
-  if (!session) return <div className="pm-card p-6">No session yet.</div>;
+  if (!session) return <div className="gl-card p-6">No session yet.</div>;
 
   const problem = session.problem || {};
   const stage = session.current_stage;
@@ -53,28 +53,28 @@ export default function AiAssistedSection({ session, onSendMessage, onConsent, o
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:h-[75vh]">
       {/* Left: problem + chat transcript + input */}
-      <div className="pm-card p-6 flex flex-col overflow-hidden">
+      <div className="gl-card p-6 flex flex-col overflow-hidden">
         <div className="flex items-center justify-between mb-2">
           <div className="font-display text-xl font-bold">{problem.title}</div>
-          <span className="pm-chip pm-chip-primary">{problem.difficulty}</span>
+          <span className="gl-tag status">{problem.difficulty}</span>
         </div>
-        <div className="text-sm text-pm-text2 mb-4 whitespace-pre-wrap">{problem.statement}</div>
+        <div className="text-sm mb-4 whitespace-pre-wrap" style={{ color: "var(--gl-muted)" }}>{problem.statement}</div>
 
-        <div data-testid="ai-assisted-transcript" className="flex-1 overflow-y-auto space-y-3 border-t border-pm-border pt-4">
+        <div data-testid="ai-assisted-transcript" className="flex-1 overflow-y-auto space-y-3 pt-4" style={{ borderTop: "1px solid var(--gl-line)" }}>
           {(session.transcript || []).map((m, i) => {
             if (m.role === "ai") return (
               <div key={i} className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-pm-primary text-white grid place-items-center font-display tabular-nums font-bold text-xs shrink-0">AI</div>
-                <div data-testid={`ai-assisted-msg-ai-${i}`} className="pm-card p-3 text-sm flex-1">{m.text}</div>
+                <div className="w-8 h-8 rounded-full grid place-items-center font-display tabular-nums font-bold text-xs shrink-0" style={{ background: "#0c0c0c", color: "#fff" }}>AI</div>
+                <div data-testid={`ai-assisted-msg-ai-${i}`} className="gl-card p-3 text-sm flex-1">{m.text}</div>
               </div>
             );
             if (m.role === "candidate") return (
               <div key={i} className="flex gap-3 justify-end">
-                <div data-testid={`ai-assisted-msg-candidate-${i}`} className="max-w-[80%] bg-pm-primary text-white p-3 rounded-2xl rounded-tr-sm text-sm">{m.text}</div>
-                <div className="w-8 h-8 rounded-full bg-[var(--pm-teal-night)] text-white grid place-items-center font-display tabular-nums font-bold text-xs shrink-0">You</div>
+                <div data-testid={`ai-assisted-msg-candidate-${i}`} className="max-w-[80%] p-3 rounded-2xl rounded-tr-sm text-sm" style={{ background: "var(--gl-accent)", color: "#fff" }}>{m.text}</div>
+                <div className="w-8 h-8 rounded-full grid place-items-center font-display tabular-nums font-bold text-xs shrink-0" style={{ background: "var(--gl-accent)", color: "#fff" }}>You</div>
               </div>
             );
-            return <div key={i} className="text-xs font-display tabular-nums text-pm-text2 italic text-center">{m.text}</div>;
+            return <div key={i} className="text-xs font-display tabular-nums italic text-center" style={{ color: "var(--gl-muted)" }}>{m.text}</div>;
           })}
           <div ref={bottomRef} />
         </div>
@@ -88,13 +88,13 @@ export default function AiAssistedSection({ session, onSendMessage, onConsent, o
               onChange={(e) => setDraft(e.target.value)}
               rows={2}
               placeholder="Type your answer..."
-              className="pm-input font-sans flex-1"
+              className="gl-field-input font-sans flex-1"
             />
             <button
               data-testid="ai-assisted-send-btn"
               onClick={send}
               disabled={sending || !draft.trim()}
-              className="pm-btn pm-btn-primary h-[54px] px-5"
+              className="gl-btn y inline-flex items-center justify-center gap-2 h-[54px] px-5"
             >
               {sending ? "…" : <><SendHorizontal size={16} /> Send</>}
             </button>
@@ -104,27 +104,27 @@ export default function AiAssistedSection({ session, onSendMessage, onConsent, o
         {/* Consent gate -- buttons only, no free text */}
         {inProgress && stage === "consent" && (
           <div className="mt-4 flex gap-3 justify-center">
-            <button data-testid="ai-assisted-consent-yes" onClick={() => onConsent(true)} disabled={sending} className="pm-btn pm-btn-primary px-6">Yes</button>
-            <button data-testid="ai-assisted-consent-no" onClick={() => onConsent(false)} disabled={sending} className="pm-btn pm-btn-ghost px-6">No</button>
+            <button data-testid="ai-assisted-consent-yes" onClick={() => onConsent(true)} disabled={sending} className="gl-btn y px-6">Yes</button>
+            <button data-testid="ai-assisted-consent-no" onClick={() => onConsent(false)} disabled={sending} className="gl-btn o px-6">No</button>
           </div>
         )}
 
         {/* Self-review checkpoint -- buttons only, no free text */}
         {inProgress && stage === "self_review" && (
           <div className="mt-4 flex gap-3 justify-center">
-            <button data-testid="ai-assisted-review-yes" onClick={() => onSelfReview(true)} disabled={sending} className="pm-btn pm-btn-ghost px-6">Yes</button>
-            <button data-testid="ai-assisted-review-no" onClick={() => onSelfReview(false)} disabled={sending} className="pm-btn pm-btn-primary px-6">No</button>
+            <button data-testid="ai-assisted-review-yes" onClick={() => onSelfReview(true)} disabled={sending} className="gl-btn o px-6">Yes</button>
+            <button data-testid="ai-assisted-review-no" onClick={() => onSelfReview(false)} disabled={sending} className="gl-btn y px-6">No</button>
           </div>
         )}
 
         {/* Final outcome summary */}
         {session.status === "completed" && outcome && (
-          <div data-testid="ai-assisted-outcome" className="mt-4 pm-card p-4">
+          <div data-testid="ai-assisted-outcome" className="mt-4 gl-card p-4">
             <div className="flex items-center gap-2 font-display font-semibold">
-              {outcome.passed ? <CheckCircle2 size={16} className="text-pm-primary" /> : <XCircle size={16} className="text-pm-secondary" />}
+              {outcome.passed ? <CheckCircle2 size={16} style={{ color: "var(--gl-accent)" }} /> : <XCircle size={16} style={{ color: "var(--gl-text)" }} />}
               Score: {(outcome.score * 100).toFixed(0)}% · {outcome.passed ? "Passed" : "Not passed"}
             </div>
-            <div className="text-sm text-pm-text2 mt-1">{outcome.reason}</div>
+            <div className="text-sm mt-1" style={{ color: "var(--gl-muted)" }}>{outcome.reason}</div>
           </div>
         )}
       </div>

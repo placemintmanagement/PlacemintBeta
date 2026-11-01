@@ -139,12 +139,12 @@ export default function InductiveChallengeQuestion({
   };
 
   return (
-    <div className="pm-card p-6">
+    <div className="gl-card p-6">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-xs pm-eyebrow text-pm-text2">
+        <div className="text-xs pm-eyebrow" style={{ color: "var(--gl-muted)" }}>
           Q{index + 1} of {total} · Inductive Challenge
         </div>
-        <div className={`flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold ${remaining <= 5 ? "text-pm-secondary" : "text-pm-text2"}`}>
+        <div className="flex items-center gap-1.5 font-display tabular-nums text-xs font-semibold" style={{ color: remaining <= 5 ? "var(--gl-text)" : "var(--gl-muted)" }}>
           <Clock size={14} />
           00:{String(remaining).padStart(2, "0")}
         </div>
@@ -153,9 +153,9 @@ export default function InductiveChallengeQuestion({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
         <div>
           <div className="font-display text-sm font-semibold mb-3">These two grids follow a rule.</div>
-          <div className="flex flex-col items-center gap-2 bg-pm-muted rounded-xl p-4">
+          <div className="flex flex-col items-center gap-2 rounded-xl p-4" style={{ background: "var(--gl-blue)" }}>
             <MiniGrid grid={q.demoBefore} />
-            <ArrowDown size={16} className="text-pm-text2 my-1" />
+            <ArrowDown size={16} className="my-1" style={{ color: "var(--gl-muted)" }} />
             <MiniGrid grid={q.demoAfter} />
           </div>
         </div>
@@ -175,13 +175,14 @@ export default function InductiveChallengeQuestion({
                   data-testid={TID.oaQuestionOption(qid, ix)}
                   onClick={() => handleToggle(ix)}
                   disabled={isDisabled}
-                  className={`relative flex items-center justify-center p-3 rounded-xl border-2 transition disabled:opacity-60 ${
-                    isSelected ? "border-pm-primary bg-pm-primary/5" : "border-transparent bg-pm-muted"
-                  }`}
+                  className="relative flex items-center justify-center p-3 rounded-xl border-2 transition disabled:opacity-60"
+                  style={isSelected
+                    ? { borderColor: "var(--gl-accent)", background: "color-mix(in srgb, var(--gl-accent) 5%, transparent)" }
+                    : { borderColor: "transparent", background: "var(--gl-blue)" }}
                 >
                   <MiniGrid grid={cand} />
                   {isSelected && (
-                    <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-pm-primary text-white text-[10px] font-bold flex items-center justify-center">
+                    <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center" style={{ background: "var(--gl-accent)" }}>
                       {pickNumber}
                     </div>
                   )}
@@ -189,10 +190,10 @@ export default function InductiveChallengeQuestion({
               );
             })}
           </div>
-          <div className="text-xs font-display tabular-nums text-pm-text2 mt-3 flex items-center gap-1.5">
+          <div className="text-xs font-display tabular-nums mt-3 flex items-center gap-1.5" style={{ color: "var(--gl-muted)" }}>
             {selected.length === 2 ? (
               <>
-                <Check size={13} className="text-pm-primary" /> 2 of 2 selected
+                <Check size={13} style={{ color: "var(--gl-accent)" }} /> 2 of 2 selected
               </>
             ) : (
               `${selected.length} of 2 selected`
